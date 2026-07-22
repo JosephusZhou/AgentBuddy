@@ -1,0 +1,73 @@
+/** CodexEnv 页的类型定义（从页面组件抽出，供页面与 api 层共享）。 */
+
+export interface CodexEnvironment {
+  id: string;
+  name: string;
+  slug: string;
+  configDir: string;
+  aliasName: string;
+  isDefault: boolean;
+  source: string;
+  notes: string;
+  aliasInstalled: boolean;
+  dirExists: boolean;
+  hasConfig: boolean;
+  hasSkills: boolean;
+  hasAuth: boolean;
+  mcpSyncStatus?: string;
+  mcpServerCount?: number;
+  globalMcpServerCount?: number;
+  // config.toml 实时读取（不入库）
+  model: string;
+  modelProvider: string;
+  baseUrl: string;
+  // 列表接口不回传明文 token；编辑时经 get_codex_env_secret 拉取。
+  apiKey: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CodexEnvCandidate {
+  path: string;
+  suggestedName: string;
+  suggestedSlug: string;
+  suggestedAlias: string;
+  hasConfig: boolean;
+  hasSkills: boolean;
+  hasAuth: boolean;
+}
+
+export interface CodexEnvSniffResult {
+  candidates: CodexEnvCandidate[];
+  message: string;
+}
+
+export interface CodexEnvShellStatus {
+  zshrcPath: string;
+  zshrcExists: boolean;
+  blockPresent: boolean;
+  aliases: string[];
+  preview: string;
+  message: string;
+}
+
+export interface CodexEnvActionResult {
+  ok: boolean;
+  message: string;
+  environment: CodexEnvironment | null;
+}
+
+export interface CodexEnvMcpSyncResult {
+  ok: boolean;
+  message: string;
+  globalServerCount: number;
+  globalServerNames: string[];
+  results: Array<{
+    id: string;
+    name: string;
+    ok: boolean;
+    status: string;
+    serverCount: number;
+    message: string;
+  }>;
+}

@@ -1,0 +1,116 @@
+/** CodexEnv 页的 Tauri 命令封装。 */
+
+import type {
+  CodexEnvironment,
+  CodexEnvSniffResult,
+  CodexEnvActionResult,
+  CodexEnvShellStatus,
+  CodexEnvMcpSyncResult,
+} from "./types";
+
+export async function invokeList(): Promise<CodexEnvironment[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("list_codex_environments") as Promise<CodexEnvironment[]>;
+}
+
+export async function invokeSniff(): Promise<CodexEnvSniffResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("sniff_codex_environments") as Promise<CodexEnvSniffResult>;
+}
+
+export async function invokeImport(payload: {
+  configDir: string;
+  name?: string;
+  slug?: string;
+  aliasName?: string;
+  notes?: string;
+  installAlias?: boolean;
+}): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("import_codex_environment", { payload }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeClone(payload: {
+  sourceId: string;
+  name: string;
+  slug: string;
+  configDir: string;
+  aliasName: string;
+  notes?: string;
+  model?: string;
+  modelProvider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  syncMcp?: boolean;
+  installAlias?: boolean;
+}): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("clone_codex_environment", { payload }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeUpsert(payload: {
+  id?: string;
+  name: string;
+  slug: string;
+  configDir: string;
+  aliasName: string;
+  notes?: string;
+  // 三态：undefined=不改动，""=删除该键，"值"=写入。
+  model?: string;
+  modelProvider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+}): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("upsert_codex_environment", { payload }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeDelete(id: string, deleteFiles: boolean): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("delete_codex_environment", { id, deleteFiles }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeInstallEnvAlias(id: string): Promise<CodexEnvShellStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("install_codex_env_alias", { id }) as Promise<CodexEnvShellStatus>;
+}
+
+export async function invokeRemoveEnvAlias(id: string): Promise<CodexEnvShellStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("remove_codex_env_alias", { id }) as Promise<CodexEnvShellStatus>;
+}
+
+export async function invokeRemoveAllAliases(): Promise<CodexEnvShellStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("remove_all_codex_env_aliases") as Promise<CodexEnvShellStatus>;
+}
+
+export async function invokeShellStatus(): Promise<CodexEnvShellStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_codex_env_shell_status") as Promise<CodexEnvShellStatus>;
+}
+
+export async function invokeReveal(id: string): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("reveal_codex_env_dir", { id }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeOpenConfig(id: string): Promise<CodexEnvActionResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("open_codex_env_config", { id }) as Promise<CodexEnvActionResult>;
+}
+
+export async function invokeGetSecret(id: string): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_codex_env_secret", { id }) as Promise<string>;
+}
+
+export async function invokeSyncMcp(id: string): Promise<CodexEnvMcpSyncResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("sync_codex_env_mcp", { id }) as Promise<CodexEnvMcpSyncResult>;
+}
+
+export async function invokeSyncAllMcp(): Promise<CodexEnvMcpSyncResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("sync_all_codex_env_mcp") as Promise<CodexEnvMcpSyncResult>;
+}
