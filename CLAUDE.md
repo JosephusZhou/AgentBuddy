@@ -123,7 +123,7 @@ AgentBuddy MCP manage still writes only the default home-root file. Custom envs 
 - UI: per-env “同步 MCP”, “同步 MCP 到全部”, clone checkbox `syncMcp` (default true)
 - Default env is a no-op (already uses the global file)
 
-Per non-default env, managed `settings.json` env keys are `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL`. The token is **never returned in the list DTO** (only a `hasApiKey` flag); the edit dialog fetches it on demand via `get_claude_env_secret`. Shell aliases follow `$SHELL`: zsh→`~/.zshrc`, bash→`~/.bash_profile`/`~/.bashrc`, fish→`~/.config/fish/config.fish` (fish uses an `env`-prefixed alias body).
+Per non-default env, managed `settings.json` env keys are `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL` (plus the companion default-model keys written with the same custom value: `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL` and `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL_NAME`). Clearing the custom model deletes the whole set; the list/edit DTO still only reads the primary `ANTHROPIC_MODEL`. On every non-default **save** (and after clone), if `ANTHROPIC_MODEL` is set but any companion is missing or differs, the full set is backfilled from the primary even when the edit form did not change the model field. The token is **never returned in the list DTO** (only a `hasApiKey` flag); the edit dialog fetches it on demand via `get_claude_env_secret`. Shell aliases follow `$SHELL`: zsh→`~/.zshrc`, bash→`~/.bash_profile`/`~/.bashrc`, fish→`~/.config/fish/config.fish` (fish uses an `env`-prefixed alias body).
 
 ### Codex multi-env (`codex_env.rs`)
 

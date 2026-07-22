@@ -54,6 +54,7 @@ pub struct ClaudeEnvironment {
     /// 该环境 settings.json 是否已设置 ANTHROPIC_AUTH_TOKEN（供 UI 展示「已配置」）。
     pub has_api_key: bool,
     /// settings.json → env.ANTHROPIC_MODEL（实时读取，不入库）。缺失为空串。
+    /// 写入时会同步整组 DEFAULT_* 模型键；读取仍只看主键。
     pub model: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -89,7 +90,8 @@ pub struct ClaudeEnvUpsertPayload {
     pub base_url: Option<String>,
     /// settings.json → env.ANTHROPIC_AUTH_TOKEN。Some("") 表示删除该键，None 表示不改动。
     pub api_key: Option<String>,
-    /// settings.json → env.ANTHROPIC_MODEL。Some("") 表示删除该键，None 表示不改动。
+    /// settings.json → env.ANTHROPIC_MODEL 及 DEFAULT_* 模型键族。
+    /// Some("") 表示删除整组，None 表示不改动。
     pub model: Option<String>,
 }
 
@@ -108,7 +110,7 @@ pub struct ClaudeEnvClonePayload {
     /// Optional override for settings.json → env.ANTHROPIC_AUTH_TOKEN.
     /// Empty / omitted keeps the value copied from the source environment.
     pub api_key: Option<String>,
-    /// Optional override for settings.json → env.ANTHROPIC_MODEL.
+    /// Optional override for settings.json → env.ANTHROPIC_MODEL 及 DEFAULT_* 键族。
     /// Empty / omitted keeps whatever the source environment had (usually none).
     pub model: Option<String>,
     /// When true (default if omitted), copy top-level mcpServers from ~/.claude.json
@@ -709,7 +711,22 @@ fn move_environment_dir(src: &Path, dst: &Path) -> Result<EnvMoveOutcome, String
     }
 }
 
-/// clone 时写入 settings.json 的三个受管 env 键。语义：留空表示「沿用源值」，
+/// 自定义模型写入 settings.json → env 时同步维护的一组键。
+/// 主键 `ANTHROPIC_MODEL` 仍是 UI/DTO 读写的唯一入口；其余为 Claude Code 各档默认模型
+/// 覆盖（模型 id 与展示名共用同一用户输入值）。
+const MODEL_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+];
+
+/// clone 时写入 settings.json 的受管 env 键。语义：留空表示「沿用源值」，
 /// 因此把空字段转成 `None`（不改动）后复用统一实现 `apply_settings_env_edit`，
 /// 既消除重复，也让 clone 出的 settings.json 一并享有 0600 权限。
 fn apply_settings_overrides(
@@ -730,9 +747,10 @@ fn apply_settings_overrides(
     )
 }
 
-/// Read the three managed env keys from `<config_dir>/settings.json`.
+/// Read the managed env keys from `<config_dir>/settings.json`.
 /// Missing file / key / non-string value → empty string. Never fails hard:
 /// a malformed settings.json just yields empties so listing keeps working.
+/// `model` 只读主键 `ANTHROPIC_MODEL`（列表/编辑表单的唯一来源）。
 fn read_settings_env(config_dir: &Path) -> (String, String, String) {
     let path = config_dir.join("settings.json");
     if !path.is_file() {
@@ -758,12 +776,15 @@ fn read_settings_env(config_dir: &Path) -> (String, String, String) {
     )
 }
 
-/// Apply edits to the three managed env keys in `<config_dir>/settings.json`.
+/// Apply edits to the managed env keys in `<config_dir>/settings.json`.
 ///
 /// Per-field semantics:
-/// - `None`        → leave the key untouched.
+/// - `None`        → leave the key(s) untouched.
 /// - `Some("...")` → set the key (trimmed) to the given value.
 /// - `Some("")`    → delete the key from `env` if present.
+///
+/// `model` 会同步写入/删除整组 [`MODEL_ENV_KEYS`]（同一用户值），避免只改主键
+/// 导致各档 DEFAULT_* 残留旧值。
 ///
 /// Returns the list of human-readable field labels that actually changed.
 /// No net change → no write (keeps mtime / avoids needless disk churn).
@@ -800,19 +821,24 @@ fn apply_settings_env_edit(
     }
 
     // Apply each edit, tracking whether the document actually changed.
+    // 统一用 apply_keys：单键（Base URL / API Key）与模型键族共用同一路径，
+    // 避免两个 mut 闭包同时借用 root/changed。
     let mut changed = Vec::new();
-    let mut apply_one = |field: Option<String>, json_key: &str, label: &str| -> Result<(), String> {
+    let mut apply_keys = |field: Option<String>, json_keys: &[&str], label: &str| -> Result<(), String> {
         let Some(val) = field else { return Ok(()) };
         let map = root.as_object_mut().unwrap();
+        let mut any = false;
         if val.is_empty() {
-            // Delete key from env if present.
+            // Delete keys from env if present.
             if let Some(env) = map.get_mut("env").and_then(|v| v.as_object_mut()) {
-                if env.remove(json_key).is_some() {
-                    changed.push(label.to_string());
+                for k in json_keys {
+                    if env.remove(*k).is_some() {
+                        any = true;
+                    }
                 }
             }
         } else {
-            // Set key, creating env object if needed.
+            // Set keys, creating env object if needed.
             if !map.get("env").map(|v| v.is_object()).unwrap_or(false) {
                 map.insert("env".into(), serde_json::json!({}));
             }
@@ -820,17 +846,22 @@ fn apply_settings_env_edit(
                 .get_mut("env")
                 .and_then(|v| v.as_object_mut())
                 .ok_or_else(|| "无法写入 settings.json 的 env 字段".to_string())?;
-            let prev = env.get(json_key).and_then(|v| v.as_str());
-            if prev != Some(val.as_str()) {
-                env.insert(json_key.into(), serde_json::Value::String(val));
-                changed.push(label.to_string());
+            for k in json_keys {
+                let prev = env.get(*k).and_then(|v| v.as_str());
+                if prev != Some(val.as_str()) {
+                    env.insert((*k).into(), serde_json::Value::String(val.clone()));
+                    any = true;
+                }
             }
+        }
+        if any {
+            changed.push(label.to_string());
         }
         Ok(())
     };
-    apply_one(base, "ANTHROPIC_BASE_URL", "Base URL")?;
-    apply_one(key, "ANTHROPIC_AUTH_TOKEN", "API Key")?;
-    apply_one(model, "ANTHROPIC_MODEL", "模型")?;
+    apply_keys(base, &["ANTHROPIC_BASE_URL"], "Base URL")?;
+    apply_keys(key, &["ANTHROPIC_AUTH_TOKEN"], "API Key")?;
+    apply_keys(model, MODEL_ENV_KEYS, "模型")?;
 
     if changed.is_empty() {
         return Ok(changed);
@@ -855,6 +886,17 @@ fn apply_settings_env_edit(
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
     Ok(changed)
+}
+
+/// 老环境可能只有主键 `ANTHROPIC_MODEL`。若主键非空且伴生 DEFAULT_* 键缺失或
+/// 与主键不一致，则按主键值补齐整组 [`MODEL_ENV_KEYS`]。主键缺失/空串时不改动。
+/// 复用 `apply_settings_env_edit`：已齐全则 no-op，不全才写盘。
+fn ensure_model_env_companions(config_dir: &Path) -> Result<Vec<String>, String> {
+    let (_, _, model) = read_settings_env(config_dir);
+    if model.is_empty() {
+        return Ok(Vec::new());
+    }
+    apply_settings_env_edit(config_dir, None, None, Some(model.as_str()))
 }
 
 fn ensure_unique_fields(
@@ -1366,6 +1408,14 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
             return Err(e);
         }
     };
+    // 源环境若是老配置（仅有 ANTHROPIC_MODEL），克隆后补齐伴生键。
+    let backfilled = match ensure_model_env_companions(&dst) {
+        Ok(fields) => fields,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&dst);
+            return Err(e);
+        }
+    };
 
     let now = now_secs();
     let mut row = ClaudeEnvironmentRow {
@@ -1394,6 +1444,9 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
             "已覆盖 settings.json 中的 {}。",
             override_fields.join("、")
         ));
+    }
+    if !backfilled.is_empty() {
+        message.push_str("已补齐 DEFAULT_* 模型键。");
     }
 
     let sync_mcp = payload.sync_mcp.unwrap_or(true);
@@ -1547,6 +1600,17 @@ pub fn upsert_environment(payload: ClaudeEnvUpsertPayload) -> Result<ClaudeEnvAc
                 Ok(_) => {}
                 Err(e) => {
                     message.push_str(&format!("；但 settings.json 更新失败：{}", e));
+                }
+            }
+            // 即使 model 字段未改（payload 为 None），也检查主键与伴生键是否齐全并补齐。
+            // 用户显式改过/清空模型时 apply 已处理整组，此处多为 no-op。
+            match ensure_model_env_companions(&dir) {
+                Ok(changed) if !changed.is_empty() => {
+                    message.push_str("；已补齐 DEFAULT_* 模型键");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    message.push_str(&format!("；但补齐 DEFAULT_* 模型键失败：{}", e));
                 }
             }
         } else if payload.base_url.is_some()
@@ -2250,6 +2314,15 @@ mod tests {
             v["env"]["ANTHROPIC_MODEL"].as_str(),
             Some("claude-opus-4-8")
         );
+        // Companion DEFAULT_* keys share the same custom model value.
+        for k in MODEL_ENV_KEYS {
+            assert_eq!(
+                v["env"][k].as_str(),
+                Some("claude-opus-4-8"),
+                "missing or wrong companion key {}",
+                k
+            );
+        }
         // Unrelated keys preserved
         assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
         assert_eq!(v["effortLevel"].as_str(), Some("high"));
@@ -2306,10 +2379,21 @@ mod tests {
             Some("https://new.example/v1")
         );
         assert!(v["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
-        assert_eq!(v["env"]["ANTHROPIC_MODEL"].as_str(), Some("claude-opus-4-8"));
+        for k in MODEL_ENV_KEYS {
+            assert_eq!(
+                v["env"][k].as_str(),
+                Some("claude-opus-4-8"),
+                "missing or wrong companion key {}",
+                k
+            );
+        }
         // Unrelated keys preserved.
         assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
         assert_eq!(v["effortLevel"].as_str(), Some("high"));
+
+        // Setting the same model again (all companions already match) → no change.
+        let changed = apply_settings_env_edit(&dir, None, None, Some("claude-opus-4-8")).unwrap();
+        assert!(changed.is_empty());
 
         // Setting the same value again → no change reported.
         let changed =
@@ -2320,11 +2404,113 @@ mod tests {
         let changed = apply_settings_env_edit(&dir, None, Some(""), None).unwrap();
         assert!(changed.is_empty());
 
-        // read_settings_env round-trips the current values.
+        // Delete model → clears primary + all DEFAULT_* companions.
+        let changed = apply_settings_env_edit(&dir, None, None, Some("")).unwrap();
+        assert_eq!(changed, vec!["模型".to_string()]);
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        for k in MODEL_ENV_KEYS {
+            assert!(
+                v["env"].get(k).is_none(),
+                "companion key {} should be removed",
+                k
+            );
+        }
+        assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
+
+        // Deleting model again when already absent → no change.
+        let changed = apply_settings_env_edit(&dir, None, None, Some("")).unwrap();
+        assert!(changed.is_empty());
+
+        // Backfill: primary already set, missing companions → write companions only.
+        {
+            let map = v.as_object().unwrap();
+            let mut env = map.get("env").and_then(|e| e.as_object()).cloned().unwrap();
+            env.insert(
+                "ANTHROPIC_MODEL".into(),
+                serde_json::Value::String("only-primary".into()),
+            );
+            let mut root = serde_json::Map::new();
+            root.insert("env".into(), serde_json::Value::Object(env));
+            root.insert(
+                "effortLevel".into(),
+                serde_json::Value::String("high".into()),
+            );
+            fs::write(
+                dir.join("settings.json"),
+                serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap(),
+            )
+            .unwrap();
+        }
+        let changed = apply_settings_env_edit(&dir, None, None, Some("only-primary")).unwrap();
+        assert_eq!(changed, vec!["模型".to_string()]);
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        for k in MODEL_ENV_KEYS {
+            assert_eq!(v["env"][k].as_str(), Some("only-primary"));
+        }
+
+        // read_settings_env round-trips the current values (primary only).
         let (base, key, model) = read_settings_env(&dir);
         assert_eq!(base, "https://new.example/v1");
         assert_eq!(key, "");
-        assert_eq!(model, "claude-opus-4-8");
+        assert_eq!(model, "only-primary");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ensure_model_companions_backfills_without_payload() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentbuddy-claude-env-backfill-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // Legacy: only primary key.
+        fs::write(
+            dir.join("settings.json"),
+            r#"{
+  "env": {
+    "ANTHROPIC_MODEL": "legacy-model",
+    "KEEP_ME": "yes"
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        // Save without model payload → companions filled from primary.
+        let changed = ensure_model_env_companions(&dir).unwrap();
+        assert_eq!(changed, vec!["模型".to_string()]);
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        for k in MODEL_ENV_KEYS {
+            assert_eq!(
+                v["env"][k].as_str(),
+                Some("legacy-model"),
+                "companion {} not backfilled",
+                k
+            );
+        }
+        assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
+
+        // Second save → already complete, no write.
+        let changed = ensure_model_env_companions(&dir).unwrap();
+        assert!(changed.is_empty());
+
+        // No primary → no-op even if companions missing.
+        fs::write(
+            dir.join("settings.json"),
+            r#"{ "env": { "KEEP_ME": "yes" } }"#,
+        )
+        .unwrap();
+        let changed = ensure_model_env_companions(&dir).unwrap();
+        assert!(changed.is_empty());
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert!(v["env"].get("ANTHROPIC_MODEL").is_none());
+        assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1119,7 +1119,7 @@ export default function ClaudeEnv() {
               <input
                 id="ce-model"
                 className="form-input"
-                placeholder="留空则不指定；填写后写入 ANTHROPIC_MODEL"
+                placeholder="留空则不指定；填写后写入 ANTHROPIC_MODEL 及 DEFAULT_* 模型键"
                 value={cloneModel}
                 onChange={(e) => setCloneModel(e.target.value)}
                 disabled={busy}
@@ -1162,7 +1162,7 @@ export default function ClaudeEnv() {
               仅复制 settings.json、CLAUDE.md、skills/、agents/。不会复制会话与历史。
               Base URL / API Key 留空时沿用源环境；填写后会写入新环境 settings.json 的
               env.ANTHROPIC_BASE_URL / env.ANTHROPIC_AUTH_TOKEN。
-              自定义模型留空则不指定，填写后写入 env.ANTHROPIC_MODEL。
+              自定义模型留空则不指定，填写后同步写入 env.ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。
               勾选同步 MCP 会以全局配置覆盖新环境的 mcpServers（权威覆盖）。
               勾选写入别名会把该环境的启动别名追加进当前 shell 配置文件，需 source 或新开终端后生效。
             </div>
@@ -1285,7 +1285,7 @@ export default function ClaudeEnv() {
                   <input
                     id="ce-edit-model"
                     className="form-input"
-                    placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL"
+                    placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL 及 DEFAULT_* 模型键"
                     value={editModel}
                     onChange={(e) => setEditModel(e.target.value)}
                     disabled={busy}
@@ -1293,7 +1293,7 @@ export default function ClaudeEnv() {
                     spellCheck={false}
                   />
                   <div className="claude-env-form-hint">
-                    以上三项预填 settings.json 当前值，留空并保存即删除对应键。
+                    以上三项预填 settings.json 当前值，留空并保存即删除对应键。自定义模型会同步写入/删除 ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。
                   </div>
                 </div>
               </>

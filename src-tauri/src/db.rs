@@ -626,10 +626,11 @@ pub fn load_claude_environment_rows() -> Result<Vec<ClaudeEnvironmentRow>, Strin
     let conn = get_connection()?;
     let mut stmt = conn
         .prepare(
+            // 默认环境置顶；其余按创建时间升序（最早在上，最新创建在最下），排序稳定不随编辑浮动。
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
                     alias_installed, created_at, updated_at
              FROM claude_environments
-             ORDER BY is_default DESC, updated_at DESC",
+             ORDER BY is_default DESC, created_at ASC",
         )
         .map_err(|e| format!("Failed to prepare claude_env query: {}", e))?;
 
@@ -762,10 +763,11 @@ pub fn load_codex_environment_rows() -> Result<Vec<CodexEnvironmentRow>, String>
     let conn = get_connection()?;
     let mut stmt = conn
         .prepare(
+            // 默认环境置顶；其余按创建时间升序（最早在上，最新创建在最下），排序稳定不随编辑浮动。
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
                     alias_installed, created_at, updated_at
              FROM codex_environments
-             ORDER BY is_default DESC, updated_at DESC",
+             ORDER BY is_default DESC, created_at ASC",
         )
         .map_err(|e| format!("Failed to prepare codex_env query: {}", e))?;
 
