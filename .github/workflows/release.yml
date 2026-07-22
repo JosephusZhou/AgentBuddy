@@ -1,0 +1,128 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate release version
+        id: version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          node - "$VERSION" <<'NODE'
+          const fs = require('node:fs');
+          const version = process.argv[2];
+          const tagPattern = /^\d+\.\d+\.\d+$/;
+
+          if (!tagPattern.test(version)) {
+            throw new Error(`Tag must use vMAJOR.MINOR.PATCH, got v${version}`);
+          }
+
+          const packageVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const tauriVersion = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
+          const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+          const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const versions = { packageVersion, tauriVersion, cargoVersion };
+
+          for (const [file, actual] of Object.entries(versions)) {
+            if (actual !== version) {
+              throw new Error(`${file} is ${actual ?? '<missing>'}, expected ${version}`);
+            }
+          }
+
+          console.log(`Validated release version ${version}`);
+          NODE
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            --verify-tag \
+            --title "AgentBuddy $TAG_NAME" \
+            --generate-notes
+
+  build:
+    name: Build ${{ matrix.arch }} DMG
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            runner: macos-13
+          - arch: aarch64
+            target: aarch64-apple-darwin
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri application
+        run: pnpm exec tauri build --target "${{ matrix.target }}"
+
+      - name: Rename DMG
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          DMG_DIR="src-tauri/target/${TARGET}/release/bundle/dmg"
+          DMG="$(find "$DMG_DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$DMG"
+          mv "$DMG" "AgentBuddy_${VERSION}_${ARCH}.dmg"
+
+      - name: Upload DMG to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: gh release upload "$TAG_NAME" "AgentBuddy_${VERSION}_${ARCH}.dmg" --clobber
