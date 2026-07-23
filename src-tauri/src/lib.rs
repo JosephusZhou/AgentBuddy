@@ -1,5 +1,3 @@
-use tauri::Manager;
-
 mod agent_open;
 mod agents;
 mod backup;
@@ -884,15 +882,17 @@ pub fn run() {
             sync_opencode_to_fork,
             sync_opencode_to_all_forks,
         ])
-        .setup(|app| {
+        .setup(|_app| {
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.
             if let Err(err) = config::ensure_app_config() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
             }
 
+            // DevTools only in debug builds; Manager is only needed here.
             #[cfg(debug_assertions)]
             {
-                if let Some(window) = app.get_webview_window("main") {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
                     window.open_devtools();
                 }
             }
