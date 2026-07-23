@@ -361,7 +361,7 @@ export default function McpManage() {
   const [isSniffing, setIsSniffing] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<McpTestResult | null>(null);
-  const hasLoadedDb = useRef(false);
+  const hasReconciled = useRef(false);
 
   const editorDismiss = useOverlayDismiss(() => closeEditor());
   const deleteDismiss = useOverlayDismiss(() => closeDelete());
@@ -378,13 +378,19 @@ export default function McpManage() {
 
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  // Load from SQLite on mount (DB is the single source of truth).
+  // Reconcile persisted MCP definitions with Agent config files on every mount.
+  // If scanning is unavailable, retain the persisted list rather than showing an empty page.
   useEffect(() => {
-    if (hasLoadedDb.current) return;
-    hasLoadedDb.current = true;
+    if (hasReconciled.current) return;
+    hasReconciled.current = true;
     (async () => {
-      const fromDb = await loadServersFromDb();
-      if (fromDb) setServers(fromDb);
+      try {
+        const res = await invokeSniffMcp();
+        setServers(res.servers);
+      } catch {
+        const fromDb = await loadServersFromDb();
+        if (fromDb) setServers(fromDb);
+      }
     })();
   }, []);
 

@@ -116,6 +116,11 @@ export async function invokeSyncMcp(id: string): Promise<ClaudeEnvMcpSyncResult>
   return invoke("sync_claude_env_mcp", { id }) as Promise<ClaudeEnvMcpSyncResult>;
 }
 
+export async function invokeSyncSkills(id: string): Promise<{ ok: boolean; message: string; skillCount: number }> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("sync_claude_env_skills", { id }) as Promise<{ ok: boolean; message: string; skillCount: number }>;
+}
+
 export async function invokeSyncAllMcp(): Promise<ClaudeEnvMcpSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("sync_all_claude_env_mcp") as Promise<ClaudeEnvMcpSyncResult>;

@@ -65,6 +65,30 @@ async fn open_agent_config_file(
         .map_err(|e| format!("打开配置文件任务失败: {e}"))?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentConfigStat {
+    name: String,
+    mcp_count: usize,
+    skill_count: usize,
+}
+
+#[tauri::command]
+async fn get_agent_config_stats(names: Vec<String>) -> Result<Vec<AgentConfigStat>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        names
+            .iter()
+            .map(|name| AgentConfigStat {
+                name: name.clone(),
+                mcp_count: mcp_config::count_agent_mcp_entries(name),
+                skill_count: skills::count_agent_skills(name),
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("读取 Agent 配置统计任务失败: {e}"))
+}
+
 #[tauri::command]
 async fn get_cached_agents() -> Result<Vec<sniff::SniffResult>, String> {
     let mut agents = db::load_agents()?;
@@ -73,9 +97,7 @@ async fn get_cached_agents() -> Result<Vec<sniff::SniffResult>, String> {
     // manual rescan; `found`/config dirs are left as stored, and the next real
     // sniff overwrites the row with clean paths.
     for agent in &mut agents {
-        agent
-            .install_paths
-            .retain(|p| !sniff::is_shim_path(p));
+        agent.install_paths.retain(|p| !sniff::is_shim_path(p));
     }
     Ok(agents)
 }
@@ -151,9 +173,7 @@ async fn get_mcp_servers() -> Result<Vec<mcp_config::McpServerRecord>, String> {
 }
 
 #[tauri::command]
-async fn save_mcp_servers(
-    servers: Vec<mcp_config::McpServerRecord>,
-) -> Result<(), String> {
+async fn save_mcp_servers(servers: Vec<mcp_config::McpServerRecord>) -> Result<(), String> {
     db::replace_mcp_servers(&servers)
 }
 
@@ -290,7 +310,10 @@ async fn check_skill_updates() -> Result<skills::SkillUpdateCheckResult, String>
 }
 
 #[tauri::command]
-async fn add_skill_local(path: String, tag: Option<String>) -> Result<skills::SkillActionResult, String> {
+async fn add_skill_local(
+    path: String,
+    tag: Option<String>,
+) -> Result<skills::SkillActionResult, String> {
     let tag = tag.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || skills::add_skill_local(path, tag))
         .await
@@ -298,7 +321,9 @@ async fn add_skill_local(path: String, tag: Option<String>) -> Result<skills::Sk
 }
 
 #[tauri::command]
-async fn pick_and_add_skill_local(tag: Option<String>) -> Result<skills::SkillActionResult, String> {
+async fn pick_and_add_skill_local(
+    tag: Option<String>,
+) -> Result<skills::SkillActionResult, String> {
     // Folder picker must run on a blocking thread; osascript is sync.
     let tag = tag.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || skills::pick_local_skill_folder(tag))
@@ -307,7 +332,10 @@ async fn pick_and_add_skill_local(tag: Option<String>) -> Result<skills::SkillAc
 }
 
 #[tauri::command]
-async fn add_skill_github(url: String, tag: Option<String>) -> Result<skills::SkillActionResult, String> {
+async fn add_skill_github(
+    url: String,
+    tag: Option<String>,
+) -> Result<skills::SkillActionResult, String> {
     let tag = tag.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || skills::add_skill_github(url, tag))
         .await
@@ -315,7 +343,10 @@ async fn add_skill_github(url: String, tag: Option<String>) -> Result<skills::Sk
 }
 
 #[tauri::command]
-async fn add_skill_gitcode(url: String, tag: Option<String>) -> Result<skills::SkillActionResult, String> {
+async fn add_skill_gitcode(
+    url: String,
+    tag: Option<String>,
+) -> Result<skills::SkillActionResult, String> {
     let tag = tag.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || skills::add_skill_gitcode(url, tag))
         .await
@@ -330,11 +361,17 @@ async fn update_skill(skill_id: String) -> Result<skills::SkillActionResult, Str
 }
 
 #[tauri::command]
-async fn export_skill_to_dir(skill_id: String) -> Result<skills::SkillActionResult, String> {
+async fn export_skill_to_dir(
+    skill_id: String,
+    install_mode: Option<String>,
+) -> Result<skills::SkillActionResult, String> {
     // Folder picker must run on a blocking thread; osascript is sync.
-    tauri::async_runtime::spawn_blocking(move || skills::export_skill_to_dir(skill_id))
-        .await
-        .map_err(|e| format!("复制 skill 任务失败: {}", e))?
+    let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::export_skill_to_dir(skill_id, install_mode)
+    })
+    .await
+    .map_err(|e| format!("应用 skill 到目录任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -387,11 +424,15 @@ async fn batch_delete_skills(
 #[tauri::command]
 async fn batch_export_skills_to_dir(
     skill_ids: Vec<String>,
+    install_mode: Option<String>,
 ) -> Result<skills::BatchSkillResult, String> {
     // Folder picker must run on a blocking thread; osascript is sync.
-    tauri::async_runtime::spawn_blocking(move || skills::batch_export_skills_to_dir(skill_ids))
-        .await
-        .map_err(|e| format!("批量软链接 skill 任务失败: {}", e))?
+    let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::batch_export_skills_to_dir(skill_ids, install_mode)
+    })
+    .await
+    .map_err(|e| format!("批量应用 skill 到目录任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -550,6 +591,15 @@ async fn sync_claude_env_mcp(id: String) -> Result<claude_env::ClaudeEnvMcpSyncR
 }
 
 #[tauri::command]
+async fn sync_claude_env_skills(
+    id: String,
+) -> Result<claude_env::ClaudeEnvSkillsSyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_env::sync_skills_to_environment(id))
+        .await
+        .map_err(|e| format!("同步 Claude skills 任务失败: {e}"))?
+}
+
+#[tauri::command]
 async fn sync_all_claude_env_mcp() -> Result<claude_env::ClaudeEnvMcpSyncResult, String> {
     tauri::async_runtime::spawn_blocking(claude_env::sync_mcp_to_all_environments)
         .await
@@ -631,7 +681,9 @@ async fn set_opencode_provider_secret(
 }
 
 #[tauri::command]
-async fn fetch_models_dev_catalog(force: bool) -> Result<opencode_config::ModelsDevCatalog, String> {
+async fn fetch_models_dev_catalog(
+    force: bool,
+) -> Result<opencode_config::ModelsDevCatalog, String> {
     tauri::async_runtime::spawn_blocking(move || opencode_config::fetch_models_dev_catalog(force))
         .await
         .map_err(|e| format!("拉取目录任务失败: {e}"))?
@@ -652,8 +704,8 @@ async fn reveal_opencode_config() -> Result<opencode_config::OpencodeActionResul
 }
 
 #[tauri::command]
-async fn get_opencode_fork_sync_status(
-) -> Result<opencode_config::OpencodeForkSyncStatus, String> {
+async fn get_opencode_fork_sync_status() -> Result<opencode_config::OpencodeForkSyncStatus, String>
+{
     tauri::async_runtime::spawn_blocking(opencode_config::get_fork_sync_status)
         .await
         .map_err(|e| format!("查询 OpenCode fork 同步状态失败: {e}"))?
@@ -792,6 +844,13 @@ async fn sync_codex_env_mcp(id: String) -> Result<codex_env::CodexEnvMcpSyncResu
 }
 
 #[tauri::command]
+async fn sync_codex_env_skills(id: String) -> Result<codex_env::CodexEnvSkillsSyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || codex_env::sync_skills_to_environment(id))
+        .await
+        .map_err(|e| format!("同步 Codex skills 任务失败: {e}"))?
+}
+
+#[tauri::command]
 async fn sync_all_codex_env_mcp() -> Result<codex_env::CodexEnvMcpSyncResult, String> {
     tauri::async_runtime::spawn_blocking(codex_env::sync_mcp_to_all_environments)
         .await
@@ -814,6 +873,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sniff_agents,
             get_cached_agents,
+            get_agent_config_stats,
             add_agent_manual,
             agent_open_targets,
             reveal_agent_config_dir,
@@ -874,6 +934,7 @@ pub fn run() {
             open_claude_env_settings,
             get_claude_env_secret,
             sync_claude_env_mcp,
+            sync_claude_env_skills,
             sync_all_claude_env_mcp,
             get_claude_env_mcp_status,
             fetch_claude_env_remote_models,
@@ -891,6 +952,7 @@ pub fn run() {
             open_codex_env_config,
             get_codex_env_secret,
             sync_codex_env_mcp,
+            sync_codex_env_skills,
             sync_all_codex_env_mcp,
             fetch_codex_env_remote_models,
             get_opencode_config,

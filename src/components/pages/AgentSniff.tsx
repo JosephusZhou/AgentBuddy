@@ -25,6 +25,12 @@ interface AgentOpenResult {
   message: string;
 }
 
+interface AgentConfigStat {
+  name: string;
+  mcpCount: number;
+  skillCount: number;
+}
+
 /* ===== SVG Icons ===== */
 const IconSearch = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -91,6 +97,7 @@ export default function AgentSniff() {
   const [formCliPath, setFormCliPath] = useState("");
   const [formConfigDir, setFormConfigDir] = useState("");
   const [openTargets, setOpenTargets] = useState<Record<string, AgentOpenTargets>>({});
+  const [configStats, setConfigStats] = useState<Record<string, AgentConfigStat>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useStatusMessage();
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -140,6 +147,25 @@ export default function AgentSniff() {
     }
   }, []);
 
+  const loadConfigStats = useCallback(async (list: AgentResult[]) => {
+    const found = list.filter((a) => a.found);
+    if (found.length === 0) {
+      setConfigStats({});
+      return;
+    }
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const stats = await (invoke("get_agent_config_stats", {
+        names: found.map((a) => a.name),
+      }) as Promise<AgentConfigStat[]>);
+      const next: Record<string, AgentConfigStat> = {};
+      for (const s of stats) next[s.name] = s;
+      setConfigStats(next);
+    } catch {
+      // Browser preview / Tauri unavailable — leave stats empty.
+    }
+  }, []);
+
   // Load cached agents on mount
   useEffect(() => {
     if (hasLoaded.current) return;
@@ -152,6 +178,7 @@ export default function AgentSniff() {
         if (cached.length > 0) {
           setAgents(cached);
           void loadOpenTargets(cached);
+          void loadConfigStats(cached);
           const foundCount = cached.filter((a) => a.found).length;
           setSummary(`最近一次扫描 — 发现 ${foundCount} 个已安装 Agent（共 ${cached.length} 个）`);
         } else {
@@ -186,6 +213,7 @@ export default function AgentSniff() {
     setIsSniffing(true);
     setAgents([]);
     setOpenTargets({});
+    setConfigStats({});
     setSummary("正在扫描已安装的 Agent...");
 
     try {
@@ -193,6 +221,7 @@ export default function AgentSniff() {
       const results = await (invoke("sniff_agents") as Promise<AgentResult[]>);
       setAgents(results);
       void loadOpenTargets(results);
+      void loadConfigStats(results);
       const foundCount = results.filter((a) => a.found).length;
       setSummary(`扫描完成 — 发现 ${foundCount} 个已安装 Agent（共检测 ${results.length} 个）`);
     } catch (err) {
@@ -200,7 +229,7 @@ export default function AgentSniff() {
     } finally {
       setIsSniffing(false);
     }
-  }, [isSniffing, loadOpenTargets]);
+  }, [isSniffing, loadOpenTargets, loadConfigStats]);
 
   const handleManualAdd = useCallback(async () => {
     const name = formName.trim();
@@ -215,6 +244,7 @@ export default function AgentSniff() {
       setAgents((prev) => {
         const next = [...prev, agent];
         void loadOpenTargets(next);
+        void loadConfigStats(next);
         return next;
       });
       const foundCount = agents.filter((a) => a.found).length + 1;
@@ -233,6 +263,7 @@ export default function AgentSniff() {
       setAgents((prev) => {
         const next = [...prev, agent];
         void loadOpenTargets(next);
+        void loadConfigStats(next);
         return next;
       });
     }
@@ -241,7 +272,7 @@ export default function AgentSniff() {
     setFormName("");
     setFormCliPath("");
     setFormConfigDir("");
-  }, [formName, formCliPath, formConfigDir, agents, loadOpenTargets]);
+  }, [formName, formCliPath, formConfigDir, agents, loadOpenTargets, loadConfigStats]);
 
   const runOpen = useCallback(
     async (key: string, action: () => Promise<AgentOpenResult>) => {
@@ -315,6 +346,7 @@ export default function AgentSniff() {
             })
             .map(({ agent }) => {
               const targets = openTargets[agent.name];
+              const stats = configStats[agent.name];
               const settingsFile = targets?.settingsFile ?? null;
               const mcpFile = targets?.mcpFile ?? null;
               const configDir = targets?.configDir ?? agent.config_dirs[0] ?? null;
@@ -375,7 +407,7 @@ export default function AgentSniff() {
                   {agent.found ? "已安装" : "未找到"}
                 </span>
               </div>
-              {agent.found && (agent.install_paths.length > 0 || agent.config_dirs.length > 0) && (
+              {agent.found && (agent.install_paths.length > 0 || agent.config_dirs.length > 0 || stats) && (
                 <div className="agent-paths">
                   {agent.install_paths.map((path, i) => (
                     <div key={`install-${i}`} className="agent-path-row">
@@ -391,6 +423,14 @@ export default function AgentSniff() {
                       <span className="agent-path-value">{dir}</span>
                     </div>
                   ))}
+                  {stats && (
+                    <div className="agent-path-row">
+                      <span className="agent-path-label">配置内容</span>
+                      <span className="agent-path-value">
+                        {stats.mcpCount} 个 MCP · {stats.skillCount} 个 Skills
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

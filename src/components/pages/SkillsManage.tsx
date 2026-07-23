@@ -70,6 +70,10 @@ export default function SkillsManage() {
   const [isChecking, setIsChecking] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [directoryApplyTarget, setDirectoryApplyTarget] = useState<SkillRecord | null>(null);
+  const [directoryApplyMode, setDirectoryApplyMode] = useState<SkillInstallMode>("link");
+  const [batchDirectoryApplyOpen, setBatchDirectoryApplyOpen] = useState(false);
+  const [batchDirectoryApplyMode, setBatchDirectoryApplyMode] = useState<SkillInstallMode>("link");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SkillRecord | null>(null);
   const [deleteAgentCopies, setDeleteAgentCopies] = useState(false);
@@ -135,6 +139,14 @@ export default function SkillsManage() {
   const migrateDismiss = useOverlayDismiss(() => closeMigrate());
   const sniffDismiss = useOverlayDismiss(() => closeSniff());
   const editDismiss = useOverlayDismiss(() => setEditTarget(null), !isSavingEdit);
+  const directoryApplyDismiss = useOverlayDismiss(
+    () => setDirectoryApplyTarget(null),
+    !exportingId
+  );
+  const batchDirectoryApplyDismiss = useOverlayDismiss(
+    () => setBatchDirectoryApplyOpen(false),
+    !isBatchRunning
+  );
   const deleteDismiss = useOverlayDismiss(() => setDeleteTarget(null), !isDeleting);
   const batchDeleteDismiss = useOverlayDismiss(() => setBatchDeleteOpen(false), !isBatchRunning);
   const batchApplyDismiss = useOverlayDismiss(() => setBatchApplyOpen(false), !isBatchRunning);
@@ -576,22 +588,27 @@ export default function SkillsManage() {
     [agents]
   );
 
-  const doExportSkill = useCallback(
-    async (skill: SkillRecord) => {
-      if (exportingId) return;
-      setExportingId(skill.id);
-      setStatusMsg(`请选择「${skill.title}」的软链接目标目录…`);
-      try {
-        const res = await invokeExportSkill(skill.id);
-        setStatusMsg(res.ok ? res.message : res.message || "已取消");
-      } catch (e) {
-        setStatusMsg(`创建软链接失败: ${e}`);
-      } finally {
-        setExportingId(null);
-      }
-    },
-    [exportingId]
-  );
+  const openDirectoryApply = useCallback((skill: SkillRecord) => {
+    setDirectoryApplyTarget(skill);
+    setDirectoryApplyMode("link");
+  }, []);
+
+  const confirmDirectoryApply = useCallback(async () => {
+    if (!directoryApplyTarget || exportingId) return;
+    const skill = directoryApplyTarget;
+    const modeLabel = directoryApplyMode === "link" ? "软链接" : "完整复制";
+    setExportingId(skill.id);
+    setStatusMsg(`请选择「${skill.title}」的应用目标目录…`);
+    try {
+      const res = await invokeExportSkill(skill.id, directoryApplyMode);
+      setStatusMsg(res.ok ? res.message : res.message || "已取消");
+      if (res.ok) setDirectoryApplyTarget(null);
+    } catch (e) {
+      setStatusMsg(`以${modeLabel}应用到目录失败: ${e}`);
+    } finally {
+      setExportingId(null);
+    }
+  }, [directoryApplyMode, directoryApplyTarget, exportingId]);
 
   const doUpdateSkill = useCallback(
     async (skill: SkillRecord) => {
@@ -904,27 +921,39 @@ export default function SkillsManage() {
     }
   }, [isBatchRunning, validSelectedIds, batchDeleteAgentCopies, exitBatchMode]);
 
-  // 批量软链接到目录：只弹一次目录选择器
-  const doBatchExport = useCallback(async () => {
+  const openBatchDirectoryApply = useCallback(() => {
+    if (validSelectedIds.size === 0) {
+      setStatusMsg("请先选择要应用的技能");
+      return;
+    }
+    setBatchDirectoryApplyMode("link");
+    setBatchDirectoryApplyOpen(true);
+  }, [validSelectedIds]);
+
+  // 批量应用到目录：安装方式确认后只弹一次目录选择器。
+  const confirmBatchDirectoryApply = useCallback(async () => {
     if (isBatchRunning) return;
     const ids = Array.from(validSelectedIds);
     if (ids.length === 0) {
-      setStatusMsg("请先选择要软链接的技能");
+      setStatusMsg("请先选择要应用的技能");
       return;
     }
+    const modeLabel = batchDirectoryApplyMode === "link" ? "软链接" : "完整复制";
     setIsBatchRunning(true);
-    setStatusMsg("请选择软链接目标目录…");
+    setStatusMsg("请选择应用目标目录…");
     try {
-      const res = await invokeBatchExport(ids);
+      const res = await invokeBatchExport(ids, batchDirectoryApplyMode);
       setStatusMsg(res.message);
-      // 软链接不改技能库，但成功时退出批量模式回到常态
-      if (res.succeeded > 0) exitBatchMode();
+      if (res.succeeded > 0) {
+        setBatchDirectoryApplyOpen(false);
+        exitBatchMode();
+      }
     } catch (e) {
-      setStatusMsg(`批量软链接失败: ${e}`);
+      setStatusMsg(`批量以${modeLabel}应用到目录失败: ${e}`);
     } finally {
       setIsBatchRunning(false);
     }
-  }, [isBatchRunning, validSelectedIds, exitBatchMode]);
+  }, [batchDirectoryApplyMode, isBatchRunning, validSelectedIds, exitBatchMode]);
 
   // 打开批量应用弹窗：默认追加模式，Agent 选择初始为空
   const openBatchApply = useCallback(() => {
@@ -1305,8 +1334,8 @@ export default function SkillsManage() {
                           <button
                             type="button"
                             className="claude-env-action-btn"
-                            title="软链接到目录…"
-                            onClick={() => void doExportSkill(skill)}
+                            title="应用到目录…"
+                            onClick={() => openDirectoryApply(skill)}
                             disabled={exportingId === skill.id || isBatchRunning}
                           >
                             <IconCopy />
@@ -1406,10 +1435,10 @@ export default function SkillsManage() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => void doBatchExport()}
+              onClick={openBatchDirectoryApply}
               disabled={isBatchRunning || validSelectedIds.size === 0}
             >
-              软链接到目录
+              应用到目录
             </button>
             <button
               type="button"
@@ -2055,6 +2084,146 @@ export default function SkillsManage() {
               disabled={isSavingEdit}
             >
               {isSavingEdit ? "保存中…" : "保存并同步"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== 应用到目录弹窗 ===== */}
+      <div
+        className={`modal-overlay ${directoryApplyTarget ? "visible" : ""}`}
+        {...directoryApplyDismiss}
+      >
+        <div className="modal skill-edit-modal">
+          <div className="modal-header">
+            <h2 className="modal-title">
+              应用到目录{directoryApplyTarget ? `：${directoryApplyTarget.title}` : ""}
+            </h2>
+            <button
+              className="modal-close"
+              onClick={() => !exportingId && setDirectoryApplyTarget(null)}
+              disabled={Boolean(exportingId)}
+            >
+              <IconClose />
+            </button>
+          </div>
+          <div className="modal-body">
+            <div className="form-group">
+              <label className="form-label">安装方式</label>
+              <div className="skill-install-mode" role="radiogroup" aria-label="安装方式">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={directoryApplyMode === "link"}
+                  className={`skill-install-mode-opt ${directoryApplyMode === "link" ? "active" : ""}`}
+                  onClick={() => setDirectoryApplyMode("link")}
+                  disabled={Boolean(exportingId)}
+                >
+                  <span className="skill-install-mode-title">软链接</span>
+                  <span className="skill-install-mode-desc">技能库更新会立即反映到目标目录</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={directoryApplyMode === "copy"}
+                  className={`skill-install-mode-opt ${directoryApplyMode === "copy" ? "active" : ""}`}
+                  onClick={() => setDirectoryApplyMode("copy")}
+                  disabled={Boolean(exportingId)}
+                >
+                  <span className="skill-install-mode-title">完整复制</span>
+                  <span className="skill-install-mode-desc">复制完整目录，目标不依赖技能库</span>
+                </button>
+              </div>
+            </div>
+            <p className="skill-add-hint">
+              确认后选择目标目录，将在其中创建同名技能目录；若同名项已存在，将不会覆盖。
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setDirectoryApplyTarget(null)}
+              disabled={Boolean(exportingId)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void confirmDirectoryApply()}
+              disabled={Boolean(exportingId)}
+            >
+              {exportingId ? "应用中…" : "选择目录并应用"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== 批量应用到目录弹窗 ===== */}
+      <div
+        className={`modal-overlay ${batchDirectoryApplyOpen ? "visible" : ""}`}
+        {...batchDirectoryApplyDismiss}
+      >
+        <div className="modal skill-edit-modal">
+          <div className="modal-header">
+            <h2 className="modal-title">批量应用到目录（{validSelectedIds.size} 个技能）</h2>
+            <button
+              className="modal-close"
+              onClick={() => !isBatchRunning && setBatchDirectoryApplyOpen(false)}
+              disabled={isBatchRunning}
+            >
+              <IconClose />
+            </button>
+          </div>
+          <div className="modal-body">
+            <div className="form-group">
+              <label className="form-label">安装方式</label>
+              <div className="skill-install-mode" role="radiogroup" aria-label="安装方式">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={batchDirectoryApplyMode === "link"}
+                  className={`skill-install-mode-opt ${batchDirectoryApplyMode === "link" ? "active" : ""}`}
+                  onClick={() => setBatchDirectoryApplyMode("link")}
+                  disabled={isBatchRunning}
+                >
+                  <span className="skill-install-mode-title">软链接</span>
+                  <span className="skill-install-mode-desc">技能库更新会立即反映到目标目录</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={batchDirectoryApplyMode === "copy"}
+                  className={`skill-install-mode-opt ${batchDirectoryApplyMode === "copy" ? "active" : ""}`}
+                  onClick={() => setBatchDirectoryApplyMode("copy")}
+                  disabled={isBatchRunning}
+                >
+                  <span className="skill-install-mode-title">完整复制</span>
+                  <span className="skill-install-mode-desc">复制完整目录，目标不依赖技能库</span>
+                </button>
+              </div>
+            </div>
+            <p className="skill-add-hint">
+              确认后选择一个目标目录，所有选中技能将以相同方式应用到该目录；同名项不会被覆盖。
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setBatchDirectoryApplyOpen(false)}
+              disabled={isBatchRunning}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void confirmBatchDirectoryApply()}
+              disabled={isBatchRunning || validSelectedIds.size === 0}
+            >
+              {isBatchRunning ? "应用中…" : "选择目录并应用"}
             </button>
           </div>
         </div>

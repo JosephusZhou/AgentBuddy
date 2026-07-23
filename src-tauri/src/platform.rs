@@ -141,10 +141,7 @@ pub fn display_path(abs: &str) -> String {
             return "~".to_string();
         }
         // Accept both separators when stripping home prefix.
-        let candidates = [
-            format!("{}/", home_s),
-            format!("{}\\", home_s),
-        ];
+        let candidates = [format!("{}/", home_s), format!("{}\\", home_s)];
         for prefix in &candidates {
             if let Some(rest) = abs.strip_prefix(prefix.as_str()) {
                 let rest = rest.replace('\\', "/");
@@ -192,12 +189,7 @@ pub fn candidate_executable_names(name: &str) -> Vec<String> {
             .filter(|s| !s.is_empty())
             .collect();
         if exts.is_empty() {
-            exts = vec![
-                ".EXE".into(),
-                ".CMD".into(),
-                ".BAT".into(),
-                ".COM".into(),
-            ];
+            exts = vec![".EXE".into(), ".CMD".into(), ".BAT".into(), ".COM".into()];
         }
         // If the name already has an extension matching PATHEXT, keep as-is first.
         let has_ext = Path::new(name)
@@ -205,8 +197,7 @@ pub fn candidate_executable_names(name: &str) -> Vec<String> {
             .and_then(|e| e.to_str())
             .map(|e| {
                 let dotted = format!(".{}", e);
-                exts.iter()
-                    .any(|x| x.eq_ignore_ascii_case(&dotted))
+                exts.iter().any(|x| x.eq_ignore_ascii_case(&dotted))
             })
             .unwrap_or(false);
         if has_ext {
@@ -290,9 +281,7 @@ pub fn open_path(path: &Path) -> Result<(), String> {
             .map_err(|e| format!("打开失败: {e}"))?;
         if !status.success() {
             // Fallback: explorer with the file path.
-            let _ = Command::new("explorer.exe")
-                .arg(path.as_os_str())
-                .status();
+            let _ = Command::new("explorer.exe").arg(path.as_os_str()).status();
         }
         return Ok(());
     }
@@ -504,8 +493,7 @@ pub fn restore_or_private_file(path: &Path, previous_mode: Option<u32>) {
 pub fn symlink_any(source: &Path, dest: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(source, dest)
-            .map_err(|e| format!("创建软链接失败: {e}"))
+        std::os::unix::fs::symlink(source, dest).map_err(|e| format!("创建软链接失败: {e}"))
     }
     #[cfg(windows)]
     {
@@ -521,29 +509,6 @@ pub fn symlink_any(source: &Path, dest: &Path) -> Result<(), String> {
     {
         let _ = (source, dest);
         Err("当前平台不支持软链接".into())
-    }
-}
-
-/// How a skill was installed into an agent root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstallKind {
-    Link,
-    Copy,
-}
-
-/// Ensure `dest` is a directory symlink to `source`, falling back to recursive copy
-/// when symlink creation is denied (common on Windows without Developer Mode).
-pub fn install_dir_link_or_copy(source: &Path, dest: &Path) -> Result<InstallKind, String> {
-    if !source.is_dir() {
-        return Err(format!("源目录不存在: {}", source.display()));
-    }
-    match symlink_any(source, dest) {
-        Ok(()) => Ok(InstallKind::Link),
-        Err(link_err) => {
-            copy_dir_recursive(source, dest)
-                .map_err(|e| format!("软链接失败（{link_err}），复制降级也失败: {e}"))?;
-            Ok(InstallKind::Copy)
-        }
     }
 }
 
@@ -725,10 +690,7 @@ mod tests {
 
     #[test]
     fn expand_home_plain() {
-        assert_eq!(
-            expand_home("/tmp/x").unwrap(),
-            PathBuf::from("/tmp/x")
-        );
+        assert_eq!(expand_home("/tmp/x").unwrap(), PathBuf::from("/tmp/x"));
     }
 
     #[test]
@@ -744,15 +706,15 @@ mod tests {
     fn candidate_names_include_original() {
         let names = candidate_executable_names("codex");
         assert!(!names.is_empty());
-        assert!(names.iter().any(|n| n == "codex" || n.starts_with("codex.")));
+        assert!(names
+            .iter()
+            .any(|n| n == "codex" || n.starts_with("codex.")));
     }
 
     #[test]
-    fn install_kind_copy_roundtrip() {
-        let base = std::env::temp_dir().join(format!(
-            "agentbuddy-platform-test-{}",
-            std::process::id()
-        ));
+    fn copy_dir_recursive_roundtrip() {
+        let base =
+            std::env::temp_dir().join(format!("agentbuddy-platform-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let src = base.join("src");
         let dst = base.join("dst");

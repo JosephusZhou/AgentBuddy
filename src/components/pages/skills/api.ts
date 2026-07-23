@@ -49,9 +49,12 @@ export async function invokeAddGitcode(url: string, tag: string): Promise<SkillA
   return invoke("add_skill_gitcode", { url, tag }) as Promise<SkillActionResult>;
 }
 
-export async function invokeExportSkill(skillId: string): Promise<SkillActionResult> {
+export async function invokeExportSkill(
+  skillId: string,
+  installMode: SkillInstallMode
+): Promise<SkillActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("export_skill_to_dir", { skillId }) as Promise<SkillActionResult>;
+  return invoke("export_skill_to_dir", { skillId, installMode }) as Promise<SkillActionResult>;
 }
 
 export async function invokeUpdateSkill(skillId: string): Promise<SkillActionResult> {
@@ -111,9 +114,12 @@ export async function invokeBatchDelete(
   }) as Promise<BatchSkillResult>;
 }
 
-export async function invokeBatchExport(skillIds: string[]): Promise<BatchSkillResult> {
+export async function invokeBatchExport(
+  skillIds: string[],
+  installMode: SkillInstallMode
+): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("batch_export_skills_to_dir", { skillIds }) as Promise<BatchSkillResult>;
+  return invoke("batch_export_skills_to_dir", { skillIds, installMode }) as Promise<BatchSkillResult>;
 }
 
 export async function invokeBatchApply(

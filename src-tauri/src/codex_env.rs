@@ -11,7 +11,7 @@ use crate::db;
 use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -42,6 +42,9 @@ pub struct CodexEnvironment {
     pub dir_exists: bool,
     pub has_config: bool,
     pub has_skills: bool,
+    pub skill_count: u32,
+    /// default | in_sync | out_of_sync | missing
+    pub skills_sync_status: String,
     pub has_auth: bool,
     /// MCP sync status vs default ~/.codex/config.toml [mcp_servers].
     /// default | in_sync | out_of_sync | missing | no_global
@@ -190,6 +193,14 @@ pub struct CodexEnvMcpSyncResult {
     pub results: Vec<CodexEnvMcpSyncItem>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexEnvSkillsSyncResult {
+    pub ok: bool,
+    pub message: String,
+    pub skill_count: u32,
+}
+
 /* ===== helpers ===== */
 
 fn now_secs() -> i64 {
@@ -320,8 +331,8 @@ fn is_dir_empty(path: &Path) -> Result<bool, String> {
     if !path.is_dir() {
         return Err(format!("目标路径已存在且不是目录: {}", path.display()));
     }
-    let mut entries = fs::read_dir(path)
-        .map_err(|e| format!("无法读取目录 {}: {}", path.display(), e))?;
+    let mut entries =
+        fs::read_dir(path).map_err(|e| format!("无法读取目录 {}: {}", path.display(), e))?;
     Ok(entries.next().is_none())
 }
 
@@ -334,6 +345,64 @@ fn probe_dir(path: &Path) -> (bool, bool, bool, bool) {
     let has_skills = path.join("skills").is_dir();
     let has_auth = path.join("auth.json").is_file();
     (true, has_config, has_skills, has_auth)
+}
+
+fn skill_count(config_dir: &Path) -> u32 {
+    crate::skills::count_skills_in_root(&config_dir.join("skills")) as u32
+}
+
+fn skills_snapshot(skills_dir: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, String> {
+    let mut files = BTreeMap::new();
+    for entry in fs::read_dir(skills_dir).into_iter().flatten() {
+        let entry = entry.map_err(|e| format!("读取 skills 目录项失败: {}", e))?;
+        let skill_dir = entry.path();
+        if !crate::skills::is_visible_skill_dir(&skill_dir) {
+            continue;
+        }
+        for nested in walkdir::WalkDir::new(&skill_dir).follow_links(true) {
+            let nested = nested.map_err(|e| format!("遍历 skills 目录失败: {}", e))?;
+            if !nested.file_type().is_file() {
+                continue;
+            }
+            let path = nested.path();
+            let relative = path
+                .strip_prefix(skills_dir)
+                .map_err(|e| format!("生成 skills 相对路径失败: {}", e))?
+                .to_path_buf();
+            files.insert(
+                relative,
+                fs::read(path).map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
+            );
+        }
+    }
+    Ok(files)
+}
+
+fn skills_status_for_row(row: &CodexEnvironmentRow, dir_exists: bool) -> (String, u32) {
+    let count = if dir_exists {
+        skill_count(Path::new(&row.config_dir))
+    } else {
+        0
+    };
+    if row.is_default {
+        return ("default".into(), count);
+    }
+    if !dir_exists {
+        return ("missing".into(), count);
+    }
+    let default_dir = match db::get_codex_environment_row(DEFAULT_ENV_ID) {
+        Ok(Some(default)) => PathBuf::from(default.config_dir),
+        _ => return ("out_of_sync".into(), count),
+    };
+    match (
+        skills_snapshot(&default_dir.join("skills")),
+        skills_snapshot(&Path::new(&row.config_dir).join("skills")),
+    ) {
+        (Ok(default_skills), Ok(local_skills)) if default_skills == local_skills => {
+            ("in_sync".into(), count)
+        }
+        _ => ("out_of_sync".into(), count),
+    }
 }
 
 fn default_codex_home() -> Result<PathBuf, String> {
@@ -374,8 +443,8 @@ fn read_auth_openai_api_key(config_dir: &Path) -> String {
 }
 
 fn write_auth_json_secret(path: &Path, value: &JsonValue) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|e| format!("序列化 auth.json 失败: {}", e))?;
+    let text =
+        serde_json::to_string_pretty(value).map_err(|e| format!("序列化 auth.json 失败: {}", e))?;
     let text = format!("{}\n", text);
     atomic_write(path, &text)?;
     platform::set_owner_only_file(path);
@@ -403,8 +472,7 @@ fn apply_auth_json_edit(config_dir: &Path, api_key: Option<&str>) -> Result<bool
         if !path.is_file() {
             return Ok(false);
         }
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| format!("读取 auth.json 失败: {}", e))?;
+        let raw = fs::read_to_string(&path).map_err(|e| format!("读取 auth.json 失败: {}", e))?;
         let mut val: JsonValue = if raw.trim().is_empty() {
             JsonValue::Object(Map::new())
         } else {
@@ -414,8 +482,7 @@ fn apply_auth_json_edit(config_dir: &Path, api_key: Option<&str>) -> Result<bool
             Some(o) => o,
             None => {
                 // 非对象：清空整个文件视为清除 token
-                fs::remove_file(&path)
-                    .map_err(|e| format!("删除 auth.json 失败: {}", e))?;
+                fs::remove_file(&path).map_err(|e| format!("删除 auth.json 失败: {}", e))?;
                 return Ok(true);
             }
         };
@@ -423,8 +490,7 @@ fn apply_auth_json_edit(config_dir: &Path, api_key: Option<&str>) -> Result<bool
             return Ok(false);
         }
         if obj.is_empty() {
-            fs::remove_file(&path)
-                .map_err(|e| format!("删除 auth.json 失败: {}", e))?;
+            fs::remove_file(&path).map_err(|e| format!("删除 auth.json 失败: {}", e))?;
         } else {
             write_auth_json_secret(&path, &val)?;
         }
@@ -437,8 +503,7 @@ fn apply_auth_json_edit(config_dir: &Path, api_key: Option<&str>) -> Result<bool
     }
 
     let mut val: JsonValue = if path.is_file() {
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| format!("读取 auth.json 失败: {}", e))?;
+        let raw = fs::read_to_string(&path).map_err(|e| format!("读取 auth.json 失败: {}", e))?;
         if raw.trim().is_empty() {
             JsonValue::Object(Map::new())
         } else {
@@ -520,7 +585,10 @@ fn read_managed_config(config_dir: &Path) -> ManagedConfig {
     let mut legacy_bearer = String::new();
     if !model_provider.is_empty() {
         if let Some(providers) = doc.get("model_providers").and_then(|i| i.as_table()) {
-            if let Some(prov) = providers.get(model_provider.as_str()).and_then(|i| i.as_table()) {
+            if let Some(prov) = providers
+                .get(model_provider.as_str())
+                .and_then(|i| i.as_table())
+            {
                 base_url = toml_str(prov.get("base_url"));
                 legacy_bearer = toml_str(prov.get("experimental_bearer_token"));
             }
@@ -583,8 +651,7 @@ fn apply_managed_config_edit(
 
     let path = env_config_path(config_dir);
     let mut doc = if path.is_file() {
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| format!("读取 config.toml 失败: {}", e))?;
+        let raw = fs::read_to_string(&path).map_err(|e| format!("读取 config.toml 失败: {}", e))?;
         if raw.trim().is_empty() {
             toml_edit::DocumentMut::new()
         } else {
@@ -736,8 +803,8 @@ fn read_mcp_servers_item(path: &Path) -> Result<Option<toml_edit::Item>, String>
     if !path.is_file() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(path)
-        .map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+    let raw =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
@@ -750,8 +817,8 @@ fn read_mcp_servers_item(path: &Path) -> Result<Option<toml_edit::Item>, String>
 /// Replace entire [mcp_servers] table in target config.toml, preserving other keys.
 fn write_mcp_servers_item(path: &Path, servers: Option<&toml_edit::Item>) -> Result<(), String> {
     let mut doc = if path.is_file() {
-        let raw = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+        let raw =
+            fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             toml_edit::DocumentMut::new()
         } else {
@@ -840,8 +907,8 @@ fn row_to_public(row: CodexEnvironmentRow) -> CodexEnvironment {
     let global_path = shared_config_path().unwrap_or_else(|_| PathBuf::from("/dev/null"));
     let (global_names, global_exists) = read_mcp_server_names(&global_path);
     let global_count = global_names.len() as u32;
-    let (status, local_count) =
-        mcp_status_for_row(&row, dir_exists, &global_names, global_exists);
+    let (status, local_count) = mcp_status_for_row(&row, dir_exists, &global_names, global_exists);
+    let (skills_sync_status, skill_count) = skills_status_for_row(&row, dir_exists);
 
     let managed = if dir_exists {
         read_managed_config(&path)
@@ -869,6 +936,8 @@ fn row_to_public(row: CodexEnvironmentRow) -> CodexEnvironment {
         dir_exists,
         has_config,
         has_skills,
+        skill_count,
+        skills_sync_status,
         has_auth,
         mcp_sync_status: status,
         mcp_server_count: local_count,
@@ -886,27 +955,20 @@ fn row_to_public(row: CodexEnvironmentRow) -> CodexEnvironment {
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
-    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))? {
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
-        let ty = entry
-            .file_type()
-            .map_err(|e| format!("读取文件类型失败: {}", e))?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
-        if ty.is_dir() {
+        if from.is_dir() {
             copy_dir_recursive(&from, &to)?;
-        } else if ty.is_file() {
+        } else if from.is_file() {
             if let Some(parent) = to.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
             }
             fs::copy(&from, &to).map_err(|e| {
-                format!(
-                    "复制文件 {} → {} 失败: {}",
-                    from.display(),
-                    to.display(),
-                    e
-                )
+                format!("复制文件 {} → {} 失败: {}", from.display(), to.display(), e)
             })?;
         }
     }
@@ -923,8 +985,7 @@ fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
         let from = src.join(name);
         if from.is_file() {
             let to = dst.join(name);
-            fs::copy(&from, &to)
-                .map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+            fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
         }
     }
     for name in CORE_DIRS {
@@ -947,7 +1008,8 @@ enum EnvMoveOutcome {
 
 fn copy_dir_strict(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
-    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))? {
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let ty = entry
             .file_type()
@@ -983,8 +1045,7 @@ fn move_environment_dir(src: &Path, dst: &Path) -> Result<EnvMoveOutcome, String
         return Err(format!("新路径已存在且非空：{}", dst.display()));
     }
     if dst.exists() {
-        fs::remove_dir(dst)
-            .map_err(|e| format!("清理空目标目录 {} 失败: {}", dst.display(), e))?;
+        fs::remove_dir(dst).map_err(|e| format!("清理空目标目录 {} 失败: {}", dst.display(), e))?;
     }
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)
@@ -1034,10 +1095,7 @@ fn ensure_unique_fields(
             ));
         }
         if r.alias_name == alias_name {
-            return Err(format!(
-                "别名「{}」已被环境「{}」占用",
-                alias_name, r.name
-            ));
+            return Err(format!("别名「{}」已被环境「{}」占用", alias_name, r.name));
         }
     }
     Ok(())
@@ -1135,7 +1193,9 @@ impl ShellKind {
 fn detect_shell_kind() -> ShellKind {
     #[cfg(windows)]
     {
-        let sh = std::env::var("SHELL").unwrap_or_default().to_ascii_lowercase();
+        let sh = std::env::var("SHELL")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
         if sh.ends_with("bash") || sh == "bash" {
             return ShellKind::Bash;
         }
@@ -1184,7 +1244,9 @@ fn shell_rc() -> Result<(PathBuf, ShellKind), String> {
 
 fn powershell_profile_path(home: &Path) -> PathBuf {
     let docs = dirs::document_dir().unwrap_or_else(|| home.join("Documents"));
-    let ps7 = docs.join("PowerShell").join("Microsoft.PowerShell_profile.ps1");
+    let ps7 = docs
+        .join("PowerShell")
+        .join("Microsoft.PowerShell_profile.ps1");
     if ps7.is_file() {
         return ps7;
     }
@@ -1366,21 +1428,17 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("无效路径: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
+    fs::create_dir_all(parent).map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
     use std::sync::atomic::{AtomicU64, Ordering};
     static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = parent.join(format!(
         ".{}.agentbuddy-{}-{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("tmp"),
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         std::process::id(),
         TMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     {
-        let mut f =
-            fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
         f.write_all(content.as_bytes())
             .map_err(|e| format!("写入临时文件失败: {}", e))?;
         f.sync_all().ok();
@@ -1498,7 +1556,12 @@ pub fn import_environment(payload: CodexEnvImportPayload) -> Result<CodexEnvActi
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("env");
-    let slug = if let Some(s) = payload.slug.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let slug = if let Some(s) = payload
+        .slug
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         validate_slug(s)?
     } else {
         validate_slug(&slug_from_dirname(dirname))?
@@ -1513,7 +1576,12 @@ pub fn import_environment(payload: CodexEnvImportPayload) -> Result<CodexEnvActi
     } else {
         validate_alias(&format!("codex-{}", slug), false)?
     };
-    let name = if let Some(n) = payload.name.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let name = if let Some(n) = payload
+        .name
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         validate_name(n)?
     } else {
         validate_name(&format!("Codex · {}", slug))?
@@ -1620,12 +1688,10 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
 
     let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     if override_fields.is_empty() {
-        message.push_str("model / provider / base_url / Token 沿用源环境（Token 不会从源环境复制）。");
+        message
+            .push_str("model / provider / base_url / Token 沿用源环境（Token 不会从源环境复制）。");
     } else {
-        message.push_str(&format!(
-            "已覆盖 {}。",
-            override_fields.join("、")
-        ));
+        message.push_str(&format!("已覆盖 {}。", override_fields.join("、")));
     }
 
     let sync_mcp = payload.sync_mcp.unwrap_or(false);
@@ -1668,8 +1734,8 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "更新环境需要提供 id；新建请使用「从现有环境复制」".to_string())?;
 
-    let existing = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let previous_config_dir = existing.config_dir.clone();
 
     let (slug, config_dir, alias_name, is_default, source) = if existing.is_default {
@@ -1789,8 +1855,8 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
 
 pub fn delete_environment(id: String, delete_files: bool) -> Result<CodexEnvActionResult, String> {
     ensure_default_environment()?;
-    let existing = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("不能删除默认环境".into());
     }
@@ -1911,8 +1977,8 @@ fn install_alias_after_create(row: &CodexEnvironmentRow, want: bool) -> (bool, S
 
 pub fn install_env_alias(id: String) -> Result<CodexEnvShellStatus, String> {
     ensure_default_environment()?;
-    let existing = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("默认环境不支持写入 shell 别名，请直接运行 codex".into());
     }
@@ -1924,8 +1990,7 @@ pub fn install_env_alias(id: String) -> Result<CodexEnvShellStatus, String> {
         ));
     }
     // Ensure CODEX_HOME exists (official requirement).
-    fs::create_dir_all(&path)
-        .map_err(|e| format!("创建 CODEX_HOME 失败: {}", e))?;
+    fs::create_dir_all(&path).map_err(|e| format!("创建 CODEX_HOME 失败: {}", e))?;
     db::set_codex_env_alias_installed(&id, true)?;
     let mut status = rewrite_shell_block_from_db()?;
     status.message = format!(
@@ -1939,8 +2004,8 @@ pub fn install_env_alias(id: String) -> Result<CodexEnvShellStatus, String> {
 
 pub fn remove_env_alias(id: String) -> Result<CodexEnvShellStatus, String> {
     ensure_default_environment()?;
-    let existing = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("默认环境没有 shell 别名可移除".into());
     }
@@ -1973,8 +2038,7 @@ pub fn remove_all_aliases() -> Result<CodexEnvShellStatus, String> {
             ),
         ));
     }
-    let current =
-        fs::read_to_string(&zshrc).map_err(|e| format!("读取 shell 配置失败: {}", e))?;
+    let current = fs::read_to_string(&zshrc).map_err(|e| format!("读取 shell 配置失败: {}", e))?;
     let (next, removed) = remove_marker_block(&current);
     if removed {
         atomic_write(&zshrc, &next)?;
@@ -2046,8 +2110,7 @@ pub fn get_shell_status() -> Result<CodexEnvShellStatus, String> {
 }
 
 pub fn reveal_dir(id: String) -> Result<CodexEnvActionResult, String> {
-    let row = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let path = PathBuf::from(&row.config_dir);
     if !path.exists() {
         return Err(format!("目录不存在: {}", path.display()));
@@ -2061,8 +2124,7 @@ pub fn reveal_dir(id: String) -> Result<CodexEnvActionResult, String> {
 }
 
 pub fn open_config(id: String) -> Result<CodexEnvActionResult, String> {
-    let row = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let dir = PathBuf::from(&row.config_dir);
     if !dir.is_dir() {
         return Err(format!("环境目录不存在: {}", dir.display()));
@@ -2097,8 +2159,7 @@ pub fn open_config(id: String) -> Result<CodexEnvActionResult, String> {
 }
 
 pub fn get_env_secret(id: String) -> Result<String, String> {
-    let row = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let dir = PathBuf::from(&row.config_dir);
     if !dir.is_dir() {
         return Ok(String::new());
@@ -2109,8 +2170,7 @@ pub fn get_env_secret(id: String) -> Result<String, String> {
 
 pub fn sync_mcp_to_environment(id: String) -> Result<CodexEnvMcpSyncResult, String> {
     ensure_default_environment()?;
-    let row = db::get_codex_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
 
     let src = shared_config_path()?;
     let (global_name_set, _) = read_mcp_server_names(&src);
@@ -2170,6 +2230,41 @@ pub fn sync_mcp_to_environment(id: String) -> Result<CodexEnvMcpSyncResult, Stri
             }],
         }),
     }
+}
+
+/// Replace one custom environment's skills with the default environment's skills.
+pub fn sync_skills_to_environment(id: String) -> Result<CodexEnvSkillsSyncResult, String> {
+    ensure_default_environment()?;
+    let row = db::get_codex_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
+    if row.is_default {
+        return Err("默认环境无需同步 skills".into());
+    }
+    let dst_root = PathBuf::from(&row.config_dir);
+    if !dst_root.is_dir() {
+        return Err(format!("环境目录不存在: {}", dst_root.display()));
+    }
+    let default = db::get_codex_environment_row(DEFAULT_ENV_ID)?
+        .ok_or_else(|| "默认环境不存在".to_string())?;
+    let src_skills = PathBuf::from(default.config_dir).join("skills");
+    let dst_skills = dst_root.join("skills");
+    if dst_skills.exists() {
+        if !dst_skills.is_dir() {
+            return Err(format!(
+                "目标 skills 路径不是目录: {}",
+                dst_skills.display()
+            ));
+        }
+        fs::remove_dir_all(&dst_skills).map_err(|e| format!("清空目标 skills 失败: {}", e))?;
+    }
+    if src_skills.is_dir() {
+        copy_dir_recursive(&src_skills, &dst_skills)?;
+    }
+    let count = skill_count(&dst_root);
+    Ok(CodexEnvSkillsSyncResult {
+        ok: true,
+        message: format!("已同步默认环境 skills（{} 个）。", count),
+        skill_count: count,
+    })
 }
 
 pub fn sync_mcp_to_all_environments() -> Result<CodexEnvMcpSyncResult, String> {
@@ -2256,10 +2351,7 @@ pub fn sync_mcp_to_all_environments() -> Result<CodexEnvMcpSyncResult, String> {
             }
         )
     } else {
-        format!(
-            "部分失败：成功 {}，失败 {}，跳过 {}",
-            ok_n, fail_n, skip_n
-        )
+        format!("部分失败：成功 {}，失败 {}，跳过 {}", ok_n, fail_n, skip_n)
     };
 
     Ok(CodexEnvMcpSyncResult {
@@ -2360,7 +2452,11 @@ command = "echo"
 
         write_mcp_servers_item(&path, item.as_ref()).unwrap();
         let raw = fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("model = \"gpt-5.5\"") || raw.contains("model=\"gpt-5.5\"") || raw.contains("gpt-5.5"));
+        assert!(
+            raw.contains("model = \"gpt-5.5\"")
+                || raw.contains("model=\"gpt-5.5\"")
+                || raw.contains("gpt-5.5")
+        );
         assert!(raw.contains("new"));
         assert!(!raw.contains("old") || raw.find("mcp_servers").is_some());
         let doc: toml_edit::DocumentMut = raw.parse().unwrap();
@@ -2377,10 +2473,8 @@ command = "echo"
 
     #[test]
     fn auth_json_write_merge_and_clear() {
-        let dir = std::env::temp_dir().join(format!(
-            "agentbuddy-codex-auth-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("agentbuddy-codex-auth-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 

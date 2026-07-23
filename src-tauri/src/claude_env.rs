@@ -8,7 +8,7 @@ use crate::db;
 use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -39,6 +39,9 @@ pub struct ClaudeEnvironment {
     pub dir_exists: bool,
     pub has_settings: bool,
     pub has_skills: bool,
+    pub skill_count: u32,
+    /// default | in_sync | out_of_sync | missing
+    pub skills_sync_status: String,
     pub has_agents: bool,
     /// MCP sync status vs global ~/.claude.json top-level mcpServers.
     /// default | in_sync | out_of_sync | missing | no_global
@@ -203,6 +206,14 @@ pub struct ClaudeEnvMcpSyncResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ClaudeEnvSkillsSyncResult {
+    pub ok: bool,
+    pub message: String,
+    pub skill_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaudeEnvMcpStatusResult {
     pub global_path: String,
     pub global_exists: bool,
@@ -259,9 +270,7 @@ fn expand_path(input: &str) -> Result<PathBuf, String> {
 
 fn path_inside_home(path: &Path) -> Result<(), String> {
     let home = home_dir()?;
-    let home_canon = home
-        .canonicalize()
-        .unwrap_or_else(|_| home.clone());
+    let home_canon = home.canonicalize().unwrap_or_else(|_| home.clone());
     // If path does not exist yet, compare prefix against home string form.
     if path.exists() {
         let canon = path
@@ -280,7 +289,10 @@ fn path_inside_home(path: &Path) -> Result<(), String> {
             return Err("配置目录必须位于用户主目录内".into());
         }
         // Reject path traversal segments.
-        if abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if abs
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err("配置目录路径包含非法的 '..'".into());
         }
         if abs == home || abs == home_canon {
@@ -312,11 +324,7 @@ fn validate_slug(slug: &str) -> Result<String, String> {
     let re_ok = slug
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if !re_ok
-        || slug.starts_with('-')
-        || slug.ends_with('-')
-        || slug.contains("--")
-    {
+    if !re_ok || slug.starts_with('-') || slug.ends_with('-') || slug.contains("--") {
         return Err("slug 仅允许小写字母、数字与单个连字符，且不能首尾为连字符".into());
     }
     if slug == "default" {
@@ -354,8 +362,8 @@ fn is_dir_empty(path: &Path) -> Result<bool, String> {
     if !path.is_dir() {
         return Err(format!("目标路径已存在且不是目录: {}", path.display()));
     }
-    let mut entries = fs::read_dir(path)
-        .map_err(|e| format!("无法读取目录 {}: {}", path.display(), e))?;
+    let mut entries =
+        fs::read_dir(path).map_err(|e| format!("无法读取目录 {}: {}", path.display(), e))?;
     Ok(entries.next().is_none())
 }
 
@@ -370,12 +378,71 @@ fn probe_dir(path: &Path) -> (bool, bool, bool, bool) {
     (true, has_settings, has_skills, has_agents)
 }
 
+fn skill_count(config_dir: &Path) -> u32 {
+    crate::skills::count_skills_in_root(&config_dir.join("skills")) as u32
+}
+
+fn skills_snapshot(skills_dir: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, String> {
+    let mut files = BTreeMap::new();
+    for entry in fs::read_dir(skills_dir).into_iter().flatten() {
+        let entry = entry.map_err(|e| format!("读取 skills 目录项失败: {}", e))?;
+        let skill_dir = entry.path();
+        if !crate::skills::is_visible_skill_dir(&skill_dir) {
+            continue;
+        }
+        for nested in walkdir::WalkDir::new(&skill_dir).follow_links(true) {
+            let nested = nested.map_err(|e| format!("遍历 skills 目录失败: {}", e))?;
+            if !nested.file_type().is_file() {
+                continue;
+            }
+            let path = nested.path();
+            let relative = path
+                .strip_prefix(skills_dir)
+                .map_err(|e| format!("生成 skills 相对路径失败: {}", e))?
+                .to_path_buf();
+            files.insert(
+                relative,
+                fs::read(path).map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
+            );
+        }
+    }
+    Ok(files)
+}
+
+fn skills_status_for_row(row: &ClaudeEnvironmentRow, dir_exists: bool) -> (String, u32) {
+    let count = if dir_exists {
+        skill_count(Path::new(&row.config_dir))
+    } else {
+        0
+    };
+    if row.is_default {
+        return ("default".into(), count);
+    }
+    if !dir_exists {
+        return ("missing".into(), count);
+    }
+    let default_dir = match db::get_claude_environment_row(DEFAULT_ENV_ID) {
+        Ok(Some(default)) => PathBuf::from(default.config_dir),
+        _ => return ("out_of_sync".into(), count),
+    };
+    match (
+        skills_snapshot(&default_dir.join("skills")),
+        skills_snapshot(&Path::new(&row.config_dir).join("skills")),
+    ) {
+        (Ok(default_skills), Ok(local_skills)) if default_skills == local_skills => {
+            ("in_sync".into(), count)
+        }
+        _ => ("out_of_sync".into(), count),
+    }
+}
+
 fn row_to_public(row: ClaudeEnvironmentRow) -> ClaudeEnvironment {
     let path = PathBuf::from(&row.config_dir);
     let (dir_exists, has_settings, has_skills, has_agents) = probe_dir(&path);
     let (global_names, _) = read_mcp_server_names(&shared_mcp_path());
     let global_count = global_names.len() as u32;
     let (status, local_count) = mcp_status_for_row(&row, dir_exists, &global_names);
+    let (skills_sync_status, skill_count) = skills_status_for_row(&row, dir_exists);
     let (base_url, api_key_plain, model) = if dir_exists {
         read_settings_env(&path)
     } else {
@@ -395,6 +462,8 @@ fn row_to_public(row: ClaudeEnvironmentRow) -> ClaudeEnvironment {
         dir_exists,
         has_settings,
         has_skills,
+        skill_count,
+        skills_sync_status,
         has_agents,
         mcp_sync_status: status,
         mcp_server_count: local_count,
@@ -427,13 +496,13 @@ fn read_mcp_servers(path: &Path) -> Result<Map<String, Value>, String> {
     if !path.is_file() {
         return Ok(Map::new());
     }
-    let raw = fs::read_to_string(path)
-        .map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+    let raw =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
     if raw.trim().is_empty() {
         return Ok(Map::new());
     }
-    let doc: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("解析 {} 失败: {}", path.display(), e))?;
+    let doc: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("解析 {} 失败: {}", path.display(), e))?;
     let Some(obj) = doc.as_object() else {
         return Err(format!("{} 根节点必须是 JSON 对象", path.display()));
     };
@@ -495,8 +564,8 @@ fn mcp_status_for_row(
 /// Write top-level mcpServers, preserving all other keys. Creates file if missing.
 fn write_mcp_servers(path: &Path, servers: &Map<String, Value>) -> Result<(), String> {
     let mut doc: Value = if path.is_file() {
-        let raw = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+        let raw =
+            fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             Value::Object(Map::new())
         } else {
@@ -552,31 +621,21 @@ fn sync_mcp_servers_to_dir(config_dir: &Path) -> Result<(u32, Vec<String>), Stri
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst)
-        .map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
-    for entry in fs::read_dir(src)
-        .map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    fs::create_dir_all(dst).map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
     {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
-        let ty = entry
-            .file_type()
-            .map_err(|e| format!("读取文件类型失败: {}", e))?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
-        if ty.is_dir() {
+        if from.is_dir() {
             copy_dir_recursive(&from, &to)?;
-        } else if ty.is_file() {
+        } else if from.is_file() {
             if let Some(parent) = to.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
             }
             fs::copy(&from, &to).map_err(|e| {
-                format!(
-                    "复制文件 {} → {} 失败: {}",
-                    from.display(),
-                    to.display(),
-                    e
-                )
+                format!("复制文件 {} → {} 失败: {}", from.display(), to.display(), e)
             })?;
         }
         // skip symlinks / other
@@ -588,20 +647,13 @@ fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
     if !src.is_dir() {
         return Err(format!("源环境目录不存在: {}", src.display()));
     }
-    fs::create_dir_all(dst)
-        .map_err(|e| format!("创建目标目录 {} 失败: {}", dst.display(), e))?;
+    fs::create_dir_all(dst).map_err(|e| format!("创建目标目录 {} 失败: {}", dst.display(), e))?;
 
     for name in CORE_FILES {
         let from = src.join(name);
         if from.is_file() {
             let to = dst.join(name);
-            fs::copy(&from, &to).map_err(|e| {
-                format!(
-                    "复制 {} 失败: {}",
-                    name,
-                    e
-                )
-            })?;
+            fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
         }
     }
     for name in CORE_DIRS {
@@ -631,10 +683,8 @@ enum EnvMoveOutcome {
 /// 文件的近似副本，而"重命名/迁移"要求内容零丢失，静默跳过 symlink 会违反预期，
 /// 因此这里选择显式失败让用户手工处理。
 fn copy_dir_strict(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst)
-        .map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
-    for entry in fs::read_dir(src)
-        .map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    fs::create_dir_all(dst).map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
     {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let ty = entry
@@ -682,8 +732,7 @@ fn move_environment_dir(src: &Path, dst: &Path) -> Result<EnvMoveOutcome, String
     }
     // rename 要求目标不存在；若是已存在的空目录先移除，让 rename 能落地。
     if dst.exists() {
-        fs::remove_dir(dst)
-            .map_err(|e| format!("清理空目标目录 {} 失败: {}", dst.display(), e))?;
+        fs::remove_dir(dst).map_err(|e| format!("清理空目标目录 {} 失败: {}", dst.display(), e))?;
     }
     // 确保目标父目录存在（新路径可能嵌套在尚未创建的目录下），避免同卷时也无谓走复制回退。
     if let Some(parent) = dst.parent() {
@@ -812,13 +861,12 @@ fn apply_settings_env_edit(
 
     let path = config_dir.join("settings.json");
     let mut root: serde_json::Value = if path.is_file() {
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| format!("读取 settings.json 失败: {}", e))?;
+        let raw =
+            fs::read_to_string(&path).map_err(|e| format!("读取 settings.json 失败: {}", e))?;
         if raw.trim().is_empty() {
             serde_json::json!({})
         } else {
-            serde_json::from_str(&raw)
-                .map_err(|e| format!("解析 settings.json 失败: {}", e))?
+            serde_json::from_str(&raw).map_err(|e| format!("解析 settings.json 失败: {}", e))?
         }
     } else {
         serde_json::json!({})
@@ -831,41 +879,42 @@ fn apply_settings_env_edit(
     // 统一用 apply_keys：单键（Base URL / API Key）与模型键族共用同一路径，
     // 避免两个 mut 闭包同时借用 root/changed。
     let mut changed = Vec::new();
-    let mut apply_keys = |field: Option<String>, json_keys: &[&str], label: &str| -> Result<(), String> {
-        let Some(val) = field else { return Ok(()) };
-        let map = root.as_object_mut().unwrap();
-        let mut any = false;
-        if val.is_empty() {
-            // Delete keys from env if present.
-            if let Some(env) = map.get_mut("env").and_then(|v| v.as_object_mut()) {
+    let mut apply_keys =
+        |field: Option<String>, json_keys: &[&str], label: &str| -> Result<(), String> {
+            let Some(val) = field else { return Ok(()) };
+            let map = root.as_object_mut().unwrap();
+            let mut any = false;
+            if val.is_empty() {
+                // Delete keys from env if present.
+                if let Some(env) = map.get_mut("env").and_then(|v| v.as_object_mut()) {
+                    for k in json_keys {
+                        if env.remove(*k).is_some() {
+                            any = true;
+                        }
+                    }
+                }
+            } else {
+                // Set keys, creating env object if needed.
+                if !map.get("env").map(|v| v.is_object()).unwrap_or(false) {
+                    map.insert("env".into(), serde_json::json!({}));
+                }
+                let env = map
+                    .get_mut("env")
+                    .and_then(|v| v.as_object_mut())
+                    .ok_or_else(|| "无法写入 settings.json 的 env 字段".to_string())?;
                 for k in json_keys {
-                    if env.remove(*k).is_some() {
+                    let prev = env.get(*k).and_then(|v| v.as_str());
+                    if prev != Some(val.as_str()) {
+                        env.insert((*k).into(), serde_json::Value::String(val.clone()));
                         any = true;
                     }
                 }
             }
-        } else {
-            // Set keys, creating env object if needed.
-            if !map.get("env").map(|v| v.is_object()).unwrap_or(false) {
-                map.insert("env".into(), serde_json::json!({}));
+            if any {
+                changed.push(label.to_string());
             }
-            let env = map
-                .get_mut("env")
-                .and_then(|v| v.as_object_mut())
-                .ok_or_else(|| "无法写入 settings.json 的 env 字段".to_string())?;
-            for k in json_keys {
-                let prev = env.get(*k).and_then(|v| v.as_str());
-                if prev != Some(val.as_str()) {
-                    env.insert((*k).into(), serde_json::Value::String(val.clone()));
-                    any = true;
-                }
-            }
-        }
-        if any {
-            changed.push(label.to_string());
-        }
-        Ok(())
-    };
+            Ok(())
+        };
     apply_keys(base, &["ANTHROPIC_BASE_URL"], "Base URL")?;
     apply_keys(key, &["ANTHROPIC_AUTH_TOKEN"], "API Key")?;
     apply_keys(model, MODEL_ENV_KEYS, "模型")?;
@@ -876,7 +925,11 @@ fn apply_settings_env_edit(
 
     // Drop an empty `env` object we may have left behind, to avoid noise.
     if let Some(map) = root.as_object_mut() {
-        if map.get("env").map(|v| v.as_object().map(|o| o.is_empty()).unwrap_or(false)).unwrap_or(false) {
+        if map
+            .get("env")
+            .map(|v| v.as_object().map(|o| o.is_empty()).unwrap_or(false))
+            .unwrap_or(false)
+        {
             map.remove("env");
         }
     }
@@ -923,10 +976,7 @@ fn ensure_unique_fields(
             ));
         }
         if r.alias_name == alias_name {
-            return Err(format!(
-                "别名「{}」已被环境「{}」占用",
-                alias_name, r.name
-            ));
+            return Err(format!("别名「{}」已被环境「{}」占用", alias_name, r.name));
         }
     }
     Ok(())
@@ -961,9 +1011,7 @@ fn slug_from_dirname(dirname: &str) -> String {
     if dirname == ".claude" {
         return "default".into();
     }
-    let rest = dirname
-        .strip_prefix(".claude-")
-        .unwrap_or(dirname);
+    let rest = dirname.strip_prefix(".claude-").unwrap_or(dirname);
     let cleaned: String = rest
         .chars()
         .map(|c| {
@@ -1033,7 +1081,9 @@ fn detect_shell_kind() -> ShellKind {
     #[cfg(windows)]
     {
         // Prefer explicit SHELL if a Unix shell is installed (Git Bash / MSYS).
-        let sh = std::env::var("SHELL").unwrap_or_default().to_ascii_lowercase();
+        let sh = std::env::var("SHELL")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
         if sh.ends_with("bash") || sh == "bash" {
             return ShellKind::Bash;
         }
@@ -1085,7 +1135,9 @@ fn powershell_profile_path(home: &Path) -> PathBuf {
     // Windows PowerShell 5.1 CurrentUserCurrentHost profile path.
     // Also works as a conventional location for pwsh when Documents\PowerShell is absent.
     let docs = dirs::document_dir().unwrap_or_else(|| home.join("Documents"));
-    let ps7 = docs.join("PowerShell").join("Microsoft.PowerShell_profile.ps1");
+    let ps7 = docs
+        .join("PowerShell")
+        .join("Microsoft.PowerShell_profile.ps1");
     if ps7.is_file() {
         return ps7;
     }
@@ -1279,23 +1331,19 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("无效路径: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
+    fs::create_dir_all(parent).map_err(|e| format!("创建目录 {} 失败: {}", parent.display(), e))?;
     // Per-call atomic sequence keeps the temp path unique even for concurrent writers
     // in the same process, so they never share a temp file and corrupt each other's write.
     use std::sync::atomic::{AtomicU64, Ordering};
     static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = parent.join(format!(
         ".{}.agentbuddy-{}-{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("tmp"),
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         std::process::id(),
         TMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     {
-        let mut f = fs::File::create(&tmp)
-            .map_err(|e| format!("创建临时文件失败: {}", e))?;
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
         f.write_all(content.as_bytes())
             .map_err(|e| format!("写入临时文件失败: {}", e))?;
         f.sync_all().ok();
@@ -1337,8 +1385,7 @@ pub fn sniff_environments() -> Result<ClaudeEnvSniffResult, String> {
         .collect();
 
     let mut candidates = Vec::new();
-    let entries = fs::read_dir(&home)
-        .map_err(|e| format!("无法读取主目录: {}", e))?;
+    let entries = fs::read_dir(&home).map_err(|e| format!("无法读取主目录: {}", e))?;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -1394,7 +1441,9 @@ pub fn sniff_environments() -> Result<ClaudeEnvSniffResult, String> {
     })
 }
 
-pub fn import_environment(payload: ClaudeEnvImportPayload) -> Result<ClaudeEnvActionResult, String> {
+pub fn import_environment(
+    payload: ClaudeEnvImportPayload,
+) -> Result<ClaudeEnvActionResult, String> {
     ensure_default_environment()?;
     let config_dir = expand_path(&payload.config_dir)?;
     path_inside_home(&config_dir)?;
@@ -1407,7 +1456,12 @@ pub fn import_environment(payload: ClaudeEnvImportPayload) -> Result<ClaudeEnvAc
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("env");
-    let slug = if let Some(s) = payload.slug.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let slug = if let Some(s) = payload
+        .slug
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         validate_slug(s)?
     } else {
         validate_slug(&slug_from_dirname(dirname))?
@@ -1422,7 +1476,12 @@ pub fn import_environment(payload: ClaudeEnvImportPayload) -> Result<ClaudeEnvAc
     } else {
         validate_alias(&format!("claude-{}", slug), false)?
     };
-    let name = if let Some(n) = payload.name.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let name = if let Some(n) = payload
+        .name
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         validate_name(n)?
     } else {
         validate_name(&format!("Claude · {}", slug))?
@@ -1536,10 +1595,7 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     };
     db::upsert_claude_environment_row(&row)?;
 
-    let mut message = format!(
-        "已从「{}」复制核心配置到「{}」。",
-        source.name, name
-    );
+    let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     if override_fields.is_empty() {
         message.push_str("Base URL / API Key 沿用源环境。");
     } else {
@@ -1583,7 +1639,9 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     })
 }
 
-pub fn upsert_environment(payload: ClaudeEnvUpsertPayload) -> Result<ClaudeEnvActionResult, String> {
+pub fn upsert_environment(
+    payload: ClaudeEnvUpsertPayload,
+) -> Result<ClaudeEnvActionResult, String> {
     ensure_default_environment()?;
     let name = validate_name(&payload.name)?;
     let notes = payload.notes.unwrap_or_default().trim().to_string();
@@ -1594,8 +1652,8 @@ pub fn upsert_environment(payload: ClaudeEnvUpsertPayload) -> Result<ClaudeEnvAc
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "更新环境需要提供 id；新建请使用「从现有环境复制」".to_string())?;
 
-    let existing = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
 
     // 提前留存旧路径：默认分支会把 existing.config_dir move 进 tuple，
     // 之后判断"是否发生迁移"和回滚都需要它，故先克隆一份稳定副本。
@@ -1716,9 +1774,7 @@ pub fn upsert_environment(payload: ClaudeEnvUpsertPayload) -> Result<ClaudeEnvAc
                     message.push_str(&format!("；但补齐 DEFAULT_* 模型键失败：{}", e));
                 }
             }
-        } else if payload.base_url.is_some()
-            || payload.api_key.is_some()
-            || payload.model.is_some()
+        } else if payload.base_url.is_some() || payload.api_key.is_some() || payload.model.is_some()
         {
             message.push_str("；环境目录不存在，未写入 Base URL / API Key / 模型");
         }
@@ -1734,8 +1790,8 @@ pub fn upsert_environment(payload: ClaudeEnvUpsertPayload) -> Result<ClaudeEnvAc
 
 pub fn delete_environment(id: String, delete_files: bool) -> Result<ClaudeEnvActionResult, String> {
     ensure_default_environment()?;
-    let existing = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("不能删除默认环境".into());
     }
@@ -1744,9 +1800,8 @@ pub fn delete_environment(id: String, delete_files: bool) -> Result<ClaudeEnvAct
         let path = PathBuf::from(&existing.config_dir);
         path_inside_home(&path)?;
         if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|e| {
-                format!("删除目录 {} 失败: {}", path.display(), e)
-            })?;
+            fs::remove_dir_all(&path)
+                .map_err(|e| format!("删除目录 {} 失败: {}", path.display(), e))?;
         }
     }
 
@@ -1853,7 +1908,8 @@ fn install_alias_after_create(row: &ClaudeEnvironmentRow, want: bool) -> (bool, 
             true,
             format!(
                 " 已写入 shell 别名 {}（执行 source {} 或新开终端后生效）。",
-                row.alias_name, rc_hint()
+                row.alias_name,
+                rc_hint()
             ),
         ),
         Err(e) => {
@@ -1867,8 +1923,8 @@ fn install_alias_after_create(row: &ClaudeEnvironmentRow, want: bool) -> (bool, 
 /// Enable shell alias for one non-default environment and rewrite the marker block.
 pub fn install_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
     ensure_default_environment()?;
-    let existing = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("默认环境不支持写入 shell 别名，请直接运行 claude".into());
     }
@@ -1883,7 +1939,9 @@ pub fn install_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
     let mut status = rewrite_shell_block_from_db()?;
     status.message = format!(
         "已为「{}」写入别名 {}。请执行 source {} 或新开终端后生效。",
-        existing.name, existing.alias_name, rc_hint()
+        existing.name,
+        existing.alias_name,
+        rc_hint()
     );
     Ok(status)
 }
@@ -1891,8 +1949,8 @@ pub fn install_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
 /// Disable shell alias for one environment and rewrite the marker block.
 pub fn remove_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
     ensure_default_environment()?;
-    let existing = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let existing =
+        db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     if existing.is_default {
         return Err("默认环境没有 shell 别名可移除".into());
     }
@@ -1900,7 +1958,9 @@ pub fn remove_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
     let mut status = rewrite_shell_block_from_db()?;
     status.message = format!(
         "已移除「{}」的别名 {}。请执行 source {} 或新开终端后生效。",
-        existing.name, existing.alias_name, rc_hint()
+        existing.name,
+        existing.alias_name,
+        rc_hint()
     );
     Ok(status)
 }
@@ -1924,8 +1984,7 @@ pub fn remove_all_aliases() -> Result<ClaudeEnvShellStatus, String> {
             ),
         ));
     }
-    let current =
-        fs::read_to_string(&zshrc).map_err(|e| format!("读取 shell 配置失败: {}", e))?;
+    let current = fs::read_to_string(&zshrc).map_err(|e| format!("读取 shell 配置失败: {}", e))?;
     let (next, removed) = remove_marker_block(&current);
     if removed {
         atomic_write(&zshrc, &next)?;
@@ -1997,8 +2056,7 @@ pub fn get_shell_status() -> Result<ClaudeEnvShellStatus, String> {
 }
 
 pub fn reveal_dir(id: String) -> Result<ClaudeEnvActionResult, String> {
-    let row = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let path = PathBuf::from(&row.config_dir);
     if !path.exists() {
         return Err(format!("目录不存在: {}", path.display()));
@@ -2014,16 +2072,14 @@ pub fn reveal_dir(id: String) -> Result<ClaudeEnvActionResult, String> {
 /// Open `<config_dir>/settings.json` with the system default app for editing.
 /// Creates an empty JSON object file if the directory exists but the file is missing.
 pub fn open_settings(id: String) -> Result<ClaudeEnvActionResult, String> {
-    let row = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let dir = PathBuf::from(&row.config_dir);
     if !dir.is_dir() {
         return Err(format!("环境目录不存在: {}", dir.display()));
     }
     let settings = dir.join("settings.json");
     let created = if !settings.is_file() {
-        fs::write(&settings, "{}\n")
-            .map_err(|e| format!("创建 settings.json 失败: {}", e))?;
+        fs::write(&settings, "{}\n").map_err(|e| format!("创建 settings.json 失败: {}", e))?;
         true
     } else {
         false
@@ -2051,8 +2107,7 @@ pub fn open_settings(id: String) -> Result<ClaudeEnvActionResult, String> {
 /// 按需读取某环境 settings.json 的 ANTHROPIC_AUTH_TOKEN 明文，供编辑弹窗预填。
 /// 列表接口不回传明文，只有用户主动编辑该环境时才调用此命令，收紧暴露面。
 pub fn get_env_secret(id: String) -> Result<String, String> {
-    let row = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
     let dir = PathBuf::from(&row.config_dir);
     if !dir.is_dir() {
         return Ok(String::new());
@@ -2064,8 +2119,7 @@ pub fn get_env_secret(id: String) -> Result<String, String> {
 /// Sync global ~/.claude.json top-level mcpServers into one custom environment.
 pub fn sync_mcp_to_environment(id: String) -> Result<ClaudeEnvMcpSyncResult, String> {
     ensure_default_environment()?;
-    let row = db::get_claude_environment_row(&id)?
-        .ok_or_else(|| format!("环境不存在: {}", id))?;
+    let row = db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
 
     let src = shared_mcp_path();
     let global_servers = read_mcp_servers(&src)?;
@@ -2094,10 +2148,7 @@ pub fn sync_mcp_to_environment(id: String) -> Result<ClaudeEnvMcpSyncResult, Str
     match sync_mcp_servers_to_dir(&dir) {
         Ok((count, names)) => Ok(ClaudeEnvMcpSyncResult {
             ok: true,
-            message: format!(
-                "已将全局 MCP（{} 个）同步到「{}」",
-                count, row.name
-            ),
+            message: format!("已将全局 MCP（{} 个）同步到「{}」", count, row.name),
             global_server_count: global_count,
             global_server_names: global_names.clone(),
             results: vec![ClaudeEnvMcpSyncItem {
@@ -2128,6 +2179,41 @@ pub fn sync_mcp_to_environment(id: String) -> Result<ClaudeEnvMcpSyncResult, Str
             }],
         }),
     }
+}
+
+/// Replace one custom environment's skills with the default environment's skills.
+pub fn sync_skills_to_environment(id: String) -> Result<ClaudeEnvSkillsSyncResult, String> {
+    ensure_default_environment()?;
+    let row = db::get_claude_environment_row(&id)?.ok_or_else(|| format!("环境不存在: {}", id))?;
+    if row.is_default {
+        return Err("默认环境无需同步 skills".into());
+    }
+    let dst_root = PathBuf::from(&row.config_dir);
+    if !dst_root.is_dir() {
+        return Err(format!("环境目录不存在: {}", dst_root.display()));
+    }
+    let default = db::get_claude_environment_row(DEFAULT_ENV_ID)?
+        .ok_or_else(|| "默认环境不存在".to_string())?;
+    let src_skills = PathBuf::from(default.config_dir).join("skills");
+    let dst_skills = dst_root.join("skills");
+    if dst_skills.exists() {
+        if !dst_skills.is_dir() {
+            return Err(format!(
+                "目标 skills 路径不是目录: {}",
+                dst_skills.display()
+            ));
+        }
+        fs::remove_dir_all(&dst_skills).map_err(|e| format!("清空目标 skills 失败: {}", e))?;
+    }
+    if src_skills.is_dir() {
+        copy_dir_recursive(&src_skills, &dst_skills)?;
+    }
+    let count = skill_count(&dst_root);
+    Ok(ClaudeEnvSkillsSyncResult {
+        ok: true,
+        message: format!("已同步默认环境 skills（{} 个）。", count),
+        skill_count: count,
+    })
 }
 
 /// Sync global mcpServers into every non-default environment with an existing dir.
@@ -2215,10 +2301,7 @@ pub fn sync_mcp_to_all_environments() -> Result<ClaudeEnvMcpSyncResult, String> 
             }
         )
     } else {
-        format!(
-            "部分失败：成功 {}，失败 {}，跳过 {}",
-            ok_n, fail_n, skip_n
-        )
+        format!("部分失败：成功 {}，失败 {}，跳过 {}", ok_n, fail_n, skip_n)
     };
 
     Ok(ClaudeEnvMcpSyncResult {
@@ -2242,7 +2325,9 @@ pub fn get_mcp_sync_status() -> Result<ClaudeEnvMcpStatusResult, String> {
     let environments = list_environments()?;
     let out_of_sync = environments
         .iter()
-        .filter(|e| !e.is_default && (e.mcp_sync_status == "out_of_sync" || e.mcp_sync_status == "missing"))
+        .filter(|e| {
+            !e.is_default && (e.mcp_sync_status == "out_of_sync" || e.mcp_sync_status == "missing")
+        })
         .count();
 
     let message = if !global_exists {
@@ -2355,6 +2440,26 @@ fn display_path_for_msg(abs: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn skills_snapshot_follows_directory_symlinks() {
+        let base = std::env::temp_dir().join(format!("agentbuddy-env-skills-{}", now_secs()));
+        let _ = fs::remove_dir_all(&base);
+        let library_skill = base.join("library/demo");
+        fs::create_dir_all(&library_skill).unwrap();
+        fs::write(library_skill.join("SKILL.md"), "demo").unwrap();
+        let linked_root = base.join("linked/skills");
+        fs::create_dir_all(&linked_root).unwrap();
+        std::os::unix::fs::symlink(&library_skill, linked_root.join("demo")).unwrap();
+        let copied_root = base.join("copied/skills/demo");
+        fs::create_dir_all(&copied_root).unwrap();
+        fs::write(copied_root.join("SKILL.md"), "demo").unwrap();
+
+        assert_eq!(skill_count(base.join("linked").as_path()), 1);
+        assert_eq!(skills_snapshot(&linked_root).unwrap(), skills_snapshot(&base.join("copied/skills")).unwrap());
+        let _ = fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn marker_block_append_and_replace() {
         let block1 = render_marker_block(&[
@@ -2443,7 +2548,10 @@ mod tests {
         let openai = serde_json::json!({
             "data": [{"id": " claude-b "}, {"id": "claude-a"}, {"id": "claude-a"}, {"id": ""}]
         });
-        assert_eq!(parse_remote_model_ids(&openai), vec!["claude-a", "claude-b"]);
+        assert_eq!(
+            parse_remote_model_ids(&openai),
+            vec!["claude-a", "claude-b"]
+        );
 
         let array = serde_json::json!([{"id": "model-2"}, {"id": "model-1"}]);
         assert_eq!(parse_remote_model_ids(&array), vec!["model-1", "model-2"]);
@@ -2458,10 +2566,8 @@ mod tests {
 
     #[test]
     fn settings_overrides_patch_env_keys() {
-        let dir = std::env::temp_dir().join(format!(
-            "agentbuddy-claude-env-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("agentbuddy-claude-env-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
@@ -2718,10 +2824,8 @@ mod tests {
 
     #[test]
     fn mcp_servers_write_preserves_other_keys_and_syncs_names() {
-        let dir = std::env::temp_dir().join(format!(
-            "agentbuddy-claude-mcp-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("agentbuddy-claude-mcp-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 
@@ -2748,8 +2852,7 @@ mod tests {
         );
         write_mcp_servers(&target, &servers).unwrap();
 
-        let v: Value =
-            serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+        let v: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
         assert_eq!(v["numStartups"], 3);
         assert!(v["projects"]["/tmp/x"].is_object());
         assert!(v["mcpServers"]["demo"].is_object());
@@ -2763,8 +2866,7 @@ mod tests {
 
         // Empty map clears servers but keeps other keys
         write_mcp_servers(&target, &Map::new()).unwrap();
-        let v2: Value =
-            serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+        let v2: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
         assert_eq!(v2["numStartups"], 3);
         assert_eq!(v2["mcpServers"], serde_json::json!({}));
 
@@ -2773,8 +2875,7 @@ mod tests {
         fs::create_dir_all(target2.parent().unwrap()).unwrap();
         write_mcp_servers(&target2, &servers).unwrap();
         assert!(target2.is_file());
-        let v3: Value =
-            serde_json::from_str(&fs::read_to_string(&target2).unwrap()).unwrap();
+        let v3: Value = serde_json::from_str(&fs::read_to_string(&target2).unwrap()).unwrap();
         assert!(v3["mcpServers"]["demo"].is_object());
 
         let _ = fs::remove_dir_all(&dir);

@@ -25,6 +25,7 @@ import {
   invokeGetSecret,
   invokeFetchRemoteModels,
   invokeSyncMcp,
+  invokeSyncSkills,
   invokeSyncAllMcp,
 } from "./codex-env/api";
 
@@ -725,6 +726,23 @@ export default function CodexEnv() {
     }
   }, [refresh]);
 
+  const handleSyncSkills = useCallback(async (env: CodexEnvironment) => {
+    if (env.isDefault) {
+      setStatusMsg("默认环境无需同步 skills");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await invokeSyncSkills(env.id);
+      setStatusMsg(result.message);
+      await refresh();
+    } catch (err) {
+      setStatusMsg(`同步 skills 失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [refresh]);
+
   const handleSyncAllMcp = useCallback(async () => {
     setBusy(true);
     try {
@@ -889,7 +907,13 @@ export default function CodexEnv() {
                         <span className="claude-env-badge warn">MCP 未对齐</span>
                       )}
                     {!env.isDefault && env.mcpSyncStatus === "in_sync" && (
-                      <span className="claude-env-badge ok">MCP 已同步</span>
+                      <span className="claude-env-badge ok">MCP 已对齐</span>
+                    )}
+                    {!env.isDefault && env.skillsSyncStatus === "in_sync" && (
+                      <span className="claude-env-badge ok">skills 已对齐</span>
+                    )}
+                    {!env.isDefault && env.skillsSyncStatus !== "in_sync" && (
+                      <span className="claude-env-badge warn">skills 未对齐</span>
                     )}
                   </div>
                   <div className="claude-env-meta">
@@ -910,6 +934,7 @@ export default function CodexEnv() {
                     )}
                   </div>
                   <div className="claude-env-meta">{mcpStatusLabel(env)}</div>
+                  <div className="claude-env-meta">skills: {env.skillCount ?? 0}个</div>
                   {(env.model || env.modelProvider || env.baseUrl) && (
                     <div className="claude-env-meta">
                       {env.model ? <>模型：<code>{env.model}</code>{" "}</> : null}
@@ -925,6 +950,17 @@ export default function CodexEnv() {
                   {env.notes ? <div className="claude-env-notes">{env.notes}</div> : null}
                 </div>
                 <div className="claude-env-actions">
+                  {!env.isDefault && (
+                    <button
+                      type="button"
+                      className="claude-env-action-btn"
+                      title="同步默认环境 skills 到此环境"
+                      onClick={() => void handleSyncSkills(env)}
+                      disabled={busy || !env.dirExists}
+                    >
+                      <IconSync />
+                    </button>
+                  )}
                   {!env.isDefault && (
                     <button
                       type="button"

@@ -118,6 +118,11 @@ export async function invokeSyncMcp(id: string): Promise<CodexEnvMcpSyncResult> 
   return invoke("sync_codex_env_mcp", { id }) as Promise<CodexEnvMcpSyncResult>;
 }
 
+export async function invokeSyncSkills(id: string): Promise<{ ok: boolean; message: string; skillCount: number }> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("sync_codex_env_skills", { id }) as Promise<{ ok: boolean; message: string; skillCount: number }>;
+}
+
 export async function invokeSyncAllMcp(): Promise<CodexEnvMcpSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("sync_all_codex_env_mcp") as Promise<CodexEnvMcpSyncResult>;

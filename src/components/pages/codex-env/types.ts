@@ -13,6 +13,8 @@ export interface CodexEnvironment {
   dirExists: boolean;
   hasConfig: boolean;
   hasSkills: boolean;
+  skillCount?: number;
+  skillsSyncStatus?: string;
   hasAuth: boolean;
   mcpSyncStatus?: string;
   mcpServerCount?: number;

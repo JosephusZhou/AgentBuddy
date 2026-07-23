@@ -278,7 +278,11 @@ pub fn merge_sniffed_servers(
 ) -> Vec<McpServerRecord> {
     let mut map: HashMap<String, McpServerRecord> = HashMap::new();
     for s in existing {
-        map.insert(s.title.to_lowercase(), s.clone());
+        // Definitions created in the app stay listed even if no agent currently has
+        // them, but disk discovery is authoritative for their applied-agent state.
+        let mut record = s.clone();
+        record.applied_agents.clear();
+        map.insert(record.title.to_lowercase(), record);
     }
     for s in sniffed {
         let key = s.title.to_lowercase();
@@ -314,8 +318,20 @@ fn agents_for_shared_root(agent: &str) -> Vec<String> {
     }
 }
 
+/// Count MCP entries in one agent's config file (0 for unknown agents or unreadable/missing files).
+pub(crate) fn count_agent_mcp_entries(agent: &str) -> usize {
+    read_agent_mcp_entries(agent).map(|v| v.len()).unwrap_or(0)
+}
+
 /// Read all MCP entries from one agent config as (title, draft).
 fn read_agent_mcp_entries(agent: &str) -> Result<Vec<(String, McpDraft)>, OpError> {
+    if matches!(
+        crate::agents::find(agent).map(|spec| spec.mcp.path),
+        Some(McpPath::ClaudeDesktopScan)
+    ) {
+        return read_claude_desktop_mcp_entries(&claude_desktop_config_paths(&home()?));
+    }
+
     let target = resolve_target(agent)?;
     if !target.path.exists() {
         return Ok(vec![]);
@@ -328,6 +344,22 @@ fn read_agent_mcp_entries(agent: &str) -> Result<Vec<(String, McpDraft)>, OpErro
         Dialect::JsonMcp => read_json_map_entries(&target.path, "mcp", true, target.jsonc),
         Dialect::JsonGeminiMixed => read_json_map_entries(&target.path, "mcpServers", false, false),
     }
+}
+
+/// Read Claude Desktop MCP entries across all discovered configuration files.
+/// Configuration directories are ordered deterministically, so the first matching
+/// title is authoritative when the same MCP is present in multiple directories.
+fn read_claude_desktop_mcp_entries(paths: &[PathBuf]) -> Result<Vec<(String, McpDraft)>, OpError> {
+    let mut entries = Vec::new();
+    let mut seen_titles = BTreeSet::new();
+    for path in paths {
+        for (title, draft) in read_json_map_entries(path, "mcpServers", false, false)? {
+            if seen_titles.insert(title.to_lowercase()) {
+                entries.push((title, draft));
+            }
+        }
+    }
+    Ok(entries)
 }
 
 fn read_json_map_entries(
@@ -590,6 +622,7 @@ struct WriteTarget {
     agent: String,
 }
 
+#[derive(Debug)]
 struct OpError {
     path: Option<String>,
     message: String,
@@ -715,33 +748,43 @@ pub(crate) fn resolve_mcp_path(agent: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_claude_desktop_config(home: &Path) -> Result<PathBuf, OpError> {
-    let roots = claude_desktop_config_roots(home);
-    let mut primary: Option<PathBuf> = None;
-    for root in &roots {
-        let candidate = root.join("Claude").join("claude_desktop_config.json");
-        if primary.is_none() {
-            primary = Some(candidate.clone());
+    Ok(claude_desktop_config_paths(home)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| home.join("Library/Application Support/Claude/claude_desktop_config.json")))
+}
+
+/// Return every existing Claude Desktop MCP configuration in a deterministic order.
+/// The default `Claude` directory sorts before `Claude-*` siblings.
+fn claude_desktop_config_paths(home: &Path) -> Vec<PathBuf> {
+    let mut paths = BTreeSet::new();
+    for root in claude_desktop_config_roots(home) {
+        let default = root.join("Claude").join("claude_desktop_config.json");
+        if default.exists() {
+            paths.insert(default);
         }
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-        // Scan Claude-* siblings under this config root
         if let Ok(entries) = fs::read_dir(root) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name == "Claude" || name.starts_with("Claude-") {
+                if name.starts_with("Claude-") {
                     let cfg = entry.path().join("claude_desktop_config.json");
                     if cfg.exists() {
-                        return Ok(cfg);
+                        paths.insert(cfg);
                     }
                 }
             }
         }
     }
-    // Default create path: first platform root's Claude/claude_desktop_config.json
-    Ok(primary.unwrap_or_else(|| {
-        home.join("Library/Application Support/Claude/claude_desktop_config.json")
-    }))
+
+    let mut paths: Vec<_> = paths.into_iter().collect();
+    paths.sort_by_key(|path| {
+        let is_default = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .is_some_and(|name| name == "Claude");
+        (!is_default, path.clone())
+    });
+    paths
 }
 
 fn claude_desktop_config_roots(home: &Path) -> Vec<PathBuf> {
@@ -775,6 +818,22 @@ fn claude_desktop_config_roots(home: &Path) -> Vec<PathBuf> {
 }
 
 fn apply_one(agent: &str, title: &str, draft: &McpDraft) -> Result<PathBuf, OpError> {
+    if matches!(
+        crate::agents::find(agent).map(|spec| spec.mcp.path),
+        Some(McpPath::ClaudeDesktopScan)
+    ) {
+        let h = home()?;
+        let paths = claude_desktop_config_paths(&h);
+        let paths = if paths.is_empty() {
+            vec![resolve_claude_desktop_config(&h)?]
+        } else {
+            paths
+        };
+        return apply_to_paths(&paths, |path| {
+            apply_json_object_key(path, "mcpServers", title, draft, false, false)
+        });
+    }
+
     let target = resolve_target(agent)?;
     match target.dialect {
         Dialect::TomlMcpServers => apply_toml_mcp_servers(&target.path, title, draft),
@@ -790,6 +849,22 @@ fn apply_one(agent: &str, title: &str, draft: &McpDraft) -> Result<PathBuf, OpEr
 }
 
 fn remove_one(agent: &str, title: &str) -> Result<PathBuf, OpError> {
+    if matches!(
+        crate::agents::find(agent).map(|spec| spec.mcp.path),
+        Some(McpPath::ClaudeDesktopScan)
+    ) {
+        let h = home()?;
+        let paths = claude_desktop_config_paths(&h);
+        let paths = if paths.is_empty() {
+            vec![resolve_claude_desktop_config(&h)?]
+        } else {
+            paths
+        };
+        return apply_to_paths(&paths, |path| {
+            remove_json_object_key(path, "mcpServers", title, false)
+        });
+    }
+
     let target = resolve_target(agent)?;
     match target.dialect {
         Dialect::TomlMcpServers => remove_toml_mcp_servers(&target.path, title),
@@ -800,6 +875,40 @@ fn remove_one(agent: &str, title: &str) -> Result<PathBuf, OpError> {
         Dialect::JsonGeminiMixed => remove_json_object_key(&target.path, "mcpServers", title, false),
         Dialect::ClaudeJsonUser => remove_claude_json(&target.path, title),
     }
+}
+
+fn apply_to_paths<F>(paths: &[PathBuf], operation: F) -> Result<PathBuf, OpError>
+where
+    F: Fn(&Path) -> Result<PathBuf, OpError>,
+{
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+    for path in paths {
+        match operation(path) {
+            Ok(path) => succeeded.push(path),
+            Err(error) => failed.push(error),
+        }
+    }
+
+    let succeeded = succeeded
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    if failed.is_empty() {
+        return Ok(PathBuf::from(succeeded.join("; ")));
+    }
+
+    let details = failed
+        .iter()
+        .map(|error| {
+            let path = error.path.as_deref().unwrap_or("未知路径");
+            format!("{path}: {}", error.message)
+        })
+        .collect::<Vec<_>>();
+    Err(err(
+        Some(PathBuf::from(succeeded.join("; "))),
+        format!("{} 个配置写入失败：{}", failed.len(), details.join("；")),
+    ))
 }
 
 /* ===== JSON helpers ===== */
@@ -1540,6 +1649,17 @@ fn test_http(draft: &McpDraft) -> McpTestResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("agent-buddy-{name}-{nonce}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     fn draft_stdio(title: &str) -> McpDraft {
         McpDraft {
@@ -1563,6 +1683,117 @@ mod tests {
             url: "https://example.com/mcp".into(),
             headers: Default::default(),
         }
+    }
+
+    #[test]
+    fn merge_sniffed_servers_reconciles_applied_agents() {
+        let record = |title: &str, agents: &[&str]| McpServerRecord {
+            id: format!("id-{title}"),
+            title: title.into(),
+            transport: "stdio".into(),
+            command: "echo".into(),
+            args: vec!["old".into()],
+            env: HashMap::new(),
+            url: String::new(),
+            headers: HashMap::new(),
+            applied_agents: agents.iter().map(|agent| (*agent).into()).collect(),
+            created_at: 1,
+        };
+
+        let existing = vec![
+            record("Still-present", &["codex", "claude-code"]),
+            record("Removed-from-disk", &["codex"]),
+        ];
+        let mut still_present = record("still-PRESENT", &["claude-code"]);
+        still_present.command = "updated".into();
+        let new_on_disk = record("New-on-disk", &["codex"]);
+
+        let merged = merge_sniffed_servers(&existing, &[still_present, new_on_disk]);
+        let by_title = merged
+            .iter()
+            .map(|record| (record.title.to_lowercase(), record))
+            .collect::<HashMap<_, _>>();
+
+        let still_present = by_title["still-present"];
+        assert_eq!(still_present.applied_agents, vec!["claude-code"]);
+        assert_eq!(still_present.command, "updated");
+        assert_eq!(still_present.id, "id-Still-present");
+
+        assert!(by_title["removed-from-disk"].applied_agents.is_empty());
+        assert_eq!(by_title["new-on-disk"].applied_agents, vec!["codex"]);
+    }
+
+    #[test]
+    fn claude_desktop_configs_apply_remove_and_read_all_paths() {
+        let home = temp_dir("claude-desktop-configs");
+        let root = home.join("Library/Application Support");
+        let configs = [
+            root.join("Claude/claude_desktop_config.json"),
+            root.join("Claude-personal/claude_desktop_config.json"),
+            root.join("Claude-work/claude_desktop_config.json"),
+        ];
+        for path in &configs {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "{\n  \"mcpServers\": {}\n}\n").unwrap();
+        }
+
+        let paths = claude_desktop_config_paths(&home);
+        assert_eq!(paths, configs);
+
+        let empty_home = temp_dir("claude-desktop-empty");
+        assert_eq!(
+            resolve_claude_desktop_config(&empty_home).unwrap(),
+            empty_home.join("Library/Application Support/Claude/claude_desktop_config.json")
+        );
+        fs::remove_dir_all(empty_home).unwrap();
+
+        let title = "all-configs";
+        apply_to_paths(&paths, |path| {
+            apply_json_object_key(path, "mcpServers", title, &draft_stdio(title), false, false)
+        })
+        .unwrap();
+        for path in &configs {
+            let doc: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            assert!(doc["mcpServers"][title].is_object(), "{}", path.display());
+        }
+
+        let entries = read_claude_desktop_mcp_entries(&paths).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, title);
+
+        apply_json_object_key(
+            &configs[1],
+            "mcpServers",
+            "Personal-only",
+            &draft_stdio("Personal-only"),
+            false,
+            false,
+        )
+        .unwrap();
+        apply_json_object_key(
+            &configs[2],
+            "mcpServers",
+            "ALL-CONFIGS",
+            &draft_http("ALL-CONFIGS"),
+            false,
+            false,
+        )
+        .unwrap();
+
+        let entries = read_claude_desktop_mcp_entries(&paths).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, title);
+        assert_eq!(entries[1].0, "Personal-only");
+
+        apply_to_paths(&paths, |path| {
+            remove_json_object_key(path, "mcpServers", title, false)
+        })
+        .unwrap();
+        for path in &configs {
+            let doc: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            assert!(doc["mcpServers"].get(title).is_none(), "{}", path.display());
+        }
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

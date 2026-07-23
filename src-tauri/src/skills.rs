@@ -327,8 +327,11 @@ fn parse_skill_md(content: &str) -> SkillDoc {
                     let key = k.trim().to_ascii_lowercase();
                     let val_raw = v.trim();
                     // YAML block scalars: `description: |` / `>` collect the indented body.
-                    if val_raw == "|" || val_raw == ">" || val_raw.starts_with("|-")
-                        || val_raw.starts_with(">-") || val_raw.starts_with("|+")
+                    if val_raw == "|"
+                        || val_raw == ">"
+                        || val_raw.starts_with("|-")
+                        || val_raw.starts_with(">-")
+                        || val_raw.starts_with("|+")
                         || val_raw.starts_with(">+")
                     {
                         let folded = val_raw.starts_with('>');
@@ -463,6 +466,25 @@ fn is_skill_dir(path: &Path) -> bool {
     path.is_dir() && (path.join("SKILL.md").exists() || path.join("skill.md").exists())
 }
 
+/// Returns true when an entry is a visible skill directory (including a directory symlink).
+pub(crate) fn is_visible_skill_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    !name.starts_with('.') && !name.starts_with("__agentbuddy") && is_skill_dir(path)
+}
+
+/// Count installed skills in a concrete skills root using the same rules as skills management.
+pub(crate) fn count_skills_in_root(root: &Path) -> usize {
+    fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| is_visible_skill_dir(&entry.path()))
+        .count()
+}
+
 /* ===== Agent skills roots ===== */
 
 struct AgentSkillsTarget {
@@ -514,6 +536,39 @@ fn scan_applied_agents() -> HashMap<String, BTreeSet<String>> {
         }
     }
     map
+}
+
+/// Count skills installed in one agent's skills roots (unique dir names across all roots;
+/// 0 for unknown/unsupported agents). Mirrors `scan_applied_agents`'s entry filtering.
+pub(crate) fn count_agent_skills(agent: &str) -> usize {
+    let Some(spec) = crate::agents::find(agent) else {
+        return 0;
+    };
+    if !spec.skills_supported {
+        return 0;
+    }
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for root in spec.skills_roots.iter().map(|&r| expand_tilde(r)) {
+        if !root.is_dir() {
+            continue;
+        }
+        let entries = match fs::read_dir(&root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !is_skill_dir(&path) {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if id.starts_with('.') || id.starts_with("__agentbuddy") {
+                continue;
+            }
+            names.insert(id);
+        }
+    }
+    names.len()
 }
 
 /* ===== List library ===== */
@@ -715,10 +770,7 @@ fn import_skill_dir(
     tag: &str,
 ) -> Result<SkillRecord, String> {
     if !is_skill_dir(src) {
-        return Err(format!(
-            "目录缺少 SKILL.md: {}",
-            src.display()
-        ));
+        return Err(format!("目录缺少 SKILL.md: {}", src.display()));
     }
     let lib = skills_library_dir()?;
     let doc = read_skill_doc(src);
@@ -937,7 +989,10 @@ fn delete_skill_core(
 
 /// 删除技能（可选一并清理各 Agent 副本）。副本清理为尽力而为：
 /// 库目录删除成功即视为 ok，副本清理失败仅并入消息提示。
-pub fn delete_skill(skill_id: String, delete_agent_copies: bool) -> Result<SkillActionResult, String> {
+pub fn delete_skill(
+    skill_id: String,
+    delete_agent_copies: bool,
+) -> Result<SkillActionResult, String> {
     let id = skill_id.trim().to_string();
     if id.is_empty() {
         return Ok(SkillActionResult {
@@ -999,11 +1054,7 @@ impl SkillInstallMode {
 /// A directory-entry name must be a single, plain path component — never a
 /// traversal token — before we join it onto an agent's skills root.
 fn is_plain_entry_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains('/')
-        && !name.contains('\\')
-        && name != "."
-        && name != ".."
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && name != "." && name != ".."
 }
 
 /// Remove a filesystem entry without following a symlink.
@@ -1065,7 +1116,10 @@ fn ensure_skill_install(
         let _ = remove_path_entry(&staging);
         if had_destination {
             if let Err(restore_err) = fs::rename(&backup, &destination) {
-                return Err(format!("安装失败: {}；恢复原技能项失败: {}", e, restore_err));
+                return Err(format!(
+                    "安装失败: {}；恢复原技能项失败: {}",
+                    e, restore_err
+                ));
             }
         }
         return Err(format!("安装{}失败: {}", mode.label(), e));
@@ -1311,13 +1365,7 @@ pub fn apply_skill_to_agents(
         .map(|a| a.trim().to_string())
         .filter(|a| !a.is_empty())
         .collect();
-    let outcome = sync_skill_installations(
-        &id,
-        &lib_skill_dir,
-        &desired,
-        &desired,
-        install_mode,
-    );
+    let outcome = sync_skill_installations(&id, &lib_skill_dir, &desired, &desired, install_mode);
 
     // 3) Rebuild the record with a fresh applied scan.
     let applied = applied_after_for(&id, &lib_skill_dir);
@@ -1427,9 +1475,12 @@ pub fn batch_delete_skills(
     })
 }
 
-/// 批量软链接技能到用户选定的单个目录：只弹一次文件夹选择器。
+/// 批量应用技能到用户选定的单个目录：只弹一次文件夹选择器。
 /// 目标已存在同名条目的项计入 `skipped`（非致命）。
-pub fn batch_export_skills_to_dir(skill_ids: Vec<String>) -> Result<BatchSkillResult, String> {
+pub fn batch_export_skills_to_dir(
+    skill_ids: Vec<String>,
+    install_mode: SkillInstallMode,
+) -> Result<BatchSkillResult, String> {
     let ids = sanitize_id_batch(&skill_ids);
     if ids.is_empty() {
         let list = list_skills()?;
@@ -1444,7 +1495,7 @@ pub fn batch_export_skills_to_dir(skill_ids: Vec<String>) -> Result<BatchSkillRe
         });
     }
 
-    let target_root = match pick_target_folder("选择软链接目标目录（批量）") {
+    let target_root = match pick_target_folder("选择应用目标目录（批量）") {
         Ok(Some(root)) => root,
         Ok(None) => {
             let list = list_skills()?;
@@ -1466,7 +1517,7 @@ pub fn batch_export_skills_to_dir(skill_ids: Vec<String>) -> Result<BatchSkillRe
     let mut failed = 0usize;
     let mut errors: Vec<String> = Vec::new();
     for id in &ids {
-        match symlink_skill_into_dir(id, &target_root) {
+        match install_skill_into_dir(id, &target_root, install_mode) {
             Ok(_) => succeeded += 1,
             Err(msg) => {
                 // 目标已存在视为跳过而非失败，避免用户误以为出错。
@@ -1480,9 +1531,9 @@ pub fn batch_export_skills_to_dir(skill_ids: Vec<String>) -> Result<BatchSkillRe
         }
     }
 
-    // 复制不改动技能库，但为保持返回结构一致仍带上整表。
+    // 应用到目录不改动技能库，但为保持返回结构一致仍带上整表。
     let list = list_skills()?;
-    let mut parts: Vec<String> = vec![format!("已软链接 {} 个", succeeded)];
+    let mut parts: Vec<String> = vec![format!("已{} {} 个", install_mode.label(), succeeded)];
     if skipped > 0 {
         parts.push(format!("跳过 {} 个（同名已存在）", skipped));
     }
@@ -1586,13 +1637,8 @@ pub fn batch_apply_skills_to_agents(
         } else {
             &selected_agents
         };
-        let outcome = sync_skill_installations(
-            id,
-            &lib_skill_dir,
-            &desired,
-            install_targets,
-            install_mode,
-        );
+        let outcome =
+            sync_skill_installations(id, &lib_skill_dir, &desired, install_targets, install_mode);
         if outcome.errors.is_empty() {
             succeeded += 1;
         } else {
@@ -1612,7 +1658,13 @@ pub fn batch_apply_skills_to_agents(
     let message = if failed == 0 {
         format!("已以{}{} {} 个技能", install_mode.label(), verb, succeeded)
     } else {
-        format!("以{}{} {} 个成功，{} 个失败", install_mode.label(), verb, succeeded, failed)
+        format!(
+            "以{}{} {} 个成功，{} 个失败",
+            install_mode.label(),
+            verb,
+            succeeded,
+            failed
+        )
     };
     Ok(BatchSkillResult {
         ok: failed == 0,
@@ -1698,7 +1750,7 @@ pub fn batch_set_skill_tag(
     })
 }
 
-/* ===== Export: symlink an existing library skill into a chosen directory ===== */
+/* ===== Apply an existing library skill into a chosen directory ===== */
 
 /// 弹出系统文件夹选择器，返回用户选定并校验通过的目标根目录。
 /// - `Ok(Some(root))`：选定的有效目录；
@@ -1717,9 +1769,13 @@ fn pick_target_folder(prompt: &str) -> Result<Option<PathBuf>, String> {
     }
 }
 
-/// 在 `target_root` 下把库技能 `id` 安装为 `<target_root>/<id>`，优先软链接，
-/// Windows 无权限时复制降级。目标已存在同名条目一律不覆盖（避免误伤用户数据）。
-fn symlink_skill_into_dir(id: &str, target_root: &Path) -> Result<String, String> {
+/// 在 `target_root` 下把库技能 `id` 安装为 `<target_root>/<id>`。
+/// 目标已存在同名条目一律不覆盖（避免误伤用户数据）。
+fn install_skill_into_dir(
+    id: &str,
+    target_root: &Path,
+    install_mode: SkillInstallMode,
+) -> Result<String, String> {
     let lib = skills_library_dir()?;
     let src = lib.join(id);
     if !src.starts_with(&lib) || !is_skill_dir(&src) {
@@ -1730,29 +1786,33 @@ fn symlink_skill_into_dir(id: &str, target_root: &Path) -> Result<String, String
     if dest.parent() != Some(target_root) {
         return Err("非法的技能路径".into());
     }
-    // 已存在同名条目一律不覆盖：软链接会误伤用户数据，交由用户先行清理。
+    // 已存在同名条目一律不覆盖，交由用户先行清理。
     if fs::symlink_metadata(&dest).is_ok() {
         return Err(format!("目标已存在同名条目：{}", dest.display()));
     }
-    // 指向技能库中的真实目录，随库更新而更新；使用绝对路径避免相对定位歧义。
-    let link_target = fs::canonicalize(&src).unwrap_or(src);
-    match crate::platform::install_dir_link_or_copy(&link_target, &dest)? {
-        crate::platform::InstallKind::Link => Ok(format!(
-            "已创建软链接 {} → {}",
-            dest.display(),
-            link_target.display()
-        )),
-        crate::platform::InstallKind::Copy => Ok(format!(
-            "已复制到 {}（当前环境不支持软链接，已降级为目录复制）",
-            dest.display()
-        )),
+    let source = fs::canonicalize(&src).unwrap_or(src);
+    match install_mode {
+        SkillInstallMode::Link => {
+            crate::platform::symlink_any(&source, &dest)?;
+            Ok(format!(
+                "已创建软链接 {} → {}",
+                dest.display(),
+                source.display()
+            ))
+        }
+        SkillInstallMode::Copy => {
+            crate::platform::copy_dir_recursive(&source, &dest)?;
+            Ok(format!("已完整复制到 {}", dest.display()))
+        }
     }
 }
 
-/// “软链接到目录”：在用户选定目录下生成 `<target>/<id>` 指向技能库中的
-/// 真实目录 `~/.agentbuddy/skills/<id>`，从而与技能库保持同源、随库更新而更新。
+/// “应用到目录”：在用户选定目录下生成 `<target>/<id>`，可选择软链接或完整复制。
 /// 目标若已存在同名条目（软链接 / 文件 / 目录）一律不覆盖，避免破坏用户数据。
-pub fn export_skill_to_dir(skill_id: String) -> Result<SkillActionResult, String> {
+pub fn export_skill_to_dir(
+    skill_id: String,
+    install_mode: SkillInstallMode,
+) -> Result<SkillActionResult, String> {
     let id = skill_id.trim().to_string();
     if id.is_empty() {
         return Ok(SkillActionResult {
@@ -1780,7 +1840,7 @@ pub fn export_skill_to_dir(skill_id: String) -> Result<SkillActionResult, String
         });
     }
 
-    let target_root = match pick_target_folder("选择软链接目标目录") {
+    let target_root = match pick_target_folder("选择应用目标目录") {
         Ok(Some(root)) => root,
         Ok(None) => {
             return Ok(SkillActionResult {
@@ -1798,7 +1858,7 @@ pub fn export_skill_to_dir(skill_id: String) -> Result<SkillActionResult, String
         }
     };
 
-    match symlink_skill_into_dir(&id, &target_root) {
+    match install_skill_into_dir(&id, &target_root, install_mode) {
         Ok(message) => Ok(SkillActionResult {
             ok: true,
             skill: None,
@@ -1980,11 +2040,7 @@ fn git_clone(url: &str, branch: &str, dest: &Path) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("创建临时目录失败: {}", e))?;
     }
 
-    let mut args = vec![
-        "clone".to_string(),
-        "--depth".into(),
-        "1".into(),
-    ];
+    let mut args = vec!["clone".to_string(), "--depth".into(), "1".into()];
     if !branch.is_empty() {
         args.push("--branch".into());
         args.push(branch.to_string());
@@ -2093,12 +2149,7 @@ fn add_skill_from_git(gh: GitRepoRef, tag: &str) -> Result<SkillActionResult, St
             Ok(rec) => {
                 // capture local git HEAD for update checks
                 if let Ok(head) = git_rev_parse(dir.parent().unwrap_or(dir)) {
-                    let _ = db::update_skill_refs(
-                        &rec.id,
-                        Some(&head),
-                        Some(&head),
-                        now_secs(),
-                    );
+                    let _ = db::update_skill_refs(&rec.id, Some(&head), Some(&head), now_secs());
                 }
                 count += 1;
                 last = Some(rec);
@@ -2245,18 +2296,20 @@ fn collect_sniff_scan() -> (usize, Vec<SniffScanEntry>) {
                 }
                 let doc = read_skill_doc(&path);
                 let identity = skill_identity(&dir_name, &doc);
-                let slot = map.entry(identity.clone()).or_insert_with(|| SniffScanEntry {
-                    identity,
-                    directory: dir_name.clone(),
-                    source_path: path.clone(),
-                    title: if !doc.name.trim().is_empty() {
-                        doc.name.trim().to_string()
-                    } else {
-                        dir_name.clone()
-                    },
-                    description: doc.description.clone(),
-                    found_agents: BTreeSet::new(),
-                });
+                let slot = map
+                    .entry(identity.clone())
+                    .or_insert_with(|| SniffScanEntry {
+                        identity,
+                        directory: dir_name.clone(),
+                        source_path: path.clone(),
+                        title: if !doc.name.trim().is_empty() {
+                            doc.name.trim().to_string()
+                        } else {
+                            dir_name.clone()
+                        },
+                        description: doc.description.clone(),
+                        found_agents: BTreeSet::new(),
+                    });
                 slot.found_agents.insert(target.agent.to_string());
             }
         }
@@ -2469,13 +2522,11 @@ pub fn sniff_skills() -> Result<SkillSniffResult, String> {
                 // match by frontmatter name against existing library
                 let doc = read_skill_doc(&path);
                 let already = meta_map.keys().any(|k| {
-                    k == &id_hint
-                        || (!doc.name.is_empty() && k == &doc.name)
-                        || {
-                            let p = lib.join(k);
-                            let d = read_skill_doc(&p);
-                            !doc.name.is_empty() && d.name == doc.name
-                        }
+                    k == &id_hint || (!doc.name.is_empty() && k == &doc.name) || {
+                        let p = lib.join(k);
+                        let d = read_skill_doc(&p);
+                        !doc.name.is_empty() && d.name == doc.name
+                    }
                 });
                 if already {
                     continue;
@@ -2786,7 +2837,10 @@ fn github_path_from_readme_url(readme_url: &str, owner: &str, repo: &str) -> Str
     if path.ends_with("/SKILL.md") {
         path = path.trim_end_matches("/SKILL.md").to_string();
     } else if path.ends_with("SKILL.md") {
-        path = path.trim_end_matches("SKILL.md").trim_end_matches('/').to_string();
+        path = path
+            .trim_end_matches("SKILL.md")
+            .trim_end_matches('/')
+            .to_string();
     }
     path
 }
@@ -2811,14 +2865,11 @@ struct CcDbRow {
 fn read_cc_switch_skill_rows() -> Result<Vec<CcDbRow>, String> {
     let db_path = cc_switch_db_path();
     if !db_path.exists() {
-        return Err(format!(
-            "未找到 CC Switch 数据库: {}",
-            db_path.display()
-        ));
+        return Err(format!("未找到 CC Switch 数据库: {}", db_path.display()));
     }
 
-    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = rusqlite::Connection::open_with_flags(&db_path, flags)
         .map_err(|e| format!("打开 cc-switch.db 失败: {}", e))?;
 
@@ -2925,10 +2976,7 @@ fn build_cc_preview_item(row: &CcDbRow, lib: &Path) -> CcSwitchPreviewItem {
     );
 
     let (status, status_label) = if !source_path.exists() || !is_skill_dir(&source_path) {
-        (
-            "missing".to_string(),
-            "源目录缺失或无 SKILL.md".to_string(),
-        )
+        ("missing".to_string(), "源目录缺失或无 SKILL.md".to_string())
     } else if lib.join(&dir_name).exists() && is_skill_dir(&lib.join(&dir_name)) {
         (
             "skip_exists".to_string(),
@@ -2985,7 +3033,10 @@ pub fn preview_cc_switch_skills() -> Result<CcSwitchPreviewResult, String> {
             }
         }
         Err(e) => {
-            eprintln!("[skills] cc-switch.db read failed, disk-only fallback: {}", e);
+            eprintln!(
+                "[skills] cc-switch.db read failed, disk-only fallback: {}",
+                e
+            );
         }
     }
 
@@ -3008,8 +3059,7 @@ pub fn preview_cc_switch_skills() -> Result<CcSwitchPreviewResult, String> {
                 } else {
                     dir_name.clone()
                 };
-                let status = if lib.join(&dir_name).exists() && is_skill_dir(&lib.join(&dir_name))
-                {
+                let status = if lib.join(&dir_name).exists() && is_skill_dir(&lib.join(&dir_name)) {
                     ("skip_exists", "技能库已存在，将跳过")
                 } else {
                     ("import", "将导入")
@@ -3137,10 +3187,7 @@ pub fn migrate_cc_switch_skills(cc_ids: Vec<String>) -> Result<CcSwitchMigrateRe
 
     let listed = list_skills()?;
     let message = if failed == 0 {
-        format!(
-            "迁移完成：成功导入 {} 个，跳过 {} 个",
-            imported, skipped
-        )
+        format!("迁移完成：成功导入 {} 个，跳过 {} 个", imported, skipped)
     } else {
         format!(
             "迁移结束：成功 {}，跳过 {}，失败 {}",
@@ -3192,8 +3239,7 @@ pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
             message: "技能不存在或缺少 SKILL.md".into(),
         });
     }
-    let meta = db::get_skill_meta(&id)?
-        .ok_or_else(|| format!("技能元数据缺失: {}", id))?;
+    let meta = db::get_skill_meta(&id)?.ok_or_else(|| format!("技能元数据缺失: {}", id))?;
     if !meta.source.is_remote() {
         return Ok(SkillActionResult {
             ok: false,
@@ -3363,7 +3409,10 @@ body
         assert_eq!(g.host, GitHost::Gitcode);
         assert_eq!(g.owner, "HarmonyOS_Skills");
         assert_eq!(g.repo, "harmonyos-agent-skills");
-        assert_eq!(g.repo_url, "https://gitcode.com/HarmonyOS_Skills/harmonyos-agent-skills");
+        assert_eq!(
+            g.repo_url,
+            "https://gitcode.com/HarmonyOS_Skills/harmonyos-agent-skills"
+        );
         assert_eq!(g.host.source(), SkillSource::Gitcode);
     }
 
@@ -3442,11 +3491,7 @@ body
             return;
         }
         let preview = preview_cc_switch_skills().expect("preview");
-        let candidate = preview
-            .items
-            .iter()
-            .find(|i| i.status == "import")
-            .cloned();
+        let candidate = preview.items.iter().find(|i| i.status == "import").cloned();
         let Some(item) = candidate else {
             eprintln!("no importable cc-switch skill; skip migrate smoke");
             return;
@@ -3510,16 +3555,15 @@ body
         // Sub-skills under a parent skill's references/ must NOT be surfaced
         // as separate top-level skills.
         assert!(
-            !found
-                .iter()
-                .any(|p| p.to_string_lossy().contains("deveco-native-flow/references")),
+            !found.iter().any(|p| p
+                .to_string_lossy()
+                .contains("deveco-native-flow/references")),
             "references/* sub-skills should stay bundled in parent skill"
         );
 
         // Block-scalar `description: |` must summarize to its first paragraph.
-        let arkui = root.join(
-            "04-development/01-application-framework/ArkUI/hmos-arkui-develop-skill",
-        );
+        let arkui =
+            root.join("04-development/01-application-framework/ArkUI/hmos-arkui-develop-skill");
         let doc = read_skill_doc(&arkui);
         assert_eq!(doc.name, "hmos-arkui-develop-skill");
         assert!(
@@ -3578,10 +3622,29 @@ body
 
     /// A unique scratch dir under the system temp dir for symlink tests.
     fn scratch_dir(tag: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("agentbuddy-symlink-test-{}-{}", tag, now_secs()));
+        let base =
+            std::env::temp_dir().join(format!("agentbuddy-symlink-test-{}-{}", tag, now_secs()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).expect("mk scratch");
         base
+    }
+
+    #[test]
+    fn count_skills_in_root_includes_directory_symlinks() {
+        let base = scratch_dir("count-links");
+        let library_skill = base.join("library-skill");
+        fs::create_dir_all(&library_skill).unwrap();
+        fs::write(library_skill.join("SKILL.md"), "name: linked").unwrap();
+        let root = base.join("agent-root");
+        fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&library_skill, root.join("linked")).unwrap();
+        fs::create_dir_all(root.join("plain")).unwrap();
+        fs::write(root.join("plain/SKILL.md"), "name: plain").unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/SKILL.md"), "name: hidden").unwrap();
+
+        assert_eq!(count_skills_in_root(&root), 2);
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -3595,13 +3658,19 @@ body
         ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
             .expect("first link");
         let link = root.join("lib-skill");
-        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), target);
 
         // Idempotent: correct link stays a link, no error.
         ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
             .expect("second link");
-        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
 
         let _ = fs::remove_dir_all(&base);
     }
@@ -3619,9 +3688,11 @@ body
         fs::create_dir_all(&occupied).unwrap();
         fs::write(occupied.join("old.txt"), "old").unwrap();
 
-        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
-            .expect("replace");
-        assert!(fs::symlink_metadata(&occupied).unwrap().file_type().is_symlink());
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link).expect("replace");
+        assert!(fs::symlink_metadata(&occupied)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&occupied).unwrap(), target);
 
         let _ = fs::remove_dir_all(&base);
@@ -3639,12 +3710,24 @@ body
         ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Copy)
             .expect("copy install");
         let installed = root.join("lib-skill");
-        assert!(fs::symlink_metadata(&installed).unwrap().file_type().is_dir());
-        assert!(!fs::symlink_metadata(&installed).unwrap().file_type().is_symlink());
-        assert_eq!(fs::read_to_string(installed.join("nested/file.txt")).unwrap(), "content");
+        assert!(fs::symlink_metadata(&installed)
+            .unwrap()
+            .file_type()
+            .is_dir());
+        assert!(!fs::symlink_metadata(&installed)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_to_string(installed.join("nested/file.txt")).unwrap(),
+            "content"
+        );
 
         fs::write(target.join("nested/file.txt"), "updated").unwrap();
-        assert_eq!(fs::read_to_string(installed.join("nested/file.txt")).unwrap(), "content");
+        assert_eq!(
+            fs::read_to_string(installed.join("nested/file.txt")).unwrap(),
+            "content"
+        );
 
         let _ = fs::remove_dir_all(&base);
     }
@@ -3665,7 +3748,10 @@ body
         ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link).unwrap();
         assert!(remove_agent_skill_entry(&root, "lib-skill").unwrap());
         assert!(!root.join("lib-skill").exists());
-        assert!(target.join("SKILL.md").exists(), "real target must survive unlink");
+        assert!(
+            target.join("SKILL.md").exists(),
+            "real target must survive unlink"
+        );
 
         // Real directory → removed.
         let real = root.join("lib-skill");

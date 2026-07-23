@@ -13,6 +13,8 @@ export interface ClaudeEnvironment {
   dirExists: boolean;
   hasSettings: boolean;
   hasSkills: boolean;
+  skillCount?: number;
+  skillsSyncStatus?: string;
   hasAgents: boolean;
   mcpSyncStatus?: string;
   mcpServerCount?: number;
