@@ -5,14 +5,13 @@
 //! Shell aliases are written into a managed marker block in `~/.zshrc`.
 
 use crate::db;
+use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_ENV_ID: &str = "default";
@@ -156,8 +155,17 @@ pub struct ClaudeEnvSniffResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeEnvShellStatus {
+    /// Shell config file path (zshrc / bash_profile / fish / PowerShell profile).
     pub zshrc_path: String,
     pub zshrc_exists: bool,
+    /// Same path as `zshrc_path` — preferred field name for new clients.
+    #[serde(default)]
+    pub shell_config_path: String,
+    #[serde(default)]
+    pub shell_config_exists: bool,
+    /// Detected shell kind label: zsh / bash / fish / powershell.
+    #[serde(default)]
+    pub shell_kind: String,
     pub block_present: bool,
     pub aliases: Vec<String>,
     pub preview: String,
@@ -214,7 +222,7 @@ fn now_secs() -> i64 {
 }
 
 fn home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir().ok_or_else(|| "无法确定用户主目录".to_string())
+    platform::home_dir().map_err(|_| "无法确定用户主目录".to_string())
 }
 
 fn expand_path(input: &str) -> Result<PathBuf, String> {
@@ -222,12 +230,14 @@ fn expand_path(input: &str) -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("配置目录不能为空".into());
     }
-    let home = home_dir()?;
     if trimmed == "~" {
-        return Ok(home);
+        return home_dir();
     }
     if let Some(rest) = trimmed.strip_prefix("~/") {
-        return Ok(home.join(rest));
+        return Ok(home_dir()?.join(rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix("~\\") {
+        return Ok(home_dir()?.join(rest));
     }
     if trimmed.starts_with('~') {
         return Err("不支持 ~user 形式的路径，请使用 ~/ 或绝对路径".into());
@@ -236,7 +246,7 @@ fn expand_path(input: &str) -> Result<PathBuf, String> {
     if path.is_absolute() {
         Ok(path)
     } else {
-        Ok(home.join(path))
+        Ok(home_dir()?.join(path))
     }
 }
 
@@ -503,19 +513,9 @@ fn write_mcp_servers(path: &Path, servers: &Map<String, Value>) -> Result<(), St
     let content = format!("{}\n", pretty);
 
     // Prefer restrictive perms when creating a new secrets-bearing file.
-    let create_mode = if path.is_file() {
-        fs::metadata(path).ok().map(|m| m.permissions().mode())
-    } else {
-        None
-    };
-
+    let create_mode = platform::current_mode(path);
     atomic_write(path, &content)?;
-
-    if let Some(mode) = create_mode {
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
-    } else {
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-    }
+    platform::restore_or_private_file(path, create_mode);
     Ok(())
 }
 
@@ -878,13 +878,9 @@ fn apply_settings_env_edit(
         .map_err(|e| format!("序列化 settings.json 失败: {}", e))?;
     let content = format!("{}\n", pretty);
     // Preserve existing perms; default to 0600 for this secrets-bearing file.
-    let create_mode = fs::metadata(&path).ok().map(|m| m.permissions().mode());
+    let create_mode = platform::current_mode(&path);
     atomic_write(&path, &content)?;
-    if let Some(mode) = create_mode {
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode));
-    } else {
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    }
+    platform::restore_or_private_file(&path, create_mode);
     Ok(changed)
 }
 
@@ -987,6 +983,14 @@ fn config_dir_for_shell(config_dir: &str) -> Result<String, String> {
     let home = home_dir()?;
     let path = PathBuf::from(config_dir);
     if let Ok(rel) = path.strip_prefix(&home) {
+        // PowerShell prefers backslashes in $HOME\...; unix shells use $HOME/...
+        #[cfg(windows)]
+        {
+            if detect_shell_kind() == ShellKind::PowerShell {
+                let rel_str = rel.to_string_lossy().replace('/', "\\");
+                return Ok(format!("$HOME\\{}", rel_str));
+            }
+        }
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         return Ok(format!("$HOME/{}", rel_str));
     }
@@ -998,28 +1002,56 @@ fn config_dir_for_shell(config_dir: &str) -> Result<String, String> {
 
 /// 目标 shell 类型（决定 rc 文件与别名语法）。
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)] // PowerShell constructed only on Windows builds
 enum ShellKind {
     Zsh,
     Bash,
     Fish,
+    PowerShell,
 }
 
-/// 依据 $SHELL 猜测当前登录 shell。未知一律按 zsh 处理（macOS 默认）。
-fn detect_shell_kind() -> ShellKind {
-    let sh = std::env::var("SHELL").unwrap_or_default();
-    if sh.ends_with("/bash") || sh == "bash" {
-        ShellKind::Bash
-    } else if sh.ends_with("/fish") || sh == "fish" {
-        ShellKind::Fish
-    } else {
-        ShellKind::Zsh
+impl ShellKind {
+    fn label(self) -> &'static str {
+        match self {
+            ShellKind::Zsh => "zsh",
+            ShellKind::Bash => "bash",
+            ShellKind::Fish => "fish",
+            ShellKind::PowerShell => "powershell",
+        }
     }
 }
 
-/// 当前 shell 对应的 rc 文件路径与类型：
-/// - zsh  → ~/.zshrc
-/// - bash → ~/.bash_profile（优先已存在的，其次 ~/.bashrc）
-/// - fish → ~/.config/fish/config.fish
+/// 依据 $SHELL / OS 猜测当前登录 shell。Windows 默认 PowerShell。
+fn detect_shell_kind() -> ShellKind {
+    #[cfg(windows)]
+    {
+        // Prefer explicit SHELL if a Unix shell is installed (Git Bash / MSYS).
+        let sh = std::env::var("SHELL").unwrap_or_default().to_ascii_lowercase();
+        if sh.ends_with("bash") || sh == "bash" {
+            return ShellKind::Bash;
+        }
+        if sh.ends_with("zsh") || sh == "zsh" {
+            return ShellKind::Zsh;
+        }
+        if sh.ends_with("fish") || sh == "fish" {
+            return ShellKind::Fish;
+        }
+        return ShellKind::PowerShell;
+    }
+    #[cfg(not(windows))]
+    {
+        let sh = std::env::var("SHELL").unwrap_or_default();
+        if sh.ends_with("/bash") || sh == "bash" {
+            ShellKind::Bash
+        } else if sh.ends_with("/fish") || sh == "fish" {
+            ShellKind::Fish
+        } else {
+            ShellKind::Zsh
+        }
+    }
+}
+
+/// 当前 shell 对应的 rc / profile 路径与类型。
 fn shell_rc() -> Result<(PathBuf, ShellKind), String> {
     let home = home_dir()?;
     let kind = detect_shell_kind();
@@ -1037,15 +1069,66 @@ fn shell_rc() -> Result<(PathBuf, ShellKind), String> {
             }
         }
         ShellKind::Fish => home.join(".config/fish/config.fish"),
+        ShellKind::PowerShell => powershell_profile_path(&home),
     };
     Ok((path, kind))
 }
 
-/// 供提示消息使用的 rc 路径（~ 形式）。失败兜底 ~/.zshrc。
+fn powershell_profile_path(home: &Path) -> PathBuf {
+    // Windows PowerShell 5.1 CurrentUserCurrentHost profile path.
+    // Also works as a conventional location for pwsh when Documents\PowerShell is absent.
+    let docs = dirs::document_dir().unwrap_or_else(|| home.join("Documents"));
+    let ps7 = docs.join("PowerShell").join("Microsoft.PowerShell_profile.ps1");
+    if ps7.is_file() {
+        return ps7;
+    }
+    let win_ps = docs
+        .join("WindowsPowerShell")
+        .join("Microsoft.PowerShell_profile.ps1");
+    if win_ps.is_file() {
+        return win_ps;
+    }
+    // Default write target: Windows PowerShell 5.1 profile (most common on Win10/11).
+    win_ps
+}
+
+/// 供提示消息使用的 rc 路径（~ 形式）。
 fn rc_hint() -> String {
     match shell_rc() {
         Ok((path, _)) => display_path_for_msg(&path.to_string_lossy()),
-        Err(_) => "~/.zshrc".to_string(),
+        Err(_) => {
+            #[cfg(windows)]
+            {
+                return "$PROFILE".to_string();
+            }
+            #[cfg(not(windows))]
+            {
+                return "~/.zshrc".to_string();
+            }
+        }
+    }
+}
+
+fn shell_status(
+    zshrc: &Path,
+    shell: ShellKind,
+    zshrc_exists: bool,
+    block_present: bool,
+    aliases: Vec<String>,
+    preview: String,
+    message: String,
+) -> ClaudeEnvShellStatus {
+    let path = zshrc.to_string_lossy().to_string();
+    ClaudeEnvShellStatus {
+        zshrc_path: path.clone(),
+        zshrc_exists,
+        shell_config_path: path,
+        shell_config_exists: zshrc_exists,
+        shell_kind: shell.label().to_string(),
+        block_present,
+        aliases,
+        preview,
+        message,
     }
 }
 
@@ -1064,17 +1147,23 @@ fn build_alias_lines(
             continue;
         }
         let shell_path = config_dir_for_shell(&r.config_dir)?;
-        // fish 不支持 `VAR=val cmd` 前缀语法，用 env 包一层；zsh/bash 通用。
-        let line = if shell == ShellKind::Fish {
-            format!(
+        let line = match shell {
+            ShellKind::Fish => format!(
                 "alias {}=\"env CLAUDE_CONFIG_DIR={} claude\"",
                 r.alias_name, shell_path
-            )
-        } else {
-            format!(
+            ),
+            ShellKind::PowerShell => {
+                // Save/restore env so the function does not leak CLAUDE_CONFIG_DIR.
+                format!(
+                    "function {} {{ $prev = $env:CLAUDE_CONFIG_DIR; $env:CLAUDE_CONFIG_DIR = '{}'; try {{ claude @args }} finally {{ if ($null -eq $prev) {{ Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue }} else {{ $env:CLAUDE_CONFIG_DIR = $prev }} }} }}",
+                    r.alias_name,
+                    shell_path.replace('\'', "''")
+                )
+            }
+            ShellKind::Zsh | ShellKind::Bash => format!(
                 "alias {}=\"CLAUDE_CONFIG_DIR={} claude\"",
                 r.alias_name, shell_path
-            )
+            ),
         };
         items.push((r.alias_name.clone(), line));
     }
@@ -1166,6 +1255,13 @@ fn parse_aliases_from_block(content: &str) -> Vec<String> {
                 if !name.is_empty() {
                     aliases.push(name.to_string());
                 }
+            }
+        } else if let Some(rest) = line.strip_prefix("function ") {
+            // PowerShell: `function name { ... }`
+            let name = rest.split_whitespace().next().unwrap_or("").trim();
+            let name = name.trim_end_matches('{').trim();
+            if !name.is_empty() {
+                aliases.push(name.to_string());
             }
         }
     }
@@ -1685,44 +1781,47 @@ fn rewrite_shell_block_from_db() -> Result<ClaudeEnvShellStatus, String> {
         if current.contains(MARKER_BEGIN) {
             let (next, _) = remove_marker_block(&current);
             atomic_write(&zshrc, &next)?;
-            return Ok(ClaudeEnvShellStatus {
-                zshrc_path: zshrc.to_string_lossy().to_string(),
-                zshrc_exists: true,
-                block_present: false,
-                aliases: vec![],
-                preview: String::new(),
-                message: format!(
+            return Ok(shell_status(
+                &zshrc,
+                shell,
+                true,
+                false,
+                vec![],
+                String::new(),
+                format!(
                     "已清除 {} 中的 AgentBuddy 标记块（当前没有启用的别名）",
                     display_path_for_msg(&zshrc.to_string_lossy())
                 ),
-            });
+            ));
         }
-        return Ok(ClaudeEnvShellStatus {
-            zshrc_path: zshrc.to_string_lossy().to_string(),
+        return Ok(shell_status(
+            &zshrc,
+            shell,
             zshrc_exists,
-            block_present: false,
-            aliases: vec![],
-            preview: String::new(),
-            message: "当前没有启用的 shell 别名".into(),
-        });
+            false,
+            vec![],
+            String::new(),
+            "当前没有启用的 shell 别名".into(),
+        ));
     }
 
     let block = render_marker_block(&lines);
     let next = apply_marker_block(&current, &block);
     atomic_write(&zshrc, &next)?;
 
-    Ok(ClaudeEnvShellStatus {
-        zshrc_path: zshrc.to_string_lossy().to_string(),
-        zshrc_exists: true,
-        block_present: true,
-        aliases: aliases.clone(),
-        preview: block,
-        message: format!(
+    Ok(shell_status(
+        &zshrc,
+        shell,
+        true,
+        true,
+        aliases.clone(),
+        block,
+        format!(
             "已同步 {} 个 alias 到 {rc}。请执行 source {rc} 或新开终端后生效。",
             aliases.len(),
             rc = display_path_for_msg(&zshrc.to_string_lossy())
         ),
-    })
+    ))
 }
 
 /// Optionally install the shell alias right after a create/import.
@@ -1801,21 +1900,22 @@ pub fn remove_env_alias(id: String) -> Result<ClaudeEnvShellStatus, String> {
 
 /// Remove the whole managed block and clear all alias_installed flags.
 pub fn remove_all_aliases() -> Result<ClaudeEnvShellStatus, String> {
-    let (zshrc, _) = shell_rc()?;
+    let (zshrc, shell) = shell_rc()?;
     let zshrc_exists = zshrc.is_file();
     if !zshrc_exists {
         db::set_claude_env_alias_installed_all(false)?;
-        return Ok(ClaudeEnvShellStatus {
-            zshrc_path: zshrc.to_string_lossy().to_string(),
-            zshrc_exists: false,
-            block_present: false,
-            aliases: vec![],
-            preview: String::new(),
-            message: format!(
+        return Ok(shell_status(
+            &zshrc,
+            shell,
+            false,
+            false,
+            vec![],
+            String::new(),
+            format!(
                 "{} 不存在，无需移除",
                 display_path_for_msg(&zshrc.to_string_lossy())
             ),
-        });
+        ));
     }
     let current =
         fs::read_to_string(&zshrc).map_err(|e| format!("读取 shell 配置失败: {}", e))?;
@@ -1824,13 +1924,14 @@ pub fn remove_all_aliases() -> Result<ClaudeEnvShellStatus, String> {
         atomic_write(&zshrc, &next)?;
     }
     db::set_claude_env_alias_installed_all(false)?;
-    Ok(ClaudeEnvShellStatus {
-        zshrc_path: zshrc.to_string_lossy().to_string(),
-        zshrc_exists: true,
-        block_present: false,
-        aliases: vec![],
-        preview: String::new(),
-        message: if removed {
+    Ok(shell_status(
+        &zshrc,
+        shell,
+        true,
+        false,
+        vec![],
+        String::new(),
+        if removed {
             format!(
                 "已从 {} 移除 AgentBuddy Claude 环境标记块",
                 display_path_for_msg(&zshrc.to_string_lossy())
@@ -1841,7 +1942,7 @@ pub fn remove_all_aliases() -> Result<ClaudeEnvShellStatus, String> {
                 display_path_for_msg(&zshrc.to_string_lossy())
             )
         },
-    })
+    ))
 }
 
 pub fn get_shell_status() -> Result<ClaudeEnvShellStatus, String> {
@@ -1870,13 +1971,14 @@ pub fn get_shell_status() -> Result<ClaudeEnvShellStatus, String> {
         (false, Vec::new())
     };
 
-    Ok(ClaudeEnvShellStatus {
-        zshrc_path: zshrc.to_string_lossy().to_string(),
+    Ok(shell_status(
+        &zshrc,
+        shell,
         zshrc_exists,
         block_present,
         aliases,
         preview,
-        message: if block_present {
+        if block_present {
             format!(
                 "已在 {} 中检测到 AgentBuddy 标记块",
                 display_path_for_msg(&zshrc.to_string_lossy())
@@ -1884,7 +1986,7 @@ pub fn get_shell_status() -> Result<ClaudeEnvShellStatus, String> {
         } else {
             "尚未写入 shell 别名".to_string()
         },
-    })
+    ))
 }
 
 pub fn reveal_dir(id: String) -> Result<ClaudeEnvActionResult, String> {
@@ -1894,13 +1996,10 @@ pub fn reveal_dir(id: String) -> Result<ClaudeEnvActionResult, String> {
     if !path.exists() {
         return Err(format!("目录不存在: {}", path.display()));
     }
-    Command::new("open")
-        .arg(path.as_os_str())
-        .status()
-        .map_err(|e| format!("打开 Finder 失败: {}", e))?;
+    platform::open_path(&path).map_err(|e| format!("打开目录失败: {e}"))?;
     Ok(ClaudeEnvActionResult {
         ok: true,
-        message: format!("已在 Finder 中打开 {}", row.config_dir),
+        message: format!("已打开 {}", row.config_dir),
         environment: None,
     })
 }
@@ -1923,16 +2022,7 @@ pub fn open_settings(id: String) -> Result<ClaudeEnvActionResult, String> {
         false
     };
 
-    let status = Command::new("open")
-        .arg(settings.as_os_str())
-        .status()
-        .map_err(|e| format!("打开 settings.json 失败: {}", e))?;
-    if !status.success() {
-        return Err(format!(
-            "打开 settings.json 失败（退出码: {:?}）",
-            status.code()
-        ));
-    }
+    platform::open_path(&settings).map_err(|e| format!("打开 settings.json 失败: {e}"))?;
 
     Ok(ClaudeEnvActionResult {
         ok: true,
@@ -2173,15 +2263,7 @@ pub fn get_mcp_sync_status() -> Result<ClaudeEnvMcpStatusResult, String> {
 }
 
 fn display_path_for_msg(abs: &str) -> String {
-    if let Ok(home) = home_dir() {
-        let home_str = home.to_string_lossy();
-        if let Some(rest) = abs.strip_prefix(home_str.as_ref()) {
-            if rest.starts_with('/') {
-                return format!("~{}", rest);
-            }
-        }
-    }
-    abs.to_string()
+    platform::display_path(abs)
 }
 
 /* ===== Tests ===== */

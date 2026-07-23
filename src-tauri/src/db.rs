@@ -10,9 +10,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn get_db_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Cannot determine home directory");
-    let dir = home.join(".agentbuddy");
-    std::fs::create_dir_all(&dir).expect("Cannot create .agentbuddy directory");
+    let dir = crate::config::app_dir().expect("Cannot determine AgentBuddy data directory");
+    std::fs::create_dir_all(&dir).expect("Cannot create AgentBuddy data directory");
     dir.join("agents.db")
 }
 
@@ -878,14 +877,24 @@ pub fn set_codex_env_alias_installed_all(installed: bool) -> Result<(), String> 
     Ok(())
 }
 
-/// One-time migration from legacy `~/.agentbuddy/skills-meta.json` into SQLite.
+/// One-time migration from legacy `skills-meta.json` into SQLite.
 /// Safe to call repeatedly; no-ops when file missing or already empty.
 pub fn migrate_skills_meta_json_if_present() -> Result<(), String> {
-    let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
-    let path = home.join(".agentbuddy/skills-meta.json");
-    if !path.exists() {
-        return Ok(());
+    // Prefer current app data dir; also check legacy ~/.agentbuddy for older installs.
+    let mut candidates = Vec::new();
+    if let Ok(dir) = crate::config::app_dir() {
+        candidates.push(dir.join("skills-meta.json"));
     }
+    if let Ok(legacy) = crate::platform::legacy_app_data_dir() {
+        let p = legacy.join("skills-meta.json");
+        if !candidates.iter().any(|c| c == &p) {
+            candidates.push(p);
+        }
+    }
+    let path = match candidates.into_iter().find(|p| p.exists()) {
+        Some(p) => p,
+        None => return Ok(()),
+    };
 
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,

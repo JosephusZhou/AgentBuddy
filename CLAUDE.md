@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-**AgentBuddy** (npm/Cargo package `agent-buddy`, Rust lib `agent_buddy_lib`, Tauri productName `AgentBuddy`) is a macOS desktop app that discovers local AI coding agents and manages their shared configuration — especially MCP servers and Skills, plus backup upload to WebDAV.
+**AgentBuddy** (npm/Cargo package `agent-buddy`, Rust lib `agent_buddy_lib`, Tauri productName `AgentBuddy`) is a desktop app (macOS + Windows) that discovers local AI coding agents and manages their shared configuration — especially MCP servers and Skills, plus backup upload to WebDAV.
 
 Stack:
 
 - **Frontend**: React 18 + TypeScript + Vite 6 + Tailwind 3 (`src/`)
 - **Backend**: Tauri 2 + Rust (`src-tauri/`)
 - **Package manager**: pnpm (see `pnpm-lock.yaml` / `pnpm-workspace.yaml`)
-- **App data**: `~/.agentbuddy/` (`config.json`, SQLite `agents.db`, skills library)
+- **App data**: `~/.agentbuddy/` on macOS/Linux; Windows prefers `%LOCALAPPDATA%\AgentBuddy` while still reading legacy `~/.agentbuddy` (`config.json`, SQLite `agents.db`, skills library). Platform helpers live in `src-tauri/src/platform.rs`.
 
-Platform focus is **macOS only** for now (Windows path support intentionally deferred). UI copy is Chinese.
+Primary platforms: **macOS** and **Windows** (see `WINDOWS_ADAPTATION_PLAN.md`). UI copy is Chinese.
 
 ## Common commands
 
@@ -43,7 +43,7 @@ cd src-tauri && cargo test encrypt_decrypt
 
 There is no ESLint/Prettier script and no frontend test runner in `package.json` yet.
 
-Requirements: Node + pnpm, Rust toolchain, Tauri 2 system deps for macOS.
+Requirements: Node + pnpm, Rust toolchain, Tauri 2 system deps (macOS / Windows).
 
 ## Architecture
 
@@ -64,15 +64,16 @@ src/                     React UI
 src-tauri/src/
   main.rs                Binary entry → agent_buddy_lib::run()
   lib.rs                 Registers all #[tauri::command] handlers + setup
+  platform.rs            Cross-platform paths, open/reveal, permissions, symlink/copy, folder picker
   agents.rs              Single source of truth: AgentSpec (identity, sniff paths, MCP dialect/path, skills roots)
-  sniff.rs               Discover agents from agents::agents(); PATH shim filtering
+  sniff.rs               Discover agents from agents::agents(); PATH/PATHEXT + shim filtering
   mcp_config.rs          Read/write/sniff MCP configs via agents registry dialects
-  skills.rs              Skills library under ~/.agentbuddy/skills + sniff/GitHub/GitCode import
-  claude_env.rs          Multi Claude Code envs via CLAUDE_CONFIG_DIR + shell aliases
-  codex_env.rs           Multi Codex CLI envs via CODEX_HOME + shell aliases
+  skills.rs              Skills library under app data/skills + sniff/GitHub/GitCode import
+  claude_env.rs          Multi Claude Code envs via CLAUDE_CONFIG_DIR + shell aliases (zsh/bash/fish/PowerShell)
+  codex_env.rs           Multi Codex CLI envs via CODEX_HOME + shell aliases (zsh/bash/fish/PowerShell)
   opencode_config.rs     OpenCode ~/.config/opencode provider/model + auth.json + Models.dev
   db.rs                  SQLite persistence (agents, mcp_servers, webdav, skills, claude_environments, codex_environments)
-  config.rs              ~/.agentbuddy/config.json (theme; secretsKey private)
+  config.rs              App config.json (theme; secretsKey private)
   crypto.rs              AES-256-GCM + HKDF for secret fields
   webdav.rs              WebDAV connections + probe + MKCOL/PUT upload
   backup.rs              Backup units probe, zip/abenc pack, multi-WebDAV upload
@@ -206,7 +207,7 @@ Dev window: Overlay title bar; debug builds open DevTools in `setup`.
 
 ## Product constraints (from repo notes)
 
-- Prioritize macOS; do not expand Windows agent path discovery unless explicitly requested
+- Support macOS and Windows; keep platform branches in `platform.rs` / agent registry path layer — do not scatter `cfg!(windows)` through business logic
 - Prefer user-global config roots; do not write project-level MCP as the default “apply” target
 - Never put tokens/API keys into docs, commits, or sample configs
 - Agent identity in code and UI is the sniff `name` string (e.g. `claude-code`)

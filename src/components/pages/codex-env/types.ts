@@ -43,8 +43,15 @@ export interface CodexEnvSniffResult {
 }
 
 export interface CodexEnvShellStatus {
+  /** @deprecated 使用 shellConfigPath；兼容旧字段名 */
   zshrcPath: string;
+  /** @deprecated 使用 shellConfigExists */
   zshrcExists: boolean;
+  /** shell 配置文件路径（zshrc / bash_profile / fish / PowerShell profile） */
+  shellConfigPath?: string;
+  shellConfigExists?: boolean;
+  /** zsh / bash / fish / powershell */
+  shellKind?: string;
   blockPresent: boolean;
   aliases: string[];
   preview: string;

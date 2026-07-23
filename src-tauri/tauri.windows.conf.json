@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/tauri/schema.json",
+  "app": {
+    "windows": [
+      {
+        "title": "AgentBuddy",
+        "width": 1140,
+        "height": 770,
+        "minWidth": 880,
+        "minHeight": 550,
+        "decorations": true,
+        "titleBarStyle": "Visible",
+        "devtools": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"]
+  }
+}

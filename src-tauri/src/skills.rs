@@ -267,12 +267,8 @@ pub struct SkillMetaEntry {
 
 /* ===== Paths ===== */
 
-fn home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir().ok_or_else(|| "无法确定用户主目录".to_string())
-}
-
 fn app_dir() -> Result<PathBuf, String> {
-    Ok(home_dir()?.join(".agentbuddy"))
+    crate::config::app_dir()
 }
 
 pub fn skills_library_dir() -> Result<PathBuf, String> {
@@ -291,17 +287,7 @@ fn now_secs() -> i64 {
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    if path == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    }
-    PathBuf::from(path)
+    crate::platform::expand_home(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
 fn default_local_meta() -> SkillMetaEntry {
@@ -844,35 +830,21 @@ pub fn add_skill_local(path: String, tag: String) -> Result<SkillActionResult, S
     })
 }
 
-/// macOS folder picker via osascript. Returns POSIX path or error/cancel.
+/// Native folder picker. Returns selected path or cancel.
 pub fn pick_local_skill_folder(tag: String) -> Result<SkillActionResult, String> {
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg("try\nPOSIX path of (choose folder with prompt \"选择 Skill 目录（需包含 SKILL.md）\")\non error number -128\nreturn \"\"\nend try")
-        .output()
-        .map_err(|e| format!("无法打开文件夹选择器: {}", e))?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Ok(SkillActionResult {
-            ok: false,
-            skill: None,
-            message: if err.is_empty() {
-                "文件夹选择失败".into()
-            } else {
-                err
-            },
-        });
-    }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return Ok(SkillActionResult {
+    match crate::platform::pick_folder("选择 Skill 目录（需包含 SKILL.md）") {
+        Ok(Some(path)) => add_skill_local(path.to_string_lossy().to_string(), tag),
+        Ok(None) => Ok(SkillActionResult {
             ok: false,
             skill: None,
             message: "已取消选择".into(),
-        });
+        }),
+        Err(e) => Ok(SkillActionResult {
+            ok: false,
+            skill: None,
+            message: e,
+        }),
     }
-    add_skill_local(path, tag)
 }
 
 /* ===== Delete: remove a library skill (dir + metadata) ===== */
@@ -1010,10 +982,10 @@ fn is_plain_entry_name(name: &str) -> bool {
         && name != ".."
 }
 
-/// Ensure `<root>/<entry_name>` is a symlink pointing at `target`.
-/// If a stale symlink / real directory / file already occupies that name,
-/// it is removed first (product decision: replace with symlink). Idempotent
-/// when the correct link already exists.
+/// Ensure `<root>/<entry_name>` is a symlink (or copy fallback on Windows)
+/// pointing at `target`. If a stale symlink / real directory / file already
+/// occupies that name, it is removed first. Idempotent when the correct link
+/// already exists.
 fn ensure_symlink(root: &Path, entry_name: &str, target: &Path) -> Result<(), String> {
     if !is_plain_entry_name(entry_name) {
         return Err("非法的技能标识".into());
@@ -1038,15 +1010,17 @@ fn ensure_symlink(root: &Path, entry_name: &str, target: &Path) -> Result<(), St
             }
             fs::remove_file(&link_path).map_err(|e| format!("清理旧软链接失败: {}", e))?;
         } else if ft.is_dir() {
+            // Existing real directory may be a previous copy install of the same skill.
+            // If contents already match target via canonicalize of a nested path, still
+            // replace to keep a single managed entry.
             fs::remove_dir_all(&link_path).map_err(|e| format!("替换已有目录失败: {}", e))?;
         } else {
             fs::remove_file(&link_path).map_err(|e| format!("替换已有文件失败: {}", e))?;
         }
     }
 
-    std::os::unix::fs::symlink(target, &link_path)
-        .map_err(|e| format!("创建软链接失败: {}", e))?;
-    Ok(())
+    // Prefer symlink; on Windows without symlink privilege, fall back to copy.
+    crate::platform::install_dir_link_or_copy(target, &link_path).map(|_| ())
 }
 
 /// Remove `<root>/<entry_name>` whether it is a symlink, real dir, or file.
@@ -1645,42 +1619,25 @@ pub fn batch_set_skill_tag(
 
 /* ===== Export: symlink an existing library skill into a chosen directory ===== */
 
-/// 弹出 macOS 文件夹选择器，返回用户选定并校验通过的目标根目录。
+/// 弹出系统文件夹选择器，返回用户选定并校验通过的目标根目录。
 /// - `Ok(Some(root))`：选定的有效目录；
 /// - `Ok(None)`：用户取消（不视为错误）；
 /// - `Err(msg)`：选择器调用失败或目录无效。
 fn pick_target_folder(prompt: &str) -> Result<Option<PathBuf>, String> {
-    let script = format!(
-        "try\nPOSIX path of (choose folder with prompt \"{}\")\non error number -128\nreturn \"\"\nend try",
-        prompt
-    );
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|e| format!("无法打开文件夹选择器: {}", e))?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if err.is_empty() {
-            "文件夹选择失败".into()
-        } else {
-            err
-        });
+    match crate::platform::pick_folder(prompt)? {
+        None => Ok(None),
+        Some(path) => {
+            let target_root = expand_tilde(&path.to_string_lossy());
+            if !target_root.is_dir() {
+                return Err("目标目录无效".into());
+            }
+            Ok(Some(target_root))
+        }
     }
-    let target_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if target_dir.is_empty() {
-        return Ok(None); // 用户取消
-    }
-    let target_root = expand_tilde(&target_dir);
-    if !target_root.is_dir() {
-        return Err("目标目录无效".into());
-    }
-    Ok(Some(target_root))
 }
 
-/// 在 `target_root` 下把库技能 `id` 软链接为 `<target_root>/<id>`，指向库中真实目录。
-/// 目标已存在同名条目一律不覆盖（避免误伤用户数据）。成功返回创建的链接消息。
+/// 在 `target_root` 下把库技能 `id` 安装为 `<target_root>/<id>`，优先软链接，
+/// Windows 无权限时复制降级。目标已存在同名条目一律不覆盖（避免误伤用户数据）。
 fn symlink_skill_into_dir(id: &str, target_root: &Path) -> Result<String, String> {
     let lib = skills_library_dir()?;
     let src = lib.join(id);
@@ -1698,13 +1655,17 @@ fn symlink_skill_into_dir(id: &str, target_root: &Path) -> Result<String, String
     }
     // 指向技能库中的真实目录，随库更新而更新；使用绝对路径避免相对定位歧义。
     let link_target = fs::canonicalize(&src).unwrap_or(src);
-    std::os::unix::fs::symlink(&link_target, &dest)
-        .map_err(|e| format!("创建软链接失败: {}", e))?;
-    Ok(format!(
-        "已创建软链接 {} → {}",
-        dest.display(),
-        link_target.display()
-    ))
+    match crate::platform::install_dir_link_or_copy(&link_target, &dest)? {
+        crate::platform::InstallKind::Link => Ok(format!(
+            "已创建软链接 {} → {}",
+            dest.display(),
+            link_target.display()
+        )),
+        crate::platform::InstallKind::Copy => Ok(format!(
+            "已复制到 {}（当前环境不支持软链接，已降级为目录复制）",
+            dest.display()
+        )),
+    }
 }
 
 /// “软链接到目录”：在用户选定目录下生成 `<target>/<id>` 指向技能库中的
@@ -3117,23 +3078,10 @@ pub fn migrate_cc_switch_skills(cc_ids: Vec<String>) -> Result<CcSwitchMigrateRe
     })
 }
 
-/// Open an external URL in the system default browser (macOS `open`).
+/// Open an external URL in the system default browser.
 /// Only http/https URLs are allowed to avoid handing arbitrary schemes/args to the shell.
 pub fn open_external_url(url: String) -> Result<(), String> {
-    let trimmed = url.trim();
-    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
-        return Err(format!("不支持的链接协议: {}", trimmed));
-    }
-    // 用 `--` 终止选项解析，防止以 `-` 开头的 URL 被当作 open 的参数
-    let status = Command::new("open")
-        .arg("--")
-        .arg(trimmed)
-        .status()
-        .map_err(|e| format!("打开链接失败: {}", e))?;
-    if !status.success() {
-        return Err(format!("打开链接失败（退出码 {:?}）", status.code()));
-    }
-    Ok(())
+    crate::platform::open_url(&url)
 }
 
 /* ===== Update: pull a remote skill to the repo's latest ===== */

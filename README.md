@@ -49,19 +49,27 @@ pnpm build
 pnpm build:renderer
 ```
 
-## 下载与安装（macOS）
+## 平台说明
 
-从 [GitHub Releases](https://github.com/JosephusZhou/AgentBuddy/releases) 下载对应架构的 DMG：
+- **macOS**：完整支持，提供 DMG 发布包。
+- **Windows**：路径 / PATH / 文件管理器 / Skills 软链降级 / PowerShell 别名等已适配（见 `WINDOWS_ADAPTATION_PLAN.md`）；Release 提供 NSIS 安装包。
 
-| 芯片 | 文件名示例 |
+## 下载与安装
+
+从 [GitHub Releases](https://github.com/JosephusZhou/AgentBuddy/releases) 下载对应平台安装包：
+
+| 平台 | 文件名示例 |
 |------|------------|
-| Apple Silicon（M 系列） | `AgentBuddy_x.y.z_aarch64.dmg` |
-| Intel | `AgentBuddy_x.y.z_x86_64.dmg` |
+| macOS Apple Silicon（M 系列） | `AgentBuddy_x.y.z_aarch64.dmg` |
+| macOS Intel | `AgentBuddy_x.y.z_x86_64.dmg` |
+| Windows x64 | `AgentBuddy_x.y.z_x64-setup.exe` |
+
+### macOS
 
 1. 打开 DMG，将 **AgentBuddy** 拖入「应用程序」文件夹
 2. 从「启动台」或 `/Applications` 启动
 
-### 首次打开被拦截时
+#### 首次打开被拦截时
 
 当前发布包**未**配置 Apple Developer 签名与公证。从浏览器下载的应用会带上隔离属性（quarantine），首次打开可能提示「已损坏，无法打开」或「无法验证开发者」。
 
@@ -83,9 +91,21 @@ codesign --force --deep --sign - /Applications/AgentBuddy.app
 
 > 上述命令只作用于本机已安装的 App，不会向 Apple 注册证书；自签名是本地 ad-hoc 签名。
 
+### Windows
+
+1. 运行 `AgentBuddy_x.y.z_x64-setup.exe`，按向导完成安装
+2. 从「开始」菜单启动 **AgentBuddy**
+
+当前 Windows 安装包**未**配置代码签名。首次运行可能被 SmartScreen 拦截：选择「更多信息」→「仍要运行」即可。安装与运行需要 WebView2 Runtime（Windows 10/11 通常已预装；缺失时 NSIS 安装器会引导安装）。
+
 ### 维护者：发布新版本
 
-发布由 `vMAJOR.MINOR.PATCH` 格式的 Git tag 触发（见 `.github/workflows/release.yml`），会自动创建 GitHub Release 并上传 Intel / Apple Silicon 两个 DMG。打 tag 前请保证 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本号一致：
+发布由 `vMAJOR.MINOR.PATCH` 格式的 Git tag 触发（见 `.github/workflows/release.yml`），会自动创建 GitHub Release 并上传：
+
+- macOS：Intel + Apple Silicon 两个 DMG
+- Windows：x64 NSIS 安装包（`*-setup.exe`）
+
+打 tag 前请保证 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本号一致：
 
 ```bash
 git tag v0.1.0

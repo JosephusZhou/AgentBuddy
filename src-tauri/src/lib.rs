@@ -11,6 +11,7 @@ mod db;
 mod http_client;
 mod mcp_config;
 mod opencode_config;
+mod platform;
 mod skills;
 mod sniff;
 mod webdav;

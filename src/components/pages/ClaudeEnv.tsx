@@ -1154,7 +1154,7 @@ export default function ClaudeEnv() {
                 <CheckGlyph />
                 <span className="ui-check-label">
                   写入 shell 别名（把 <code>{cloneAlias.trim() || "claude-<slug>"}</code> 写入{" "}
-                  <code>{shell ? displayPath(shell.zshrcPath) : "shell 配置"}</code>）
+                  <code>{shell ? displayPath((shell.shellConfigPath || shell.zshrcPath)) : "shell 配置"}</code>）
                 </span>
               </label>
             </div>
@@ -1452,7 +1452,7 @@ export default function ClaudeEnv() {
             {deleteTarget?.aliasInstalled && (
               <div className="confirm-subtext">
                 该环境的 shell 别名 <code>{deleteTarget.aliasName}</code> 也将从{" "}
-                <code>~/.zshrc</code> 一并移除。
+                <code>shell 配置文件</code> 一并移除。
               </div>
             )}
             <label className="ui-check">
@@ -1499,8 +1499,8 @@ export default function ClaudeEnv() {
           </div>
           <div className="modal-body">
             <div className="claude-env-form-hint">
-              已写入 <code>{shell ? displayPath(shell.zshrcPath) : "shell 配置"}</code> 的 AgentBuddy 标记块。请在终端执行{" "}
-              <code>source {shell ? displayPath(shell.zshrcPath) : "对应 rc 文件"}</code> 或新开终端后生效。
+              已写入 <code>{shell ? displayPath((shell.shellConfigPath || shell.zshrcPath)) : "shell 配置"}</code> 的 AgentBuddy 标记块。请在终端执行{" "}
+              <code>source {shell ? displayPath((shell.shellConfigPath || shell.zshrcPath)) : "对应 rc 文件"}</code> 或新开终端后生效。
             </div>
             <pre className="claude-env-preview">{shell?.preview || "（无别名内容）"}</pre>
           </div>

@@ -1,11 +1,12 @@
-//! Open an agent's config directory / config files in Finder or the system default app.
+//! Open an agent's config directory / config files in the system file manager
+//! or default app.
 //!
 //! Commands only accept agent `name` + file kind — never an arbitrary path from the UI —
 //! so the frontend cannot coerce the shell into opening untrusted locations.
 
+use crate::platform;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// What the Agent 管理 card can open for a given agent.
 #[derive(Debug, Clone, Serialize)]
@@ -43,36 +44,15 @@ impl ConfigFileKind {
 }
 
 fn home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir().ok_or_else(|| "无法解析用户主目录".to_string())
+    platform::home_dir()
 }
 
 fn expand_tilde(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = home_dir() {
-            return home.join(rest).to_string_lossy().to_string();
-        }
-    }
-    if path == "~" {
-        if let Ok(home) = home_dir() {
-            return home.to_string_lossy().to_string();
-        }
-    }
-    path.to_string()
+    platform::expand_tilde_lossy(path)
 }
 
 fn display_path(abs: &str) -> String {
-    if let Ok(home) = home_dir() {
-        let home_s = home.to_string_lossy();
-        if let Some(rest) = abs.strip_prefix(home_s.as_ref()) {
-            if rest.is_empty() {
-                return "~".to_string();
-            }
-            if let Some(stripped) = rest.strip_prefix('/') {
-                return format!("~/{stripped}");
-            }
-        }
-    }
-    abs.to_string()
+    platform::display_path(abs)
 }
 
 fn path_key(path: &Path) -> String {
@@ -123,7 +103,7 @@ fn resolve_config_dir(name: &str) -> Option<PathBuf> {
 /// Only Claude Code today: MCP lives at `~/.claude.json`, settings at `~/.claude/settings.json`.
 fn resolve_settings_file(name: &str) -> Option<PathBuf> {
     if name == "claude-code" {
-        return home_dir().ok().map(|h| h.join(".claude/settings.json"));
+        return home_dir().ok().map(|h| h.join(".claude").join("settings.json"));
     }
     None
 }
@@ -166,19 +146,7 @@ fn open_existing_path(path: &Path, kind_label: &str) -> Result<AgentOpenResult, 
         ));
     }
 
-    // `--` stops option parsing so paths starting with `-` cannot be treated as flags.
-    let status = Command::new("open")
-        .arg("--")
-        .arg(path.as_os_str())
-        .status()
-        .map_err(|e| format!("打开{kind_label}失败: {e}"))?;
-
-    if !status.success() {
-        return Err(format!(
-            "打开{kind_label}失败（退出码: {:?}）",
-            status.code()
-        ));
-    }
+    platform::open_path(path).map_err(|e| format!("打开{kind_label}失败: {e}"))?;
 
     Ok(AgentOpenResult {
         ok: true,
@@ -242,7 +210,8 @@ mod tests {
         assert_eq!(
             targets.settings_file.as_deref(),
             Some(
-                home.join(".claude/settings.json")
+                home.join(".claude")
+                    .join("settings.json")
                     .to_string_lossy()
                     .as_ref()
             )
@@ -259,7 +228,7 @@ mod tests {
         let targets = open_targets("codex");
         assert_eq!(
             targets.mcp_file.as_deref(),
-            Some(home.join(".codex/config.toml").to_string_lossy().as_ref())
+            Some(home.join(".codex").join("config.toml").to_string_lossy().as_ref())
         );
         assert!(targets.settings_file.is_none());
         assert_eq!(

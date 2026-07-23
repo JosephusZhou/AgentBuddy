@@ -79,6 +79,92 @@ pub fn find(name: &str) -> Option<&'static AgentSpec> {
     AGENTS.iter().find(|a| a.name == name)
 }
 
+/// Windows 上额外的静态安装路径候选（从环境变量解析，不硬编码盘符）。
+/// 在 `cfg(windows)` 的 sniff 中与 `bin_paths` 合并；其它平台返回空。
+#[cfg(windows)]
+pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
+    use crate::platform::windows_env_path;
+    let mut out = Vec::new();
+    let push = |out: &mut Vec<std::path::PathBuf>, p: Option<std::path::PathBuf>| {
+        if let Some(p) = p {
+            if !out.iter().any(|x| x == &p) {
+                out.push(p);
+            }
+        }
+    };
+
+    match spec.name {
+        "codex" => {
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Codex"));
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Codex/Codex.exe"));
+            push(&mut out, windows_env_path("PROGRAMFILES", "Codex"));
+            push(&mut out, windows_env_path("PROGRAMFILES", "Codex/Codex.exe"));
+        }
+        "claude-desktop" => {
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Claude"));
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Claude/Claude.exe"));
+            push(&mut out, windows_env_path("PROGRAMFILES", "Claude"));
+            push(&mut out, windows_env_path("PROGRAMFILES", "Claude/Claude.exe"));
+        }
+        "opencode" => {
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/OpenCode"));
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/OpenCode/OpenCode.exe"),
+            );
+            push(&mut out, windows_env_path("PROGRAMFILES", "OpenCode"));
+        }
+        "kiro" => {
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Kiro"));
+            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Kiro/Kiro.exe"));
+        }
+        "antigravity" => {
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/Antigravity"),
+            );
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/Antigravity/Antigravity.exe"),
+            );
+        }
+        "codebuddy" => {
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy"),
+            );
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy/CodeBuddy.exe"),
+            );
+        }
+        "codebuddy-cn" => {
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy CN"),
+            );
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy CN/CodeBuddy.exe"),
+            );
+        }
+        "workbuddy" => {
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/WorkBuddy"),
+            );
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/WorkBuddy/WorkBuddy.exe"),
+            );
+        }
+        // CLI-only agents rely on PATH + PATHEXT; no extra App paths.
+        _ => {}
+    }
+    out
+}
+
+
 static AGENTS: &[AgentSpec] = &[
     // 1. Codex（CLI + App，共享 ~/.codex）
     AgentSpec {

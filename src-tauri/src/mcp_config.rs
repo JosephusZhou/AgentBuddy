@@ -715,25 +715,63 @@ pub(crate) fn resolve_mcp_path(agent: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_claude_desktop_config(home: &Path) -> Result<PathBuf, OpError> {
-    let app_support = home.join("Library/Application Support");
-    let primary = app_support.join("Claude/claude_desktop_config.json");
-    if primary.exists() {
-        return Ok(primary);
-    }
-    // Scan Claude-* siblings that already have the config file
-    if let Ok(entries) = fs::read_dir(&app_support) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == "Claude" || name.starts_with("Claude-") {
-                let cfg = entry.path().join("claude_desktop_config.json");
-                if cfg.exists() {
-                    return Ok(cfg);
+    let roots = claude_desktop_config_roots(home);
+    let mut primary: Option<PathBuf> = None;
+    for root in &roots {
+        let candidate = root.join("Claude").join("claude_desktop_config.json");
+        if primary.is_none() {
+            primary = Some(candidate.clone());
+        }
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        // Scan Claude-* siblings under this config root
+        if let Ok(entries) = fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == "Claude" || name.starts_with("Claude-") {
+                    let cfg = entry.path().join("claude_desktop_config.json");
+                    if cfg.exists() {
+                        return Ok(cfg);
+                    }
                 }
             }
         }
     }
-    // Default create path
-    Ok(primary)
+    // Default create path: first platform root's Claude/claude_desktop_config.json
+    Ok(primary.unwrap_or_else(|| {
+        home.join("Library/Application Support/Claude/claude_desktop_config.json")
+    }))
+}
+
+fn claude_desktop_config_roots(home: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        roots.push(home.join("Library/Application Support"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = dirs::config_dir() {
+            roots.push(appdata);
+        } else if let Ok(v) = std::env::var("APPDATA") {
+            roots.push(PathBuf::from(v));
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(cfg) = dirs::config_dir() {
+            roots.push(cfg);
+        }
+    }
+    if roots.is_empty() {
+        if let Some(cfg) = dirs::config_dir() {
+            roots.push(cfg);
+        } else {
+            roots.push(home.join("Library/Application Support"));
+        }
+    }
+    roots
 }
 
 fn apply_one(agent: &str, title: &str, draft: &McpDraft) -> Result<PathBuf, OpError> {

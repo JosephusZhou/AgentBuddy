@@ -145,8 +145,7 @@ impl Default for AppConfig {
 }
 
 pub fn app_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
-    Ok(home.join(".agentbuddy"))
+    crate::platform::app_data_dir()
 }
 
 fn config_path() -> Result<PathBuf, String> {

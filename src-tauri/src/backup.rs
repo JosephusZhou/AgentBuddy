@@ -900,7 +900,19 @@ fn is_excluded(path: &Path) -> bool {
     {
         // agents.db under app is explicit include — only exclude when path has sessions etc.
         // For agent trees we exclude sqlite; app db is added as a single file not via walk.
-        if !s.contains(".agentbuddy/agents.db") {
+        // App SQLite is added as a single explicit file, not via agent-tree walk.
+        // Match both legacy ~/.agentbuddy and platform app-data locations.
+        let is_app_db = s.contains(".agentbuddy/agents.db")
+            || s.contains(".agentbuddy\\agents.db")
+            || s.ends_with("AgentBuddy/agents.db")
+            || s.ends_with("AgentBuddy\\agents.db")
+            || path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n == "agents.db")
+                .unwrap_or(false)
+                && s.to_ascii_lowercase().contains("agentbuddy");
+        if !is_app_db {
             // walking agent dirs: exclude
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name.ends_with(".sqlite")
@@ -937,18 +949,79 @@ fn is_excluded(path: &Path) -> bool {
 
 fn path_allowed_for_custom(path: &Path) -> bool {
     let Ok(canon) = path.canonicalize() else {
-        // may not exist yet for conf path display; allow absolute common prefixes
+        // may not exist yet for conf path display; allow absolute / home-relative forms
         let s = path.to_string_lossy();
-        return s.starts_with('/') || s.starts_with('~');
+        if s.starts_with('~') {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            // Drive-letter absolute path, e.g. C:\...
+            let bytes = s.as_bytes();
+            if bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && (bytes[2] == b'\\' || bytes[2] == b'/')
+            {
+                // Still block obvious system roots even before canonicalize
+                let lower = s.to_ascii_lowercase().replace('/', "\\");
+                if lower.starts_with("c:\\windows")
+                    || lower.starts_with("c:\\program files")
+                    || lower.starts_with("c:\\programdata")
+                {
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        }
+        #[cfg(not(windows))]
+        {
+            return s.starts_with('/');
+        }
     };
     if let Some(home) = dirs::home_dir() {
         if canon.starts_with(&home) {
             return true;
         }
     }
-    let allowed_prefixes = ["/opt/", "/usr/local/", "/etc/", "/private/etc/"];
-    let s = canon.to_string_lossy();
-    allowed_prefixes.iter().any(|p| s.starts_with(p))
+    // AgentBuddy app data (may sit outside home on Windows LOCALAPPDATA)
+    if let Ok(app) = crate::config::app_dir() {
+        if canon.starts_with(&app) {
+            return true;
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Default deny system directories; allow nothing outside home/appdata unless
+        // it is clearly under the user profile via env-expanded forms already covered.
+        let s = canon.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
+        if s.starts_with("c:\\windows")
+            || s.contains("\\windows\\")
+            || s.starts_with("c:\\program files")
+            || s.starts_with("c:\\programdata")
+        {
+            return false;
+        }
+        // Allow LocalAppData / AppData trees for agent configs that live there.
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            if canon.starts_with(Path::new(&local)) {
+                return true;
+            }
+        }
+        if let Ok(roam) = std::env::var("APPDATA") {
+            if canon.starts_with(Path::new(&roam)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    #[cfg(not(windows))]
+    {
+        let allowed_prefixes = ["/opt/", "/usr/local/", "/etc/", "/private/etc/"];
+        let s = canon.to_string_lossy();
+        return allowed_prefixes.iter().any(|p| s.starts_with(p));
+    }
 }
 
 // ===== Collect + run =====

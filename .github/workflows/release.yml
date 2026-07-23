@@ -1,4 +1,4 @@
-name: Release macOS DMG
+name: Release
 
 on:
   push:
@@ -66,8 +66,8 @@ jobs:
             --title "AgentBuddy $TAG_NAME" \
             --generate-notes
 
-  build:
-    name: Build ${{ matrix.arch }} DMG
+  build-macos:
+    name: Build macOS ${{ matrix.arch }} DMG
     needs: create-release
     strategy:
       fail-fast: false
@@ -106,7 +106,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri application
-        run: pnpm exec tauri build --target "${{ matrix.target }}"
+        run: pnpm exec tauri build --target "${{ matrix.target }}" --ci
 
       - name: Rename DMG
         env:
@@ -126,3 +126,72 @@ jobs:
           VERSION: ${{ needs.create-release.outputs.version }}
           ARCH: ${{ matrix.arch }}
         run: gh release upload "$TAG_NAME" "AgentBuddy_${VERSION}_${ARCH}.dmg" --clobber
+
+  build-windows:
+    name: Build Windows NSIS
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri.windows.conf.json is auto-merged on Windows (title bar + nsis target).
+      - name: Build Tauri application (NSIS)
+        run: pnpm exec tauri build --bundles nsis --ci
+
+      - name: Rename installer
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @(
+            "src-tauri/target/release/bundle/nsis",
+            "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          )
+          $installer = $null
+          foreach ($dir in $candidates) {
+            if (Test-Path $dir) {
+              $found = Get-ChildItem -Path $dir -Filter *.exe -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+              if ($found) {
+                $installer = $found.FullName
+                break
+              }
+            }
+          }
+          if (-not $installer) {
+            throw "NSIS installer (.exe) not found under bundle/nsis"
+          }
+          $out = "AgentBuddy_${env:VERSION}_x64-setup.exe"
+          Move-Item -LiteralPath $installer -Destination $out -Force
+          Write-Host "Prepared $out"
+
+      - name: Upload NSIS installer to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        shell: pwsh
+        run: |
+          gh release upload "$env:TAG_NAME" "AgentBuddy_$($env:VERSION)_x64-setup.exe" --clobber

@@ -6,13 +6,12 @@
 //!
 //! 列表 DTO **永不**回传明文 API Key；编辑时用 `get_opencode_provider_secret` 按需拉取。
 
+use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -282,19 +281,7 @@ fn auth_path() -> Result<PathBuf, String> {
 }
 
 fn display_path(path: &Path) -> String {
-    if let Ok(home) = home_dir() {
-        let home_s = home.to_string_lossy();
-        let abs = path.to_string_lossy();
-        if let Some(rest) = abs.strip_prefix(home_s.as_ref()) {
-            if rest.is_empty() {
-                return "~".into();
-            }
-            if let Some(s) = rest.strip_prefix('/') {
-                return format!("~/{s}");
-            }
-        }
-    }
-    path.to_string_lossy().into_owned()
+    platform::display_path(&path.to_string_lossy())
 }
 
 /* ===== IO helpers ===== */
@@ -333,7 +320,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 
 fn atomic_write_secret(path: &Path, content: &str) -> Result<(), String> {
     atomic_write(path, content)?;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    platform::set_owner_only_file(path);
     Ok(())
 }
 
@@ -1297,32 +1284,23 @@ pub fn set_provider_secret(provider_id: String, api_key: String) -> Result<Openc
 pub fn reveal_config() -> Result<OpencodeActionResult, String> {
     let (path, _, _, exists) = load_or_empty_config()?;
     if !exists {
-        // Reveal parent dir if possible
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
-            let status = Command::new("open").arg(parent).status();
-            match status {
-                Ok(s) if s.success() => {
-                    return Ok(OpencodeActionResult {
-                        ok: true,
-                        message: format!("已打开目录 {}", display_path(parent)),
-                        view: None,
-                    });
-                }
-                _ => return Err("打开目录失败".into()),
-            }
+            platform::open_path(parent).map_err(|e| format!("打开目录失败: {e}"))?;
+            return Ok(OpencodeActionResult {
+                ok: true,
+                message: format!("已打开目录 {}", display_path(parent)),
+                view: None,
+            });
         }
         return Err("配置文件尚不存在".into());
     }
-    let status = Command::new("open").args(["-R", &path.to_string_lossy()]).status();
-    match status {
-        Ok(s) if s.success() => Ok(OpencodeActionResult {
-            ok: true,
-            message: format!("已在 Finder 中显示 {}", display_path(&path)),
-            view: None,
-        }),
-        Ok(_) | Err(_) => Err("打开 Finder 失败".into()),
-    }
+    platform::reveal_path(&path).map_err(|e| format!("打开文件管理器失败: {e}"))?;
+    Ok(OpencodeActionResult {
+        ok: true,
+        message: format!("已在文件管理器中显示 {}", display_path(&path)),
+        view: None,
+    })
 }
 
 /* ===== Sync provider + mcp to OpenCode forks (e.g. DevEco Code) ===== */
@@ -1965,7 +1943,7 @@ fn build_http_client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn catalog_cache_file() -> Result<PathBuf, String> {
-    Ok(home_dir()?.join(".agentbuddy/cache/models-dev.json"))
+    Ok(crate::config::app_dir()?.join("cache").join("models-dev.json"))
 }
 
 fn load_file_cache() -> Option<ModelsDevCatalog> {

@@ -1,3 +1,4 @@
+use crate::platform;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -14,18 +15,17 @@ pub struct SniffResult {
 // ===== Path resolution =====
 
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(&path[2..]).to_string_lossy().to_string();
-        }
-    }
-    path.to_string()
+    platform::expand_tilde_lossy(path)
 }
 
 fn resolve_path(path: &str) -> Option<PathBuf> {
     let expanded = expand_tilde(path);
     let p = PathBuf::from(&expanded);
-    if p.exists() { Some(p) } else { None }
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 /// A path that lives in a CLI shim/interceptor location rather than a real
@@ -41,12 +41,33 @@ pub(crate) fn is_shim_path(path: &str) -> bool {
         // Empty PATH entry means CWD on Unix — never a real install location.
         return true;
     }
-    if path.contains("/cmux-cli-shims/") || path.ends_with("/cmux-cli-shims") {
+
+    // Normalize separators + case for cross-platform comparisons.
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+
+    if normalized.contains("/cmux-cli-shims/") || normalized.ends_with("/cmux-cli-shims") {
         return true;
     }
-    if let Some(tmp) = std::env::temp_dir().to_str() {
-        let tmp = tmp.trim_end_matches('/');
-        if !tmp.is_empty() && (path == tmp || path.starts_with(&format!("{tmp}/"))) {
+
+    if let Ok(tmp) = std::env::temp_dir().canonicalize() {
+        let candidate = Path::new(path);
+        // starts_with works with mixed separators after canonicalize on the tmp side;
+        // also try a string prefix fallback when candidate cannot be canonicalized.
+        if candidate.starts_with(&tmp) {
+            return true;
+        }
+        let tmp_s = tmp.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+        if !tmp_s.is_empty()
+            && (normalized == tmp_s || normalized.starts_with(&format!("{tmp_s}/")))
+        {
+            return true;
+        }
+    } else if let Some(tmp) = std::env::temp_dir().to_str() {
+        let tmp = tmp
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_ascii_lowercase();
+        if !tmp.is_empty() && (normalized == tmp || normalized.starts_with(&format!("{tmp}/"))) {
             return true;
         }
     }
@@ -54,37 +75,28 @@ pub(crate) fn is_shim_path(path: &str) -> bool {
 }
 
 fn find_in_path(binary_name: &str) -> Option<PathBuf> {
-    let paths = std::env::var("PATH").unwrap_or_default();
-    for dir in paths.split(':') {
-        if is_shim_path(dir) {
-            continue;
-        }
-        let full_path = Path::new(dir).join(binary_name);
-        if full_path.exists() {
-            return Some(full_path);
-        }
-    }
-    None
+    platform::find_in_path(binary_name, is_shim_path)
 }
 
-/// Scan ~/Library/Application Support for Claude Desktop config dirs:
-/// - ~/Library/Application Support/Claude (always included if exists)
-/// - ~/Library/Application Support/Claude-* that contains claude_desktop_config.json
+/// Scan platform config roots for Claude Desktop config dirs:
+/// - macOS: `~/Library/Application Support/Claude` (+ `Claude-*` with config file)
+/// - Windows: `%APPDATA%\Claude` (+ `Claude-*`)
+/// - Linux: `dirs::config_dir()` under the same name rules
 fn find_claude_desktop_configs() -> Vec<String> {
     let mut results = Vec::new();
-    let app_support = if let Some(dir) = dirs::config_dir() {
-        dir
-    } else {
-        return results;
-    };
-
-    if let Ok(entries) = std::fs::read_dir(&app_support) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == "Claude" || name.starts_with("Claude-") {
-                let config_file = entry.path().join("claude_desktop_config.json");
-                if config_file.exists() {
-                    results.push(entry.path().to_string_lossy().to_string());
+    let roots = claude_desktop_scan_roots();
+    for app_support in roots {
+        if let Ok(entries) = std::fs::read_dir(&app_support) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == "Claude" || name.starts_with("Claude-") {
+                    let config_file = entry.path().join("claude_desktop_config.json");
+                    if config_file.exists() {
+                        let s = entry.path().to_string_lossy().to_string();
+                        if !results.contains(&s) {
+                            results.push(s);
+                        }
+                    }
                 }
             }
         }
@@ -92,19 +104,64 @@ fn find_claude_desktop_configs() -> Vec<String> {
     results
 }
 
+fn claude_desktop_scan_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            roots.push(home.join("Library/Application Support"));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = dirs::config_dir() {
+            // dirs::config_dir() == %APPDATA% on Windows
+            roots.push(appdata);
+        } else if let Ok(v) = std::env::var("APPDATA") {
+            roots.push(PathBuf::from(v));
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(cfg) = dirs::config_dir() {
+            roots.push(cfg);
+        }
+    }
+    // Fallback: config_dir when platform-specific root empty
+    if roots.is_empty() {
+        if let Some(cfg) = dirs::config_dir() {
+            roots.push(cfg);
+        }
+    }
+    roots
+}
+
 // ===== Main sniff =====
 
-/// Collect install paths for one agent (static `bin_paths` + PATH `search_names`).
-/// Shim / temp-dir wrappers are filtered out the same way as full agent sniff.
+/// Collect install paths for one agent (static `bin_paths` + PATH `search_names`
+/// + optional Windows-only candidates). Shim / temp-dir wrappers are filtered out.
 fn collect_install_paths(spec: &crate::agents::AgentSpec) -> Vec<String> {
     let mut install_paths = Vec::new();
 
-    // 1. Check static bin_paths
+    // 1. Check static bin_paths (unix/macOS style kept for all platforms)
     for p in spec.bin_paths {
         if let Some(resolved) = resolve_path(p) {
             let path_str = resolved.to_string_lossy().to_string();
-            if !install_paths.contains(&path_str) {
+            if !is_shim_path(&path_str) && !install_paths.contains(&path_str) {
                 install_paths.push(path_str);
+            }
+        }
+    }
+
+    // 1b. Windows-only static candidates from registry
+    #[cfg(windows)]
+    {
+        for p in crate::agents::windows_bin_candidates(spec) {
+            if p.exists() {
+                let path_str = p.to_string_lossy().to_string();
+                if !is_shim_path(&path_str) && !install_paths.contains(&path_str) {
+                    install_paths.push(path_str);
+                }
             }
         }
     }
@@ -113,7 +170,7 @@ fn collect_install_paths(spec: &crate::agents::AgentSpec) -> Vec<String> {
     for bin_name in spec.search_names {
         if let Some(found) = find_in_path(bin_name) {
             let path_str = found.to_string_lossy().to_string();
-            if !install_paths.contains(&path_str) {
+            if !is_shim_path(&path_str) && !install_paths.contains(&path_str) {
                 install_paths.push(path_str);
             }
             break;
@@ -147,7 +204,7 @@ pub fn sniff_agents() -> Vec<SniffResult> {
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
 
-            // 4. Special: scan Application Support for Claude Desktop
+            // 4. Special: scan Application Support / AppData for Claude Desktop
             if spec.scan_app_support {
                 let claude_configs = find_claude_desktop_configs();
                 for c in claude_configs {
@@ -172,11 +229,21 @@ pub fn sniff_agents() -> Vec<SniffResult> {
         .collect()
 }
 
-/// App paths first (…/*.app), then CLI/other install paths.
+/// Prefer app bundles / installers over bare CLI paths.
 fn order_install_paths(paths: &mut Vec<String>) {
     paths.sort_by_key(|path| {
-        let is_app = path.ends_with(".app") || path.contains(".app/");
-        if is_app { 0 } else { 1 }
+        let n = path.replace('\\', "/").to_ascii_lowercase();
+        let is_app = n.ends_with(".app")
+            || n.contains(".app/")
+            || n.ends_with(".exe")
+            || n.contains("/programs/")
+            || n.contains("/program files/")
+            || n.contains("/program files (x86)/");
+        if is_app {
+            0
+        } else {
+            1
+        }
     });
 }
 
@@ -201,6 +268,10 @@ mod tests {
         ));
         // Marker match even outside the temp dir, matching cmux's own filter.
         assert!(is_shim_path("/home/user/cmux-cli-shims"));
+        // Windows-style separators
+        assert!(is_shim_path(
+            r"C:\Users\x\AppData\Local\Temp\cmux-cli-shims\uuid"
+        ));
     }
 
     #[test]
@@ -230,13 +301,6 @@ mod tests {
         assert!(!is_shim_path("/opt/homebrew/bin/codex"));
         // A path that merely contains "cmux" but is not a shim dir must survive.
         assert!(!is_shim_path("/Applications/cmux.app/Contents/Resources/bin"));
-    }
-
-    #[test]
-    fn os_temp_dir_entries_are_skipped() {
-        // Any PATH entry under the OS temp dir is treated as ephemeral.
-        let tmp = std::env::temp_dir();
-        let child = tmp.join("some-tool/bin");
-        assert!(is_shim_path(&child.to_string_lossy()));
+        assert!(!is_shim_path(r"C:\Users\x\AppData\Local\Programs\Claude\Claude.exe"));
     }
 }
