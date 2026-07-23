@@ -212,6 +212,13 @@ pub struct ClaudeEnvMcpStatusResult {
     pub message: String,
 }
 
+/// Models exposed by an OpenAI-compatible endpoint configured for a Claude environment.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeEnvRemoteModelsResult {
+    pub model_ids: Vec<String>,
+}
+
 /* ===== Helpers ===== */
 
 fn now_secs() -> i64 {
@@ -2262,6 +2269,82 @@ pub fn get_mcp_sync_status() -> Result<ClaudeEnvMcpStatusResult, String> {
     })
 }
 
+fn models_endpoint_urls(base_url: &str) -> Result<Vec<String>, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("请先填写 Base URL".into());
+    }
+
+    let root = base
+        .strip_suffix("/v1/models")
+        .or_else(|| base.strip_suffix("/models"))
+        .or_else(|| base.strip_suffix("/v1"))
+        .unwrap_or(base);
+    let mut urls = Vec::new();
+    for url in [format!("{root}/v1/models"), format!("{root}/models")] {
+        if !urls.contains(&url) {
+            urls.push(url);
+        }
+    }
+    Ok(urls)
+}
+
+fn parse_remote_model_ids(value: &Value) -> Vec<String> {
+    let items = value
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array());
+    let mut ids = BTreeSet::new();
+    if let Some(items) = items {
+        for item in items {
+            if let Some(id) = item.get("id").and_then(Value::as_str) {
+                let id = id.trim();
+                if !id.is_empty() {
+                    ids.insert(id.to_string());
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+pub fn fetch_remote_models(
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<ClaudeEnvRemoteModelsResult, String> {
+    let urls = models_endpoint_urls(&base_url)?;
+    let client = crate::http_client::apply_proxy(
+        reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)),
+    )?
+    .build()
+    .map_err(|e| format!("创建请求客户端失败: {e}"))?;
+    let api_key = api_key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let mut failures = Vec::new();
+
+    for url in urls {
+        let mut request = client.get(&url);
+        if let Some(api_key) = &api_key {
+            request = request.bearer_auth(api_key).header("x-api-key", api_key);
+        }
+        match request.send() {
+            Ok(response) if response.status().is_success() => {
+                let value: Value = response
+                    .json()
+                    .map_err(|e| format!("解析模型列表响应失败: {e}"))?;
+                return Ok(ClaudeEnvRemoteModelsResult {
+                    model_ids: parse_remote_model_ids(&value),
+                });
+            }
+            Ok(response) => failures.push(format!("{url}: HTTP {}", response.status())),
+            Err(err) => failures.push(format!("{url}: {err}")),
+        }
+    }
+
+    Err(format!("拉取模型列表失败（{}）", failures.join("；")))
+}
+
 fn display_path_for_msg(abs: &str) -> String {
     platform::display_path(abs)
 }
@@ -2328,6 +2411,42 @@ mod tests {
         ]);
         let aliases = parse_aliases_from_block(&block);
         assert_eq!(aliases, vec!["claude-work", "claude-personal"]);
+    }
+
+    #[test]
+    fn models_endpoint_urls_try_v1_before_root_models() {
+        assert_eq!(
+            models_endpoint_urls("https://api.example.com").unwrap(),
+            vec![
+                "https://api.example.com/v1/models",
+                "https://api.example.com/models",
+            ]
+        );
+        assert_eq!(
+            models_endpoint_urls("https://api.example.com/v1/").unwrap(),
+            vec![
+                "https://api.example.com/v1/models",
+                "https://api.example.com/models",
+            ]
+        );
+        assert_eq!(
+            models_endpoint_urls("https://api.example.com/models").unwrap(),
+            vec![
+                "https://api.example.com/v1/models",
+                "https://api.example.com/models",
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_remote_models_accepts_openai_and_array_responses() {
+        let openai = serde_json::json!({
+            "data": [{"id": " claude-b "}, {"id": "claude-a"}, {"id": "claude-a"}, {"id": ""}]
+        });
+        assert_eq!(parse_remote_model_ids(&openai), vec!["claude-a", "claude-b"]);
+
+        let array = serde_json::json!([{"id": "model-2"}, {"id": "model-1"}]);
+        assert_eq!(parse_remote_model_ids(&array), vec!["model-1", "model-2"]);
     }
 
     #[test]

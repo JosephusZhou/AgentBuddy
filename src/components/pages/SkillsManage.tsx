@@ -11,6 +11,7 @@ import type {
   CcSwitchPreviewItem,
   CcSwitchPreviewResult,
   BatchApplyMode,
+  SkillInstallMode,
 } from "./skills/types";
 
 import {
@@ -74,10 +75,11 @@ export default function SkillsManage() {
   const [deleteAgentCopies, setDeleteAgentCopies] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // 编辑弹窗：修改标签 + 应用到 Agent（软链接同步）
+  // 编辑弹窗：修改标签 + 应用到 Agent
   const [editTarget, setEditTarget] = useState<SkillRecord | null>(null);
   const [editTag, setEditTag] = useState("");
   const [editAgents, setEditAgents] = useState<Set<string>>(new Set());
+  const [editInstallMode, setEditInstallMode] = useState<SkillInstallMode>("link");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -124,6 +126,7 @@ export default function SkillsManage() {
   const [batchApplyOpen, setBatchApplyOpen] = useState(false);
   const [batchApplyAgents, setBatchApplyAgents] = useState<Set<string>>(new Set());
   const [batchApplyMode, setBatchApplyMode] = useState<BatchApplyMode>("add");
+  const [batchInstallMode, setBatchInstallMode] = useState<SkillInstallMode>("link");
   // 批量设置标签
   const [batchTagOpen, setBatchTagOpen] = useState(false);
   const [batchTag, setBatchTag] = useState("");
@@ -629,6 +632,7 @@ export default function SkillsManage() {
     setEditTarget(skill);
     setEditTag(skill.tag?.trim() ?? "");
     setEditAgents(new Set(skill.appliedAgents));
+    setEditInstallMode("link");
     setIsSavingEdit(false);
   }, []);
 
@@ -649,7 +653,8 @@ export default function SkillsManage() {
       const res = await invokeApplySkill(
         editTarget.id,
         Array.from(editAgents),
-        editTag.trim()
+        editTag.trim(),
+        editInstallMode
       );
       setStatusMsg(res.message);
       if (res.ok) {
@@ -661,7 +666,7 @@ export default function SkillsManage() {
     } finally {
       setIsSavingEdit(false);
     }
-  }, [editTarget, editAgents, editTag, isSavingEdit, reload]);
+  }, [editTarget, editAgents, editTag, editInstallMode, isSavingEdit, reload]);
 
   const openRepo = useCallback(
     async (skill: SkillRecord) => {
@@ -929,6 +934,7 @@ export default function SkillsManage() {
     }
     setBatchApplyAgents(new Set());
     setBatchApplyMode("add");
+    setBatchInstallMode("link");
     setBatchApplyOpen(true);
   }, [validSelectedIds]);
 
@@ -957,7 +963,12 @@ export default function SkillsManage() {
     setIsBatchRunning(true);
     setStatusMsg(`正在为 ${ids.length} 个技能同步 Agent…`);
     try {
-      const res = await invokeBatchApply(ids, Array.from(batchApplyAgents), batchApplyMode);
+      const res = await invokeBatchApply(
+        ids,
+        Array.from(batchApplyAgents),
+        batchApplyMode,
+        batchInstallMode
+      );
       setSkills(res.skills);
       setStatusMsg(res.message);
       setBatchApplyOpen(false);
@@ -967,7 +978,7 @@ export default function SkillsManage() {
     } finally {
       setIsBatchRunning(false);
     }
-  }, [isBatchRunning, validSelectedIds, batchApplyMode, batchApplyAgents, exitBatchMode]);
+  }, [isBatchRunning, validSelectedIds, batchApplyMode, batchApplyAgents, batchInstallMode, exitBatchMode]);
 
   // 打开批量标签弹窗：初值取选中项共同标签，否则留空
   const openBatchTag = useCallback(() => {
@@ -1938,6 +1949,34 @@ export default function SkillsManage() {
                 />
               </div>
 
+              <div className="form-group">
+                <label className="form-label">安装方式</label>
+                <div className="skill-install-mode" role="radiogroup" aria-label="安装方式">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={editInstallMode === "link"}
+                    className={`skill-install-mode-opt ${editInstallMode === "link" ? "active" : ""}`}
+                    onClick={() => setEditInstallMode("link")}
+                    disabled={isSavingEdit}
+                  >
+                    <span className="skill-install-mode-title">软链接</span>
+                    <span className="skill-install-mode-desc">技能库更新会立即反映到 Agent</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={editInstallMode === "copy"}
+                    className={`skill-install-mode-opt ${editInstallMode === "copy" ? "active" : ""}`}
+                    onClick={() => setEditInstallMode("copy")}
+                    disabled={isSavingEdit}
+                  >
+                    <span className="skill-install-mode-title">完整复制</span>
+                    <span className="skill-install-mode-desc">复制完整目录，Agent 不依赖技能库</span>
+                  </button>
+                </div>
+              </div>
+
               {/* 应用到 Agent */}
               <div className="form-group">
                 <div className="agent-pick-header">
@@ -1949,8 +1988,8 @@ export default function SkillsManage() {
                   </label>
                 </div>
                 <p className="skill-add-hint">
-                  勾选后，将以软链接形式把该技能同步到对应 Agent 的{" "}
-                  <code>skills</code> 目录；取消勾选会移除其对应项。
+                  勾选后，将以{editInstallMode === "link" ? "软链接" : "完整复制"}形式把该技能应用到对应
+                  Agent 的 <code>skills</code> 目录；取消勾选会移除其对应项。
                 </p>
                 {agents.length === 0 ? (
                   <div className="agent-pick-empty">
@@ -2206,6 +2245,34 @@ export default function SkillsManage() {
               </div>
             </div>
 
+            <div className="form-group">
+              <label className="form-label">安装方式</label>
+              <div className="skill-install-mode" role="radiogroup" aria-label="安装方式">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={batchInstallMode === "link"}
+                  className={`skill-install-mode-opt ${batchInstallMode === "link" ? "active" : ""}`}
+                  onClick={() => setBatchInstallMode("link")}
+                  disabled={isBatchRunning}
+                >
+                  <span className="skill-install-mode-title">软链接</span>
+                  <span className="skill-install-mode-desc">技能库更新会立即反映到 Agent</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={batchInstallMode === "copy"}
+                  className={`skill-install-mode-opt ${batchInstallMode === "copy" ? "active" : ""}`}
+                  onClick={() => setBatchInstallMode("copy")}
+                  disabled={isBatchRunning}
+                >
+                  <span className="skill-install-mode-title">完整复制</span>
+                  <span className="skill-install-mode-desc">复制完整目录，Agent 不依赖技能库</span>
+                </button>
+              </div>
+            </div>
+
             {/* 选择 Agent */}
             <div className="form-group">
               <div className="agent-pick-header">
@@ -2218,8 +2285,8 @@ export default function SkillsManage() {
               </div>
               <p className="skill-add-hint">
                 {batchApplyMode === "replace"
-                  ? "将把每个选中技能的应用最终态设为下列勾选的 Agent（软链接同步）。"
-                  : "将把下列勾选的 Agent 追加到每个选中技能的应用列表（软链接同步）。"}
+                  ? `将把每个选中技能的应用最终态设为下列勾选的 Agent（${batchInstallMode === "link" ? "软链接" : "完整复制"}）。`
+                  : `将把下列勾选的 Agent 追加到每个选中技能的应用列表（${batchInstallMode === "link" ? "软链接" : "完整复制"}）。`}
               </p>
               {agents.length === 0 ? (
                 <div className="agent-pick-empty">

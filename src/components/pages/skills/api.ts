@@ -11,6 +11,7 @@ import type {
   CcSwitchMigrateResult,
   BatchSkillResult,
   BatchApplyMode,
+  SkillInstallMode,
 } from "./types";
 
 export async function invokeListSkills(): Promise<SkillsListResult> {
@@ -72,10 +73,16 @@ export async function invokeDeleteSkill(
 export async function invokeApplySkill(
   skillId: string,
   agents: string[],
-  tag: string
+  tag: string,
+  installMode: SkillInstallMode
 ): Promise<SkillApplyResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("apply_skill_to_agents", { skillId, agents, tag }) as Promise<SkillApplyResult>;
+  return invoke("apply_skill_to_agents", {
+    skillId,
+    agents,
+    tag,
+    installMode,
+  }) as Promise<SkillApplyResult>;
 }
 
 export async function invokeAddLocalPath(path: string, tag: string): Promise<SkillActionResult> {
@@ -112,13 +119,15 @@ export async function invokeBatchExport(skillIds: string[]): Promise<BatchSkillR
 export async function invokeBatchApply(
   skillIds: string[],
   agents: string[],
-  mode: BatchApplyMode
+  mode: BatchApplyMode,
+  installMode: SkillInstallMode
 ): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("batch_apply_skills_to_agents", {
     skillIds,
     agents,
     mode,
+    installMode,
   }) as Promise<BatchSkillResult>;
 }
 

@@ -103,6 +103,14 @@ export async function invokeGetSecret(id: string): Promise<string> {
   return invoke("get_claude_env_secret", { id }) as Promise<string>;
 }
 
+export async function invokeFetchRemoteModels(baseUrl: string, apiKey?: string): Promise<string[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const result = await invoke("fetch_claude_env_remote_models", { baseUrl, apiKey }) as {
+    modelIds: string[];
+  };
+  return result.modelIds;
+}
+
 export async function invokeSyncMcp(id: string): Promise<ClaudeEnvMcpSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("sync_claude_env_mcp", { id }) as Promise<ClaudeEnvMcpSyncResult>;

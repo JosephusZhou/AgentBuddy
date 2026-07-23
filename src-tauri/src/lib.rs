@@ -360,10 +360,12 @@ async fn apply_skill_to_agents(
     skill_id: String,
     agents: Vec<String>,
     tag: Option<String>,
+    install_mode: Option<String>,
 ) -> Result<skills::SkillApplyResult, String> {
     let tag = tag.unwrap_or_default();
+    let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
     tauri::async_runtime::spawn_blocking(move || {
-        skills::apply_skill_to_agents(skill_id, agents, tag)
+        skills::apply_skill_to_agents(skill_id, agents, tag, install_mode)
     })
     .await
     .map_err(|e| format!("应用 skill 到 Agent 任务失败: {}", e))?
@@ -397,6 +399,7 @@ async fn batch_apply_skills_to_agents(
     skill_ids: Vec<String>,
     agents: Vec<String>,
     mode: String,
+    install_mode: Option<String>,
 ) -> Result<skills::BatchSkillResult, String> {
     // 未知模式一律退回到「追加」，避免误触发覆盖导致解除现有应用。
     let apply_mode = if mode == "replace" {
@@ -404,8 +407,9 @@ async fn batch_apply_skills_to_agents(
     } else {
         skills::BatchApplyMode::Add
     };
+    let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
     tauri::async_runtime::spawn_blocking(move || {
-        skills::batch_apply_skills_to_agents(skill_ids, agents, apply_mode)
+        skills::batch_apply_skills_to_agents(skill_ids, agents, apply_mode, install_mode)
     })
     .await
     .map_err(|e| format!("批量应用 skill 到 Agent 任务失败: {}", e))?
@@ -557,6 +561,16 @@ async fn get_claude_env_mcp_status() -> Result<claude_env::ClaudeEnvMcpStatusRes
     tauri::async_runtime::spawn_blocking(claude_env::get_mcp_sync_status)
         .await
         .map_err(|e| format!("读取 MCP 同步状态任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn fetch_claude_env_remote_models(
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
+        .await
+        .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
 }
 
 /* ===== OpenCode provider / model config ===== */
@@ -784,6 +798,16 @@ async fn sync_all_codex_env_mcp() -> Result<codex_env::CodexEnvMcpSyncResult, St
         .map_err(|e| format!("批量同步 Codex MCP 任务失败: {}", e))?
 }
 
+#[tauri::command]
+async fn fetch_codex_env_remote_models(
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
+        .await
+        .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -852,6 +876,7 @@ pub fn run() {
             sync_claude_env_mcp,
             sync_all_claude_env_mcp,
             get_claude_env_mcp_status,
+            fetch_claude_env_remote_models,
             list_codex_environments,
             sniff_codex_environments,
             import_codex_environment,
@@ -867,6 +892,7 @@ pub fn run() {
             get_codex_env_secret,
             sync_codex_env_mcp,
             sync_all_codex_env_mcp,
+            fetch_codex_env_remote_models,
             get_opencode_config,
             set_opencode_defaults,
             upsert_opencode_provider,

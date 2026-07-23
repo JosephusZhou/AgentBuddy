@@ -2700,7 +2700,8 @@ label,
   display: flex;
   gap: 10px;
 }
-.skill-batch-mode-opt {
+.skill-batch-mode-opt,
+.skill-install-mode-opt {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -2713,14 +2714,17 @@ label,
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.skill-batch-mode-opt:hover:not(:disabled) {
+.skill-batch-mode-opt:hover:not(:disabled),
+.skill-install-mode-opt:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--seed-primary), var(--seed-border) 55%);
 }
-.skill-batch-mode-opt.active {
+.skill-batch-mode-opt.active,
+.skill-install-mode-opt.active {
   border-color: var(--seed-primary);
   background: var(--seed-active-bg);
 }
-.skill-batch-mode-opt:disabled {
+.skill-batch-mode-opt:disabled,
+.skill-install-mode-opt:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -2730,6 +2734,20 @@ label,
   color: var(--seed-fg);
 }
 .skill-batch-mode-desc {
+  font-size: var(--text-sm);
+  color: var(--seed-muted);
+  line-height: 1.4;
+}
+.skill-install-mode {
+  display: flex;
+  gap: 10px;
+}
+.skill-install-mode-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--seed-fg);
+}
+.skill-install-mode-desc {
   font-size: var(--text-sm);
   color: var(--seed-muted);
   line-height: 1.4;
@@ -3484,6 +3502,40 @@ label,
 .claude-env-action-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+.claude-env-model-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.claude-env-model-label-row .form-label {
+  margin-bottom: 0;
+}
+.claude-env-fetch-models-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--seed-radius);
+  background: transparent;
+  color: var(--seed-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.claude-env-fetch-models-btn:hover:not(:disabled) {
+  background: var(--seed-hover);
+}
+.claude-env-fetch-models-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.claude-env-fetch-models-btn svg {
+  width: 14px;
+  height: 14px;
 }
 .claude-env-form-hint {
   margin: 4px 0 8px;

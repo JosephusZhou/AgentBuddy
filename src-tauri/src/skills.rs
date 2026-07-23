@@ -145,14 +145,14 @@ pub struct SkillActionResult {
     pub message: String,
 }
 
-/// Result of applying a skill to a set of agents via symlink sync.
+/// Result of applying a skill to a set of agents.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillApplyResult {
     pub ok: bool,
     /// Refreshed record with up-to-date `applied_agents` / `tag`.
     pub skill: Option<SkillRecord>,
-    /// Agents newly linked (or already correctly linked) this run.
+    /// Agents newly installed (or already present) this run.
     pub linked: usize,
     /// Agents whose stale entry was removed this run.
     pub unlinked: usize,
@@ -970,7 +970,31 @@ pub fn delete_skill(skill_id: String, delete_agent_copies: bool) -> Result<Skill
     })
 }
 
-/* ===== Apply: sync a library skill into agents' skills dirs via symlink ===== */
+/* ===== Apply: sync a library skill into agents' skills dirs ===== */
+
+/// How a library skill is installed into an Agent's skills directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillInstallMode {
+    Link,
+    Copy,
+}
+
+impl SkillInstallMode {
+    /// Missing or unrecognised wire values retain the historical link behavior.
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("copy") => Self::Copy,
+            _ => Self::Link,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Link => "软链接",
+            Self::Copy => "完整复制",
+        }
+    }
+}
 
 /// A directory-entry name must be a single, plain path component — never a
 /// traversal token — before we join it onto an agent's skills root.
@@ -982,45 +1006,75 @@ fn is_plain_entry_name(name: &str) -> bool {
         && name != ".."
 }
 
-/// Ensure `<root>/<entry_name>` is a symlink (or copy fallback on Windows)
-/// pointing at `target`. If a stale symlink / real directory / file already
-/// occupies that name, it is removed first. Idempotent when the correct link
-/// already exists.
-fn ensure_symlink(root: &Path, entry_name: &str, target: &Path) -> Result<(), String> {
+/// Remove a filesystem entry without following a symlink.
+fn remove_path_entry(path: &Path) -> Result<(), String> {
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("读取目标项失败: {}", e))?;
+    if meta.file_type().is_dir() {
+        fs::remove_dir_all(path).map_err(|e| format!("删除技能目录失败: {}", e))
+    } else {
+        fs::remove_file(path).map_err(|e| format!("删除技能项失败: {}", e))
+    }
+}
+
+/// Install `target` under `<root>/<entry_name>` using the requested mode.
+///
+/// The new entry is prepared before an existing target is moved aside. If the
+/// final replacement fails, the original entry is restored so an Agent's
+/// existing skill is not lost to an IO or permissions error.
+fn ensure_skill_install(
+    root: &Path,
+    entry_name: &str,
+    target: &Path,
+    mode: SkillInstallMode,
+) -> Result<(), String> {
     if !is_plain_entry_name(entry_name) {
         return Err("非法的技能标识".into());
     }
     fs::create_dir_all(root).map_err(|e| format!("创建 skills 目录失败: {}", e))?;
-    let link_path = root.join(entry_name);
+    let destination = root.join(entry_name);
     // Defense in depth: resolved path must stay directly under root.
-    if link_path.parent() != Some(root) {
+    if destination.parent() != Some(root) {
         return Err("非法的技能路径".into());
     }
+    let nonce = format!("{}-{}", std::process::id(), now_secs());
+    let staging = root.join(format!(".agentbuddy-{}-staging-{}", entry_name, nonce));
+    let backup = root.join(format!(".agentbuddy-{}-backup-{}", entry_name, nonce));
 
-    if let Ok(meta) = fs::symlink_metadata(&link_path) {
-        let ft = meta.file_type();
-        if ft.is_symlink() {
-            // Already pointing where we want? No-op.
-            let same = fs::read_link(&link_path)
-                .map(|p| p == target)
-                .unwrap_or(false)
-                || fs::canonicalize(&link_path).ok() == fs::canonicalize(target).ok();
-            if same {
-                return Ok(());
-            }
-            fs::remove_file(&link_path).map_err(|e| format!("清理旧软链接失败: {}", e))?;
-        } else if ft.is_dir() {
-            // Existing real directory may be a previous copy install of the same skill.
-            // If contents already match target via canonicalize of a nested path, still
-            // replace to keep a single managed entry.
-            fs::remove_dir_all(&link_path).map_err(|e| format!("替换已有目录失败: {}", e))?;
-        } else {
-            fs::remove_file(&link_path).map_err(|e| format!("替换已有文件失败: {}", e))?;
+    if fs::symlink_metadata(&staging).is_ok() || fs::symlink_metadata(&backup).is_ok() {
+        return Err("技能安装临时路径已存在，请稍后重试".into());
+    }
+
+    let prepare = match mode {
+        SkillInstallMode::Link => crate::platform::symlink_any(target, &staging),
+        SkillInstallMode::Copy => crate::platform::copy_dir_recursive(target, &staging),
+    };
+    if let Err(e) = prepare {
+        let _ = remove_path_entry(&staging);
+        return Err(format!("创建{}失败: {}", mode.label(), e));
+    }
+
+    let had_destination = fs::symlink_metadata(&destination).is_ok();
+    if had_destination {
+        if let Err(e) = fs::rename(&destination, &backup) {
+            let _ = remove_path_entry(&staging);
+            return Err(format!("备份已有技能项失败: {}", e));
         }
     }
 
-    // Prefer symlink; on Windows without symlink privilege, fall back to copy.
-    crate::platform::install_dir_link_or_copy(target, &link_path).map(|_| ())
+    if let Err(e) = fs::rename(&staging, &destination) {
+        let _ = remove_path_entry(&staging);
+        if had_destination {
+            if let Err(restore_err) = fs::rename(&backup, &destination) {
+                return Err(format!("安装失败: {}；恢复原技能项失败: {}", e, restore_err));
+            }
+        }
+        return Err(format!("安装{}失败: {}", mode.label(), e));
+    }
+
+    if had_destination {
+        remove_path_entry(&backup).map_err(|e| format!("清理旧技能项失败: {}", e))?;
+    }
+    Ok(())
 }
 
 /// Remove `<root>/<entry_name>` whether it is a symlink, real dir, or file.
@@ -1048,32 +1102,36 @@ fn remove_agent_skill_entry(root: &Path, entry_name: &str) -> Result<bool, Strin
     }
 }
 
-/// Update a skill's tag and sync its installation across agents by symlink.
+/// Update a skill's tag and sync its installation across agents.
 ///
 /// - `agents`: the desired set of agent sniff-names that should have this skill.
-/// - Newly desired agents get a symlink under their first skills root (shared
+/// - Newly desired agents get the requested installation under their first skills root (shared
 ///   roots — codebuddy / codebuddy-cn — are written once).
 /// - Agents that were previously applied but are now unchecked have their entry
 ///   removed (symlink or real copy), unless the same root is still needed by a
 ///   desired agent.
 /// - Agents never applied and not desired are left completely untouched.
-/// 链接同步结果（不含 record 重建，交由调用方）。
-struct LinkSyncOutcome {
+/// 安装同步结果（不含 record 重建，交由调用方）。
+struct InstallationSyncOutcome {
     linked: usize,
     unlinked: usize,
     errors: Vec<String>,
 }
 
-/// 将库技能的安装同步到「恰好等于 `desired`」的最终态（软链接）：
-/// - `desired` 中的 Agent 建立软链接（共享物理根去重，只写一次）；
+/// 将库技能的安装同步到「恰好等于 `desired`」的最终态：
+/// - `desired` 是最终应用集合（共享物理根的删除保护仍按此集合计算）；
 /// - 之前已应用但不在 `desired` 的 Agent 移除其条目（保护仍被占用的根）。
+/// - `install_targets` 是本次需要重装的 Agent；批量追加时仅包含新增目标，
+///   避免改动其它已应用 Agent 的安装方式。
 /// 不触碰 tag / meta。`lib_skill_dir` 须为库内、已校验的技能目录。
 /// 记录重建（applied_after 扫描）由调用方用 `applied_after_for` 完成。
-fn sync_skill_links(
+fn sync_skill_installations(
     id: &str,
     lib_skill_dir: &Path,
     desired: &BTreeSet<String>,
-) -> LinkSyncOutcome {
+    install_targets: &BTreeSet<String>,
+    install_mode: SkillInstallMode,
+) -> InstallationSyncOutcome {
     let targets = agent_skills_targets();
 
     // Candidate entry names we manage: the library id, plus the frontmatter
@@ -1092,11 +1150,11 @@ fn sync_skill_links(
 
     let mut errors: Vec<String> = Vec::new();
 
-    // Link desired agents (dedupe by physical root for shared configs).
+    // Install desired agents (dedupe by physical root for shared configs).
     let mut linked = 0usize;
     let mut ensured_roots: BTreeSet<PathBuf> = BTreeSet::new();
     let mut failed_roots: BTreeSet<PathBuf> = BTreeSet::new();
-    for agent in desired {
+    for agent in install_targets {
         let target = match targets.iter().find(|t| t.agent == agent.as_str()) {
             Some(t) => t,
             None => {
@@ -1122,7 +1180,7 @@ fn sync_skill_links(
         if failed_roots.contains(&root) {
             continue; // error already recorded for this shared root
         }
-        match ensure_symlink(&root, id, lib_skill_dir) {
+        match ensure_skill_install(&root, id, lib_skill_dir, install_mode) {
             Ok(()) => {
                 ensured_roots.insert(root);
                 linked += 1;
@@ -1178,7 +1236,7 @@ fn sync_skill_links(
         }
     }
 
-    LinkSyncOutcome {
+    InstallationSyncOutcome {
         linked,
         unlinked,
         errors,
@@ -1212,6 +1270,7 @@ pub fn apply_skill_to_agents(
     skill_id: String,
     agents: Vec<String>,
     tag: String,
+    install_mode: SkillInstallMode,
 ) -> Result<SkillApplyResult, String> {
     let id = skill_id.trim().to_string();
     if !is_plain_entry_name(&id) {
@@ -1238,7 +1297,7 @@ pub fn apply_skill_to_agents(
         });
     }
 
-    // 1) Persist the (possibly changed) tag first — independent of link sync.
+    // 1) Persist the (possibly changed) tag first — independent of installation sync.
     let mut meta = db::get_skill_meta(&id)
         .unwrap_or_default()
         .unwrap_or_else(default_local_meta);
@@ -1246,13 +1305,19 @@ pub fn apply_skill_to_agents(
     meta.updated_at = now_secs();
     db::upsert_skill_meta(&id, &meta)?;
 
-    // 2) Sync links to the desired final state (single-card semantics: replace).
+    // 2) Sync installations to the desired final state (single-card semantics: replace).
     let desired: BTreeSet<String> = agents
         .iter()
         .map(|a| a.trim().to_string())
         .filter(|a| !a.is_empty())
         .collect();
-    let outcome = sync_skill_links(&id, &lib_skill_dir, &desired);
+    let outcome = sync_skill_installations(
+        &id,
+        &lib_skill_dir,
+        &desired,
+        &desired,
+        install_mode,
+    );
 
     // 3) Rebuild the record with a fresh applied scan.
     let applied = applied_after_for(&id, &lib_skill_dir);
@@ -1260,13 +1325,17 @@ pub fn apply_skill_to_agents(
 
     let message = if outcome.errors.is_empty() {
         format!(
-            "已更新「{}」：应用 {} 个、解除 {} 个 Agent",
-            record.title, outcome.linked, outcome.unlinked
+            "已更新「{}」：以{}应用 {} 个、解除 {} 个 Agent",
+            record.title,
+            install_mode.label(),
+            outcome.linked,
+            outcome.unlinked
         )
     } else {
         format!(
-            "「{}」部分完成：应用 {} 个、解除 {} 个，{} 项未成功",
+            "「{}」部分完成：以{}应用 {} 个、解除 {} 个，{} 项未成功",
             record.title,
+            install_mode.label(),
             outcome.linked,
             outcome.unlinked,
             outcome.errors.len()
@@ -1441,11 +1510,12 @@ pub enum BatchApplyMode {
 /// 批量把选中技能应用到一组 Agent。
 /// - `Add`：把 `agents` 并入每个技能已应用的 Agent（不解除任何现有应用）。
 /// - `Replace`：把每个技能的应用最终态设为恰好 `agents`（会解除多余项）。
-/// tag 一律不改动：批量应用只同步软链接。逐项容错。
+/// tag 一律不改动；逐项按 `install_mode` 同步。逐项容错。
 pub fn batch_apply_skills_to_agents(
     skill_ids: Vec<String>,
     agents: Vec<String>,
     mode: BatchApplyMode,
+    install_mode: SkillInstallMode,
 ) -> Result<BatchSkillResult, String> {
     let ids = sanitize_id_batch(&skill_ids);
     if ids.is_empty() {
@@ -1511,7 +1581,18 @@ pub fn batch_apply_skills_to_agents(
             cur
         };
 
-        let outcome = sync_skill_links(id, &lib_skill_dir, &desired);
+        let install_targets = if mode == BatchApplyMode::Replace {
+            &desired
+        } else {
+            &selected_agents
+        };
+        let outcome = sync_skill_installations(
+            id,
+            &lib_skill_dir,
+            &desired,
+            install_targets,
+            install_mode,
+        );
         if outcome.errors.is_empty() {
             succeeded += 1;
         } else {
@@ -1529,9 +1610,9 @@ pub fn batch_apply_skills_to_agents(
         "追加应用"
     };
     let message = if failed == 0 {
-        format!("已{} {} 个技能", verb, succeeded)
+        format!("已以{}{} {} 个技能", install_mode.label(), verb, succeeded)
     } else {
-        format!("{} {} 个成功，{} 个失败", verb, succeeded, failed)
+        format!("以{}{} {} 个成功，{} 个失败", install_mode.label(), verb, succeeded, failed)
     };
     Ok(BatchSkillResult {
         ok: failed == 0,
@@ -3504,27 +3585,29 @@ body
     }
 
     #[test]
-    fn ensure_symlink_creates_and_is_idempotent() {
+    fn ensure_link_install_creates_and_replaces_idempotently() {
         let base = scratch_dir("ensure");
         let target = base.join("lib-skill");
         fs::create_dir_all(&target).unwrap();
         fs::write(target.join("SKILL.md"), "---\nname: t\n---\n").unwrap();
         let root = base.join("agent-root");
 
-        ensure_symlink(&root, "lib-skill", &target).expect("first link");
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
+            .expect("first link");
         let link = root.join("lib-skill");
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), target);
 
         // Idempotent: correct link stays a link, no error.
-        ensure_symlink(&root, "lib-skill", &target).expect("second link");
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
+            .expect("second link");
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
 
         let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn ensure_symlink_replaces_real_directory() {
+    fn ensure_link_install_replaces_real_directory() {
         let base = scratch_dir("replace");
         let target = base.join("lib-skill");
         fs::create_dir_all(&target).unwrap();
@@ -3536,9 +3619,32 @@ body
         fs::create_dir_all(&occupied).unwrap();
         fs::write(occupied.join("old.txt"), "old").unwrap();
 
-        ensure_symlink(&root, "lib-skill", &target).expect("replace");
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link)
+            .expect("replace");
         assert!(fs::symlink_metadata(&occupied).unwrap().file_type().is_symlink());
         assert_eq!(fs::read_link(&occupied).unwrap(), target);
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn ensure_copy_install_creates_independent_directory() {
+        let base = scratch_dir("copy");
+        let target = base.join("lib-skill");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        fs::write(target.join("SKILL.md"), "original").unwrap();
+        fs::write(target.join("nested/file.txt"), "content").unwrap();
+        let root = base.join("agent-root");
+
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Copy)
+            .expect("copy install");
+        let installed = root.join("lib-skill");
+        assert!(fs::symlink_metadata(&installed).unwrap().file_type().is_dir());
+        assert!(!fs::symlink_metadata(&installed).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(installed.join("nested/file.txt")).unwrap(), "content");
+
+        fs::write(target.join("nested/file.txt"), "updated").unwrap();
+        assert_eq!(fs::read_to_string(installed.join("nested/file.txt")).unwrap(), "content");
 
         let _ = fs::remove_dir_all(&base);
     }
@@ -3556,7 +3662,7 @@ body
         assert!(!remove_agent_skill_entry(&root, "lib-skill").unwrap());
 
         // Symlink → removed, target survives.
-        ensure_symlink(&root, "lib-skill", &target).unwrap();
+        ensure_skill_install(&root, "lib-skill", &target, SkillInstallMode::Link).unwrap();
         assert!(remove_agent_skill_entry(&root, "lib-skill").unwrap());
         assert!(!root.join("lib-skill").exists());
         assert!(target.join("SKILL.md").exists(), "real target must survive unlink");

@@ -23,6 +23,7 @@ import {
   invokeReveal,
   invokeOpenConfig,
   invokeGetSecret,
+  invokeFetchRemoteModels,
   invokeSyncMcp,
   invokeSyncAllMcp,
 } from "./codex-env/api";
@@ -117,6 +118,14 @@ const IconSync = () => (
   </svg>
 );
 
+const IconDownload = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M5 21h14" />
+  </svg>
+);
+
 const IconEmpty = () => (
   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -196,6 +205,9 @@ export default function CodexEnv() {
   const [cloneApiKey, setCloneApiKey] = useState("");
   const [showCloneApiKey, setShowCloneApiKey] = useState(false);
   const [cloneModel, setCloneModel] = useState("");
+  const [cloneRemoteModels, setCloneRemoteModels] = useState<string[]>([]);
+  const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
+  const [cloneModelSelectOpen, setCloneModelSelectOpen] = useState(false);
   const [cloneModelProvider, setCloneModelProvider] = useState("");
   const [cloneSyncMcp, setCloneSyncMcp] = useState(false);
   const [cloneInstallAlias, setCloneInstallAlias] = useState(false);
@@ -218,6 +230,9 @@ export default function CodexEnv() {
   const [editBaseUrl, setEditBaseUrl] = useState("");
   const [editApiKey, setEditApiKey] = useState("");
   const [editModel, setEditModel] = useState("");
+  const [editRemoteModels, setEditRemoteModels] = useState<string[]>([]);
+  const [editModelsLoading, setEditModelsLoading] = useState(false);
+  const [editModelSelectOpen, setEditModelSelectOpen] = useState(false);
   const [editModelProvider, setEditModelProvider] = useState("");
   const [editApiKeyVisible, setEditApiKeyVisible] = useState(false);
   // 目录变更时的迁移二次确认（Tauri WebView 不支持原生 window.confirm，用受控 modal）。
@@ -243,6 +258,8 @@ export default function CodexEnv() {
   const hasLoaded = useRef(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const cloneSourceRef = useRef<HTMLDivElement>(null);
+  const cloneModelSelectRef = useRef<HTMLDivElement>(null);
+  const editModelSelectRef = useRef<HTMLDivElement>(null);
 
   const cloneDismiss = useOverlayDismiss(() => setShowClone(false), !busy);
   const editDismiss = useOverlayDismiss(() => setShowEdit(false), !busy);
@@ -275,8 +292,10 @@ export default function CodexEnv() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || busy) return;
-      if (cloneSourceOpen) {
+      if (cloneSourceOpen || cloneModelSelectOpen || editModelSelectOpen) {
         setCloneSourceOpen(false);
+        setCloneModelSelectOpen(false);
+        setEditModelSelectOpen(false);
         return;
       }
       setShowClone(false);
@@ -287,7 +306,7 @@ export default function CodexEnv() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [busy, cloneSourceOpen]);
+  }, [busy, cloneSourceOpen, cloneModelSelectOpen, editModelSelectOpen]);
 
   useEffect(() => {
     if (!cloneSourceOpen) return;
@@ -300,6 +319,20 @@ export default function CodexEnv() {
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [cloneSourceOpen]);
+
+  useEffect(() => {
+    if (!cloneModelSelectOpen && !editModelSelectOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (cloneModelSelectRef.current && !cloneModelSelectRef.current.contains(e.target as Node)) {
+        setCloneModelSelectOpen(false);
+      }
+      if (editModelSelectRef.current && !editModelSelectRef.current.contains(e.target as Node)) {
+        setEditModelSelectOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [cloneModelSelectOpen, editModelSelectOpen]);
 
   useEffect(() => {
     if (showClone || showEdit) {
@@ -328,6 +361,9 @@ export default function CodexEnv() {
     setCloneApiKey("");
     setShowCloneApiKey(false);
     setCloneModel("");
+    setCloneRemoteModels([]);
+    setCloneModelsLoading(false);
+    setCloneModelSelectOpen(false);
     setCloneModelProvider("");
     setCloneSyncMcp(false);
     setCloneInstallAlias(false);
@@ -362,6 +398,32 @@ export default function CodexEnv() {
       }
     }
   };
+
+  const fetchModels = useCallback(async (mode: "clone" | "edit") => {
+    const baseUrl = mode === "clone" ? cloneBaseUrl : editBaseUrl;
+    const apiKey = mode === "clone" ? cloneApiKey : editApiKey;
+    const setLoading = mode === "clone" ? setCloneModelsLoading : setEditModelsLoading;
+    const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
+    const setModel = mode === "clone" ? setCloneModel : setEditModel;
+    const setOpen = mode === "clone" ? setCloneModelSelectOpen : setEditModelSelectOpen;
+
+    setLoading(true);
+    try {
+      const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
+      if (models.length === 0) {
+        setStatusMsg("远端未返回可用模型，仍可手动输入");
+        return;
+      }
+      setModels(models);
+      setModel(models[0]);
+      setOpen(false);
+      setStatusMsg(`已拉取 ${models.length} 个远端模型`);
+    } catch (err) {
+      setStatusMsg(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [cloneApiKey, cloneBaseUrl, editApiKey, editBaseUrl, setStatusMsg]);
 
   const handleClone = useCallback(async () => {
     setBusy(true);
@@ -424,6 +486,9 @@ export default function CodexEnv() {
     const modelProvider = env.isDefault ? "" : env.modelProvider ?? "";
     setEditBaseUrl(baseUrl);
     setEditModel(model);
+    setEditRemoteModels([]);
+    setEditModelsLoading(false);
+    setEditModelSelectOpen(false);
     setEditModelProvider(modelProvider);
     setEditApiKeyVisible(false);
     setEditError("");
@@ -1131,17 +1196,68 @@ export default function CodexEnv() {
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="xe-model">模型（可选）</label>
-              <input
-                id="xe-model"
-                className="form-input"
-                placeholder="留空则复用源环境 model"
-                value={cloneModel}
-                onChange={(e) => setCloneModel(e.target.value)}
-                disabled={busy}
-                autoComplete="off"
-                spellCheck={false}
-              />
+              <div className="claude-env-model-label-row">
+                <label className="form-label" htmlFor="xe-model">模型（可选）</label>
+                <button
+                  type="button"
+                  className="claude-env-fetch-models-btn"
+                  title="从当前 Base URL 拉取模型列表"
+                  onClick={() => void fetchModels("clone")}
+                  disabled={busy || cloneModelsLoading}
+                >
+                  <IconDownload />
+                  {cloneModelsLoading ? "拉取中…" : "拉取列表"}
+                </button>
+              </div>
+              {cloneRemoteModels.length > 0 ? (
+                <div
+                  className={`app-select ${cloneModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
+                  ref={cloneModelSelectRef}
+                >
+                  <button
+                    type="button"
+                    id="xe-model"
+                    className="app-select-trigger form-input"
+                    aria-haspopup="listbox"
+                    aria-expanded={cloneModelSelectOpen}
+                    onClick={() => !busy && setCloneModelSelectOpen((open) => !open)}
+                    disabled={busy}
+                  >
+                    <span className="app-select-value">{cloneModel}</span>
+                    <span className="app-select-chevron" aria-hidden><IconChevron open={cloneModelSelectOpen} /></span>
+                  </button>
+                  {cloneModelSelectOpen && (
+                    <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
+                      {cloneRemoteModels.map((model) => (
+                        <button
+                          key={model}
+                          type="button"
+                          role="option"
+                          aria-selected={model === cloneModel}
+                          className={`app-select-option ${model === cloneModel ? "selected" : ""}`}
+                          onClick={() => {
+                            setCloneModel(model);
+                            setCloneModelSelectOpen(false);
+                          }}
+                        >
+                          <span className="app-select-option-title">{model}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <input
+                  id="xe-model"
+                  className="form-input"
+                  placeholder="留空则复用源环境 model"
+                  value={cloneModel}
+                  onChange={(e) => setCloneModel(e.target.value)}
+                  disabled={busy}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              )}
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="xe-provider">Provider（可选）</label>
@@ -1310,17 +1426,68 @@ export default function CodexEnv() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label" htmlFor="xe-edit-model">模型</label>
-                  <input
-                    id="xe-edit-model"
-                    className="form-input"
-                    placeholder="留空即删除 model 键"
-                    value={editModel}
-                    onChange={(e) => setEditModel(e.target.value)}
-                    disabled={busy}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
+                  <div className="claude-env-model-label-row">
+                    <label className="form-label" htmlFor="xe-edit-model">模型</label>
+                    <button
+                      type="button"
+                      className="claude-env-fetch-models-btn"
+                      title="从当前 Base URL 拉取模型列表"
+                      onClick={() => void fetchModels("edit")}
+                      disabled={busy || editModelsLoading}
+                    >
+                      <IconDownload />
+                      {editModelsLoading ? "拉取中…" : "拉取列表"}
+                    </button>
+                  </div>
+                  {editRemoteModels.length > 0 ? (
+                    <div
+                      className={`app-select ${editModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
+                      ref={editModelSelectRef}
+                    >
+                      <button
+                        type="button"
+                        id="xe-edit-model"
+                        className="app-select-trigger form-input"
+                        aria-haspopup="listbox"
+                        aria-expanded={editModelSelectOpen}
+                        onClick={() => !busy && setEditModelSelectOpen((open) => !open)}
+                        disabled={busy}
+                      >
+                        <span className="app-select-value">{editModel}</span>
+                        <span className="app-select-chevron" aria-hidden><IconChevron open={editModelSelectOpen} /></span>
+                      </button>
+                      {editModelSelectOpen && (
+                        <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
+                          {editRemoteModels.map((model) => (
+                            <button
+                              key={model}
+                              type="button"
+                              role="option"
+                              aria-selected={model === editModel}
+                              className={`app-select-option ${model === editModel ? "selected" : ""}`}
+                              onClick={() => {
+                                setEditModel(model);
+                                setEditModelSelectOpen(false);
+                              }}
+                            >
+                              <span className="app-select-option-title">{model}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <input
+                      id="xe-edit-model"
+                      className="form-input"
+                      placeholder="留空即删除 model 键"
+                      value={editModel}
+                      onChange={(e) => setEditModel(e.target.value)}
+                      disabled={busy}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label" htmlFor="xe-edit-provider">Provider</label>

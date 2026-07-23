@@ -136,3 +136,4 @@ export interface BatchSkillResult {
 }
 
 export type BatchApplyMode = "add" | "replace";
+export type SkillInstallMode = "link" | "copy";
