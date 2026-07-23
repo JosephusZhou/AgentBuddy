@@ -544,6 +544,8 @@ export default function OpenCodeConfig() {
   const [forkStatusLoading, setForkStatusLoading] = useState(false);
   /** 每个二开 agent 是否勾选「同步 MCP」；默认 false，仅勾选时覆盖目标 mcp。 */
   const [forkSyncMcp, setForkSyncMcp] = useState<Record<string, boolean>>({});
+  /** 每个二开 agent 是否勾选「同步 skills」；默认 false，仅勾选时替换目标 skills。 */
+  const [forkSyncSkills, setForkSyncSkills] = useState<Record<string, boolean>>({});
 
   const providerIdRef = useRef<HTMLInputElement>(null);
   const modelIdRef = useRef<HTMLInputElement>(null);
@@ -631,7 +633,8 @@ export default function OpenCodeConfig() {
       setBusy(true);
       try {
         const syncMcp = !!forkSyncMcp[agent];
-        const res = await invokeSyncToFork(agent, syncMcp);
+        const syncSkills = !!forkSyncSkills[agent];
+        const res = await invokeSyncToFork(agent, syncMcp, syncSkills);
         setStatusMsg(res.message);
         await loadForkStatus();
       } catch (e) {
@@ -640,13 +643,13 @@ export default function OpenCodeConfig() {
         setBusy(false);
       }
     },
-    [forkSyncMcp, loadForkStatus, setStatusMsg],
+    [forkSyncMcp, forkSyncSkills, loadForkStatus, setStatusMsg],
   );
 
   const handleSyncAllForks = useCallback(async () => {
     setBusy(true);
     try {
-      // 按各目标各自的「同步 MCP」勾选逐个同步，避免批量按钮误覆盖未勾选目标的 mcp。
+      // 按各目标的 MCP / skills 勾选逐个同步，避免批量按钮误覆盖未选中的目标内容。
       const targets = forkStatus?.targets.filter((t) => t.found) ?? [];
       if (targets.length === 0) {
         setStatusMsg("没有可同步的 OpenCode 二开 agent");
@@ -657,8 +660,9 @@ export default function OpenCodeConfig() {
       let skipN = 0;
       for (const t of targets) {
         const syncMcp = !!forkSyncMcp[t.agent];
+        const syncSkills = !!forkSyncSkills[t.agent];
         try {
-          const res = await invokeSyncToFork(t.agent, syncMcp);
+          const res = await invokeSyncToFork(t.agent, syncMcp, syncSkills);
           for (const item of res.results) {
             if (item.ok) {
               if (item.status === "not_installed" || item.status === "no_source") {
@@ -687,7 +691,7 @@ export default function OpenCodeConfig() {
     } finally {
       setBusy(false);
     }
-  }, [forkStatus, forkSyncMcp, loadForkStatus, setStatusMsg]);
+  }, [forkStatus, forkSyncMcp, forkSyncSkills, loadForkStatus, setStatusMsg]);
 
   const forkOutOfSyncCount = useMemo(() => {
     if (!forkStatus) return 0;
@@ -1125,7 +1129,7 @@ export default function OpenCodeConfig() {
               <div className="oc-fork-sync-desc">
                 将本页维护的 <code>provider</code> 覆盖同步到同源配置（如 DevEco Code），并合并对应{" "}
                 <code>auth.json</code> 密钥条目。勾选「同步 MCP」后才会覆盖目标的{" "}
-                <code>mcp</code>；不修改目标其它顶层字段。
+                <code>mcp</code>；勾选「同步 skills」后会以 OpenCode 的最新 skills 替换目标 skills 目录。
               </div>
               {forkStatusLoading && !forkStatus ? (
                 <div className="oc-fork-sync-empty">正在检测本机 fork…</div>
@@ -1150,7 +1154,9 @@ export default function OpenCodeConfig() {
                   <ul className="oc-fork-sync-list">
                     {forkInstalledTargets.map((t) => {
                       const syncMcpChecked = !!forkSyncMcp[t.agent];
-                      const checkId = `oc-fork-sync-mcp-${t.agent}`;
+                      const syncSkillsChecked = !!forkSyncSkills[t.agent];
+                      const mcpCheckId = `oc-fork-sync-mcp-${t.agent}`;
+                      const skillsCheckId = `oc-fork-sync-skills-${t.agent}`;
                       return (
                         <li key={t.agent} className="oc-fork-sync-item">
                           <div className="oc-fork-sync-item-body">
@@ -1180,9 +1186,9 @@ export default function OpenCodeConfig() {
                                 {t.configPath}
                               </code>
                             </div>
-                            <label className="ui-check oc-fork-sync-mcp-check" htmlFor={checkId}>
+                            <label className="ui-check oc-fork-sync-mcp-check" htmlFor={mcpCheckId}>
                               <input
-                                id={checkId}
+                                id={mcpCheckId}
                                 type="checkbox"
                                 className="ui-check-input"
                                 checked={syncMcpChecked}
@@ -1200,6 +1206,28 @@ export default function OpenCodeConfig() {
                                 {syncMcpChecked
                                   ? "（将覆盖目标 mcp）"
                                   : "（默认仅同步 provider）"}
+                              </span>
+                            </label>
+                            <label className="ui-check oc-fork-sync-mcp-check" htmlFor={skillsCheckId}>
+                              <input
+                                id={skillsCheckId}
+                                type="checkbox"
+                                className="ui-check-input"
+                                checked={syncSkillsChecked}
+                                onChange={(e) =>
+                                  setForkSyncSkills((prev) => ({
+                                    ...prev,
+                                    [t.agent]: e.target.checked,
+                                  }))
+                                }
+                                disabled={busy}
+                              />
+                              <CheckGlyph />
+                              <span className="ui-check-label">
+                                同步 skills
+                                {syncSkillsChecked
+                                  ? "（将替换目标 skills）"
+                                  : "（不修改目标 skills）"}
                               </span>
                             </label>
                           </div>

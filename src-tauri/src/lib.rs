@@ -715,10 +715,12 @@ async fn get_opencode_fork_sync_status() -> Result<opencode_config::OpencodeFork
 async fn sync_opencode_to_fork(
     agent: String,
     sync_mcp: Option<bool>,
+    sync_skills: Option<bool>,
 ) -> Result<opencode_config::OpencodeForkSyncResult, String> {
     let sync_mcp = sync_mcp.unwrap_or(false);
+    let sync_skills = sync_skills.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
-        opencode_config::sync_to_fork_agent(agent, sync_mcp)
+        opencode_config::sync_to_fork_agent(agent, sync_mcp, sync_skills)
     })
     .await
     .map_err(|e| format!("同步 OpenCode 配置任务失败: {e}"))?
@@ -727,9 +729,13 @@ async fn sync_opencode_to_fork(
 #[tauri::command]
 async fn sync_opencode_to_all_forks(
     sync_mcp: Option<bool>,
+    sync_skills: Option<bool>,
 ) -> Result<opencode_config::OpencodeForkSyncResult, String> {
     let sync_mcp = sync_mcp.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || opencode_config::sync_to_all_forks(sync_mcp))
+    let sync_skills = sync_skills.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        opencode_config::sync_to_all_forks(sync_mcp, sync_skills)
+    })
         .await
         .map_err(|e| format!("批量同步 OpenCode 配置任务失败: {e}"))?
 }

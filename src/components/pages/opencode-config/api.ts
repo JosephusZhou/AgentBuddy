@@ -99,19 +99,23 @@ export async function invokeGetForkSyncStatus(): Promise<OpencodeForkSyncStatus>
 export async function invokeSyncToFork(
   agent: string,
   syncMcp = false,
+  syncSkills = false,
 ): Promise<OpencodeForkSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("sync_opencode_to_fork", {
     agent,
     syncMcp,
+    syncSkills,
   }) as Promise<OpencodeForkSyncResult>;
 }
 
 export async function invokeSyncToAllForks(
   syncMcp = false,
+  syncSkills = false,
 ): Promise<OpencodeForkSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("sync_opencode_to_all_forks", {
     syncMcp,
+    syncSkills,
   }) as Promise<OpencodeForkSyncResult>;
 }

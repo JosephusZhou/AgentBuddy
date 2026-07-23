@@ -244,6 +244,7 @@ pub struct OpencodeForkSyncItem {
     pub provider_count: u32,
     pub mcp_count: u32,
     pub auth_keys_synced: u32,
+    pub skills_synced: u32,
     pub message: String,
 }
 
@@ -1404,6 +1405,96 @@ fn fork_auth_path(agent: &str) -> Result<PathBuf, String> {
     Ok(home_dir()?.join(".local/share").join(share_name).join("auth.json"))
 }
 
+fn agent_skills_root(agent: &str) -> Result<PathBuf, String> {
+    let spec = crate::agents::find(agent)
+        .ok_or_else(|| format!("未知 Agent: {agent}"))?;
+    let root = spec
+        .skills_roots
+        .first()
+        .ok_or_else(|| format!("{agent} 没有可用 skills 目录"))?;
+    crate::platform::expand_home(root)
+}
+
+fn remove_skills_entry(path: &Path) -> Result<(), String> {
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("读取 skills 项失败: {e}"))?;
+    if meta.file_type().is_dir() {
+        fs::remove_dir_all(path).map_err(|e| format!("删除 skills 目录失败: {e}"))
+    } else {
+        fs::remove_file(path).map_err(|e| format!("删除 skills 项失败: {e}"))
+    }
+}
+
+fn skill_dir_count(root: &Path) -> u32 {
+    fs::read_dir(root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .count() as u32
+        })
+        .unwrap_or(0)
+}
+
+/// Copy skills recursively, dereferencing directory links so the fork receives
+/// an independent skills tree rather than references back to OpenCode's source.
+fn copy_skills_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("创建 skills 目录失败: {e}"))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("读取 skills 目录失败: {e}"))? {
+        let entry = entry.map_err(|e| format!("读取 skills 目录项失败: {e}"))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_skills_dir_recursive(&from, &to)?;
+        } else if from.is_file() {
+            fs::copy(&from, &to).map_err(|e| format!("复制 skills 文件失败: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Replace a target skills root from the source using a staged sibling directory.
+/// The existing root is restored if the final replacement fails.
+fn replace_skills_root(src: &Path, dst: &Path) -> Result<u32, String> {
+    if src.exists() && !src.is_dir() {
+        return Err(format!("OpenCode skills 路径不是目录: {}", display_path(src)));
+    }
+    let parent = dst
+        .parent()
+        .ok_or_else(|| format!("无效 skills 路径: {}", dst.display()))?;
+    fs::create_dir_all(parent).map_err(|e| format!("创建 skills 父目录失败: {e}"))?;
+    let name = dst.file_name().and_then(|s| s.to_str()).unwrap_or("skills");
+    let nonce = format!("{}", std::process::id());
+    let staging = parent.join(format!(".{name}.agentbuddy-staging-{nonce}"));
+    let backup = parent.join(format!(".{name}.agentbuddy-backup-{nonce}"));
+    if staging.exists() || backup.exists() {
+        return Err("skills 同步临时目录已存在，请稍后重试".into());
+    }
+
+    if src.is_dir() {
+        copy_skills_dir_recursive(src, &staging)?;
+    } else {
+        fs::create_dir(&staging).map_err(|e| format!("创建空 skills 目录失败: {e}"))?;
+    }
+    let count = skill_dir_count(&staging);
+    let had_destination = fs::symlink_metadata(dst).is_ok();
+    if had_destination {
+        fs::rename(dst, &backup).map_err(|e| format!("备份目标 skills 失败: {e}"))?;
+    }
+    if let Err(e) = fs::rename(&staging, dst) {
+        let _ = remove_skills_entry(&staging);
+        if had_destination {
+            if let Err(restore_err) = fs::rename(&backup, dst) {
+                return Err(format!("写入目标 skills 失败: {e}；恢复原目录失败: {restore_err}"));
+            }
+        }
+        return Err(format!("写入目标 skills 失败: {e}"));
+    }
+    if had_destination {
+        remove_skills_entry(&backup).map_err(|e| format!("清理旧 skills 失败: {e}"))?;
+    }
+    Ok(count)
+}
+
 fn load_auth_at(path: &Path) -> Result<Map<String, Value>, String> {
     if !path.exists() {
         return Ok(Map::new());
@@ -1588,9 +1679,11 @@ pub fn get_fork_sync_status() -> Result<OpencodeForkSyncStatus, String> {
 ///
 /// - `sync_mcp == true`：覆盖写入目标的 `mcp` 字段
 /// - `sync_mcp == false`：仅同步 `provider`（及对应 auth），保留目标现有 `mcp`
+/// - `sync_skills == true`：以 OpenCode 的 skills 目录替换目标 skills
 fn sync_provider_mcp_to_agent(
     agent: &str,
     sync_mcp: bool,
+    sync_skills: bool,
 ) -> Result<OpencodeForkSyncItem, String> {
     let display_name = crate::agents::find(agent)
         .map(|s| s.display_name.to_string())
@@ -1605,6 +1698,7 @@ fn sync_provider_mcp_to_agent(
             provider_count: 0,
             mcp_count: 0,
             auth_keys_synced: 0,
+            skills_synced: 0,
             message: "本机未检测到安装，已跳过".into(),
         });
     }
@@ -1619,6 +1713,7 @@ fn sync_provider_mcp_to_agent(
             provider_count: 0,
             mcp_count: 0,
             auth_keys_synced: 0,
+            skills_synced: 0,
             message: "OpenCode 源配置不存在".into(),
         });
     }
@@ -1636,6 +1731,7 @@ fn sync_provider_mcp_to_agent(
                 provider_count: object_key_count(src_root.get("provider")),
                 mcp_count: object_key_count(src_root.get("mcp")),
                 auth_keys_synced: 0,
+                skills_synced: 0,
                 message: "目标与源为同一文件，跳过".into(),
             });
         }
@@ -1648,6 +1744,7 @@ fn sync_provider_mcp_to_agent(
             provider_count: object_key_count(src_root.get("provider")),
             mcp_count: object_key_count(src_root.get("mcp")),
             auth_keys_synced: 0,
+            skills_synced: 0,
             message: "目标与源为同一文件，跳过".into(),
         });
     }
@@ -1695,6 +1792,13 @@ fn sync_provider_mcp_to_agent(
             .unwrap_or(0),
         Err(_) => 0,
     };
+    let skills_synced = if sync_skills {
+        let src_skills = agent_skills_root("opencode")?;
+        let dst_skills = agent_skills_root(agent)?;
+        replace_skills_root(&src_skills, &dst_skills)?
+    } else {
+        0
+    };
 
     let mcp_part = if sync_mcp {
         format!("、mcp {} 个", mcp_count)
@@ -1709,12 +1813,18 @@ fn sync_provider_mcp_to_agent(
         provider_count,
         mcp_count,
         auth_keys_synced,
+        skills_synced,
         message: format!(
-            "已同步 provider {} 个{}{}",
+            "已同步 provider {} 个{}{}{}",
             provider_count,
             mcp_part,
             if auth_keys_synced > 0 {
                 format!("，密钥条目 {} 个", auth_keys_synced)
+            } else {
+                String::new()
+            },
+            if sync_skills {
+                format!("，skills {} 个", skills_synced)
             } else {
                 String::new()
             }
@@ -1725,9 +1835,11 @@ fn sync_provider_mcp_to_agent(
 /// 同步到指定 fork agent（例如 `deveco-code`）。
 ///
 /// `sync_mcp`：是否同时覆盖目标 `mcp`；为 false 时仅同步 provider + auth。
+/// `sync_skills`：是否以 OpenCode skills 替换目标 skills 目录。
 pub fn sync_to_fork_agent(
     agent: String,
     sync_mcp: bool,
+    sync_skills: bool,
 ) -> Result<OpencodeForkSyncResult, String> {
     let name = agent.trim().to_string();
     if name.is_empty() {
@@ -1742,7 +1854,7 @@ pub fn sync_to_fork_agent(
             "「{name}」不是 OpenCode 同源 fork（需 JsonMcp 方言）"
         ));
     }
-    let item = sync_provider_mcp_to_agent(&name, sync_mcp)?;
+    let item = sync_provider_mcp_to_agent(&name, sync_mcp, sync_skills)?;
     let ok = item.ok;
     let message = item.message.clone();
     Ok(OpencodeForkSyncResult {
@@ -1755,7 +1867,10 @@ pub fn sync_to_fork_agent(
 /// 同步到全部已登记的 OpenCode fork（当前主要是 DevEco Code）。
 ///
 /// `sync_mcp`：是否同时覆盖各目标的 `mcp`；为 false 时仅同步 provider + auth。
-pub fn sync_to_all_forks(sync_mcp: bool) -> Result<OpencodeForkSyncResult, String> {
+pub fn sync_to_all_forks(
+    sync_mcp: bool,
+    sync_skills: bool,
+) -> Result<OpencodeForkSyncResult, String> {
     let names = opencode_fork_agent_names();
     if names.is_empty() {
         return Ok(OpencodeForkSyncResult {
@@ -1769,7 +1884,7 @@ pub fn sync_to_all_forks(sync_mcp: bool) -> Result<OpencodeForkSyncResult, Strin
     let mut fail_n = 0u32;
     let mut skip_n = 0u32;
     for name in names {
-        match sync_provider_mcp_to_agent(name, sync_mcp) {
+        match sync_provider_mcp_to_agent(name, sync_mcp, sync_skills) {
             Ok(item) => {
                 if item.ok {
                     if item.status == "not_installed" || item.status == "no_source" {
@@ -1796,18 +1911,24 @@ pub fn sync_to_all_forks(sync_mcp: bool) -> Result<OpencodeForkSyncResult, Strin
                     provider_count: 0,
                     mcp_count: 0,
                     auth_keys_synced: 0,
+                    skills_synced: 0,
                     message: e,
                 });
             }
         }
     }
     let ok = fail_n == 0;
-    let mcp_hint = if sync_mcp { "（含 mcp）" } else { "（仅 provider）" };
+    let detail_hint = match (sync_mcp, sync_skills) {
+        (true, true) => "（含 mcp、skills）",
+        (true, false) => "（含 mcp）",
+        (false, true) => "（含 skills）",
+        (false, false) => "（仅 provider）",
+    };
     let message = if ok {
         format!(
             "已同步 {} 个目标{}{}",
             ok_n,
-            mcp_hint,
+            detail_hint,
             if skip_n > 0 {
                 format!("，跳过 {} 个", skip_n)
             } else {
@@ -1817,7 +1938,7 @@ pub fn sync_to_all_forks(sync_mcp: bool) -> Result<OpencodeForkSyncResult, Strin
     } else {
         format!(
             "部分失败：成功 {}，失败 {}，跳过 {}{}",
-            ok_n, fail_n, skip_n, mcp_hint
+            ok_n, fail_n, skip_n, detail_hint
         )
     };
     Ok(OpencodeForkSyncResult {
@@ -2386,7 +2507,7 @@ mod tests {
         .unwrap();
 
         // 默认含 mcp 同步
-        let res = sync_to_fork_agent("deveco-code".into(), true).unwrap();
+        let res = sync_to_fork_agent("deveco-code".into(), true, false).unwrap();
         assert!(res.ok, "{}", res.message);
         assert_eq!(res.results.len(), 1);
         assert!(res.results[0].ok);
@@ -2450,7 +2571,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = sync_to_fork_agent("deveco-code".into(), false).unwrap();
+        let res = sync_to_fork_agent("deveco-code".into(), false, false).unwrap();
         assert!(res.ok, "{}", res.message);
         assert_eq!(res.results[0].provider_count, 1);
         // 未同步 mcp 时计数为目标侧保留的 mcp
@@ -2464,5 +2585,75 @@ mod tests {
         // 目标 mcp 保留，源 mcp 未写入
         assert!(v.pointer("/mcp/keep-me").is_some());
         assert!(v.pointer("/mcp/demo").is_none());
+    }
+
+    #[test]
+    fn sync_skills_replaces_target_directory_when_selected() {
+        let h = TempHome::new();
+        fs::write(h.config_file(), r#"{"provider":{}}"#).unwrap();
+        let src_skills = h.path.join(".config/opencode/skills");
+        fs::create_dir_all(src_skills.join("new-skill")).unwrap();
+        fs::write(src_skills.join("new-skill/SKILL.md"), "new").unwrap();
+
+        let deveco_dir = h.path.join(".config/deveco");
+        fs::create_dir_all(&deveco_dir).unwrap();
+        fs::write(deveco_dir.join("deveco.jsonc"), r#"{"provider":{}}"#).unwrap();
+        let dst_skills = deveco_dir.join("skills");
+        fs::create_dir_all(dst_skills.join("stale-skill")).unwrap();
+        fs::write(dst_skills.join("stale-skill/SKILL.md"), "stale").unwrap();
+
+        let res = sync_to_fork_agent("deveco-code".into(), false, true).unwrap();
+        assert!(res.ok, "{}", res.message);
+        assert_eq!(res.results[0].skills_synced, 1);
+        assert_eq!(fs::read_to_string(dst_skills.join("new-skill/SKILL.md")).unwrap(), "new");
+        assert!(!dst_skills.join("stale-skill").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_skills_dereferences_source_directory_symlink() {
+        let h = TempHome::new();
+        fs::write(h.config_file(), r#"{"provider":{}}"#).unwrap();
+        let linked_source = h.path.join("linked-source-skill");
+        fs::create_dir_all(&linked_source).unwrap();
+        fs::write(linked_source.join("SKILL.md"), "linked").unwrap();
+        let src_skills = h.path.join(".config/opencode/skills");
+        fs::create_dir_all(&src_skills).unwrap();
+        std::os::unix::fs::symlink(&linked_source, src_skills.join("linked-skill")).unwrap();
+
+        let deveco_dir = h.path.join(".config/deveco");
+        fs::create_dir_all(&deveco_dir).unwrap();
+        fs::write(deveco_dir.join("deveco.jsonc"), r#"{"provider":{}}"#).unwrap();
+        let dst_skills = deveco_dir.join("skills");
+
+        let res = sync_to_fork_agent("deveco-code".into(), false, true).unwrap();
+        assert!(res.ok, "{}", res.message);
+        assert_eq!(res.results[0].skills_synced, 1);
+        let copied = dst_skills.join("linked-skill");
+        assert!(copied.is_dir());
+        assert!(!fs::symlink_metadata(&copied).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(copied.join("SKILL.md")).unwrap(), "linked");
+    }
+
+    #[test]
+    fn sync_skills_leaves_target_directory_when_unselected() {
+        let h = TempHome::new();
+        fs::write(h.config_file(), r#"{"provider":{}}"#).unwrap();
+        let src_skills = h.path.join(".config/opencode/skills");
+        fs::create_dir_all(src_skills.join("source-skill")).unwrap();
+        fs::write(src_skills.join("source-skill/SKILL.md"), "source").unwrap();
+
+        let deveco_dir = h.path.join(".config/deveco");
+        fs::create_dir_all(&deveco_dir).unwrap();
+        fs::write(deveco_dir.join("deveco.jsonc"), r#"{"provider":{}}"#).unwrap();
+        let dst_skills = deveco_dir.join("skills");
+        fs::create_dir_all(dst_skills.join("target-skill")).unwrap();
+        fs::write(dst_skills.join("target-skill/SKILL.md"), "target").unwrap();
+
+        let res = sync_to_fork_agent("deveco-code".into(), false, false).unwrap();
+        assert!(res.ok, "{}", res.message);
+        assert_eq!(res.results[0].skills_synced, 0);
+        assert_eq!(fs::read_to_string(dst_skills.join("target-skill/SKILL.md")).unwrap(), "target");
+        assert!(!dst_skills.join("source-skill").exists());
     }
 }

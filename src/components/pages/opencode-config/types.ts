@@ -137,6 +137,7 @@ export interface OpencodeForkSyncItem {
   providerCount: number;
   mcpCount: number;
   authKeysSynced: number;
+  skillsSynced: number;
   message: string;
 }
 
