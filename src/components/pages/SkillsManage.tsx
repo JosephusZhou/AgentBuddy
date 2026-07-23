@@ -69,6 +69,7 @@ export default function SkillsManage() {
   const [isSniffing, setIsSniffing] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const isPickingLocalFolder = useRef(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [directoryApplyTarget, setDirectoryApplyTarget] = useState<SkillRecord | null>(null);
   const [directoryApplyMode, setDirectoryApplyMode] = useState<SkillInstallMode>("link");
@@ -113,6 +114,9 @@ export default function SkillsManage() {
   const [activeSource, setActiveSource] = useState<string>("all");
   // 标签筛选：单选，"all" 表示全部（与来源筛选为「与」关系）
   const [activeTag, setActiveTag] = useState<string>("all");
+  // 搜索输入即时响应；查询值延迟更新，避免每次按键都重新筛选整表
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   // 筛选区折叠态：默认展开；收起时对应筛选回退到「全部」，避免隐藏筛选造成困惑
   const [sourceExpanded, setSourceExpanded] = useState(true);
   const [tagExpanded, setTagExpanded] = useState(true);
@@ -324,8 +328,8 @@ export default function SkillsManage() {
   }, [isChecking]);
 
   const doPickLocal = useCallback(async () => {
-    if (isAdding) return;
-    setIsAdding(true);
+    if (isAdding || isPickingLocalFolder.current) return;
+    isPickingLocalFolder.current = true;
     setFormError("");
     setStatusMsg("请选择本地 Skill 目录…");
     try {
@@ -344,7 +348,7 @@ export default function SkillsManage() {
       setFormError(String(e));
       setStatusMsg(`导入失败: ${e}`);
     } finally {
-      setIsAdding(false);
+      isPickingLocalFolder.current = false;
     }
   }, [isAdding, reload, addTag]);
 
@@ -745,6 +749,16 @@ export default function SkillsManage() {
     }
   }, [activeTag, knownTags]);
 
+  useEffect(() => {
+    const query = searchInput.trim().toLocaleLowerCase();
+    if (!query) {
+      setSearchQuery("");
+      return;
+    }
+    const timer = window.setTimeout(() => setSearchQuery(query), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
   // 折叠/展开筛选区：仅切换显隐，保留当前选中项
   const toggleSourceExpanded = useCallback(() => {
     setSourceExpanded((prev) => !prev);
@@ -753,15 +767,26 @@ export default function SkillsManage() {
     setTagExpanded((prev) => !prev);
   }, []);
 
-  // 来源与标签为「与」筛选
+  // 来源、标签与关键词为「与」筛选；关键词覆盖卡片当前展示的主要技能信息
   const filteredSkills = useMemo(
     () =>
-      skills.filter(
-        (s) =>
+      skills.filter((s) => {
+        const matchesFilters =
           (activeSource === "all" || sourceKeyOf(s) === activeSource) &&
-          (activeTag === "all" || (s.tag?.trim() ?? "") === activeTag)
-      ),
-    [skills, activeSource, activeTag]
+          (activeTag === "all" || (s.tag?.trim() ?? "") === activeTag);
+        if (!matchesFilters || !searchQuery) return matchesFilters;
+        return [
+          s.title,
+          s.description,
+          s.tag,
+          s.githubOwner,
+          s.githubRepo,
+          s.repoUrl,
+          s.githubPath,
+          s.localPath,
+        ].some((value) => value.toLocaleLowerCase().includes(searchQuery));
+      }),
+    [skills, activeSource, activeTag, searchQuery]
   );
 
   const updateAvailableSkills = useMemo(
@@ -1158,6 +1183,34 @@ export default function SkillsManage() {
                 </>
               )}
             </div>
+            <div className="skill-search">
+              <IconSearch />
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSearchInput(value);
+                  if (!value.trim()) setSearchQuery("");
+                }}
+                placeholder="搜索技能名称、简介、标签或来源"
+                aria-label="搜索技能"
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  className="skill-search-clear"
+                  title="清空搜索"
+                  aria-label="清空搜索"
+                  onClick={() => {
+                    setSearchInput("");
+                    setSearchQuery("");
+                  }}
+                >
+                  <IconClose />
+                </button>
+              )}
+            </div>
             {sourceOptions.length > 1 && (
               <div className="skill-filter-section">
                 <button
@@ -1226,7 +1279,12 @@ export default function SkillsManage() {
               </div>
             )}
             <div className="skill-list">
-              {filteredSkills.map((skill) => {
+              {filteredSkills.length === 0 ? (
+                <div className="empty-state skill-filter-empty">
+                  <IconSearch />
+                  <div className="empty-state-text">没有匹配的技能</div>
+                </div>
+              ) : filteredSkills.map((skill) => {
                 const isRemote = skill.source === "github" || skill.source === "gitcode";
                 const isGitcode = skill.source === "gitcode";
                 const hostTag = isGitcode ? "skill-tag-gitcode" : "skill-tag-github";
@@ -1546,7 +1604,7 @@ export default function SkillsManage() {
                     onClick={() => void doPickLocal()}
                     disabled={isAdding}
                   >
-                    {isAdding ? "处理中…" : "浏览文件夹…"}
+                    浏览文件夹…
                   </button>
                   <button
                     type="button"
