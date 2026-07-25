@@ -79,6 +79,17 @@ pub fn find(name: &str) -> Option<&'static AgentSpec> {
     AGENTS.iter().find(|a| a.name == name)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::find;
+
+    #[test]
+    fn deveco_code_searches_the_official_capitalized_cli_name() {
+        let deveco = find("deveco-code").expect("DevEco Code 应已注册");
+        assert!(deveco.search_names.contains(&"Deveco"));
+    }
+}
+
 /// Windows 上额外的静态安装路径候选（从环境变量解析，不硬编码盘符）。
 /// 在 `cfg(windows)` 的 sniff 中与 `bin_paths` 合并；其它平台返回空。
 #[cfg(windows)]
@@ -257,7 +268,9 @@ static AGENTS: &[AgentSpec] = &[
         display_name: "DevEco Code",
         icon: "De",
         bin_paths: &[],
-        search_names: &["deveco", "devecocli"],
+        // DevEco Code 的 macOS/Linux CLI 名为 `Deveco`（保留历史小写别名，
+        // 以兼容不同安装渠道）。Unix 文件系统的可执行文件名大小写敏感。
+        search_names: &["Deveco", "deveco", "devecocli"],
         config_paths: &["~/.config/deveco"],
         scan_app_support: false,
         mcp: McpSpec {
