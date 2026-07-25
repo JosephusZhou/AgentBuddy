@@ -105,6 +105,14 @@ const IconLayers = () => (
   </svg>
 );
 
+const IconFolderConfig = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    <circle cx="16" cy="15" r="2" />
+    <path d="M16 11v2M16 17v2M12 15h2M18 15h2" />
+  </svg>
+);
+
 export default function Sidebar({
   mode,
   mainView,
@@ -169,6 +177,13 @@ export default function Sidebar({
             >
               <IconBrackets />
               <span className="menu-label">OpenCode配置</span>
+            </button>
+            <button
+              className={`menu-item ${mainView === "project-config" ? "active" : ""}`}
+              onClick={() => onNavigateMain("project-config")}
+            >
+              <IconFolderConfig />
+              <span className="menu-label">项目AI配置</span>
             </button>
             <button
               className={`menu-item ${mainView === "backup-manage" ? "active" : ""}`}

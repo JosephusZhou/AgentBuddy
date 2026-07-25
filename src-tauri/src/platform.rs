@@ -490,6 +490,11 @@ pub fn restore_or_private_file(path: &Path, previous_mode: Option<u32>) {
 
 /// Create a directory symlink (or file symlink when `source` is a file).
 /// On Windows this requires privilege / Developer Mode for `symlink_dir`.
+///
+/// **Caveat:** on Windows the dir/file choice uses `source.is_dir()`, which for a
+/// *relative* `source` is resolved against the process CWD — not `dest`'s parent.
+/// Prefer [`symlink_dir`] when the link target is known to be a directory
+/// (especially with relative sources like `../.agents/commands`).
 pub fn symlink_any(source: &Path, dest: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -504,6 +509,26 @@ pub fn symlink_any(source: &Path, dest: &Path) -> Result<(), String> {
             std::os::windows::fs::symlink_file(source, dest)
                 .map_err(|e| format!("创建文件软链接失败: {e}"))
         }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (source, dest);
+        Err("当前平台不支持软链接".into())
+    }
+}
+
+/// Create a **directory** symlink. `source` is stored as-is (absolute or relative);
+/// this never probes `source.is_dir()` against the process CWD.
+/// On Windows requires privilege / Developer Mode.
+pub fn symlink_dir(source: &Path, dest: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, dest).map_err(|e| format!("创建软链接失败: {e}"))
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(source, dest)
+            .map_err(|e| format!("创建目录软链接失败: {e}"))
     }
     #[cfg(not(any(unix, windows)))]
     {

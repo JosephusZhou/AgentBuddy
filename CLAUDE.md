@@ -57,6 +57,7 @@ src/                     React UI
     claude-env/          Claude Env types + API helpers
     codex-env/           Codex Env types + API helpers
     opencode-config/     OpenCode provider/model types + API helpers
+    project-config/      Project AI config types + API helpers
     skills/              Skills types, API, controls, icons
   lib/theme.ts           Theme load/save via invoke
   index.css              Global styles + design tokens (data-theme)
@@ -72,6 +73,7 @@ src-tauri/src/
   claude_env.rs          Multi Claude Code envs via CLAUDE_CONFIG_DIR + shell aliases (zsh/bash/fish/PowerShell)
   codex_env.rs           Multi Codex CLI envs via CODEX_HOME + shell aliases (zsh/bash/fish/PowerShell)
   opencode_config.rs     OpenCode ~/.config/opencode provider/model + auth.json + Models.dev
+  project_config.rs      Project-dir AI skeleton init (Full / Symlink modes; not user-global MCP)
   db.rs                  SQLite persistence (agents, mcp_servers, webdav, skills, claude_environments, codex_environments)
   config.rs              App config.json (theme; secretsKey private)
   crypto.rs              AES-256-GCM + HKDF for secret fields
@@ -103,6 +105,7 @@ Registered commands (see `lib.rs`):
 | Claude Env | `list_claude_environments`, `sniff_claude_environments`, `import_claude_environment`, `clone_claude_environment`, `upsert_claude_environment`, `delete_claude_environment`, `install_claude_env_alias`, `remove_claude_env_alias`, `remove_all_claude_env_aliases`, `get_claude_env_shell_status`, `reveal_claude_env_dir`, `open_claude_env_settings`, `get_claude_env_secret`, `sync_claude_env_mcp`, `sync_all_claude_env_mcp`, `get_claude_env_mcp_status` |
 | Codex Env | `list_codex_environments`, `sniff_codex_environments`, `import_codex_environment`, `clone_codex_environment`, `upsert_codex_environment`, `delete_codex_environment`, `install_codex_env_alias`, `remove_codex_env_alias`, `remove_all_codex_env_aliases`, `get_codex_env_shell_status`, `reveal_codex_env_dir`, `open_codex_env_config`, `get_codex_env_secret`, `sync_codex_env_mcp`, `sync_all_codex_env_mcp` |
 | OpenCode | `get_opencode_config`, `set_opencode_defaults`, `upsert_opencode_provider`, `delete_opencode_provider`, `upsert_opencode_model`, `delete_opencode_model`, `get_opencode_provider_secret`, `set_opencode_provider_secret`, `fetch_models_dev_catalog`, `probe_opencode_models_endpoint`, `reveal_opencode_config` |
+| Project Config | `pick_project_folder`, `check_project_config_exists`, `init_project_config` |
 | WebDAV | `get_webdav_connections`, `upsert_webdav_connection`, `delete_webdav_connection`, `test_webdav_connection`, `test_webdav_connection_draft` |
 | Backup | `list_backup_units`, `get_backup_settings`, `update_backup_settings`, `run_backup_upload` |
 
@@ -199,7 +202,7 @@ Important behaviors:
 - **Main**: agent-sniff, mcp-manage, skills-manage, claude-env, codex-env, opencode-config, backup-manage
 - **Settings**: preferences, network (proxy), webdav
 
-Implemented end-to-end today: Agent sniff, MCP manage, Skills manage, Claude Env (multi `CLAUDE_CONFIG_DIR`), Codex Env (multi `CODEX_HOME`), OpenCode provider/model config, Preferences (theme), WebDAV, Backup manage (pack + multi-WebDAV upload; restore is future). See `BACKUP_MANAGE_PLAN.md`.
+Implemented end-to-end today: Agent sniff, MCP manage, Skills manage, Claude Env (multi `CLAUDE_CONFIG_DIR`), Codex Env (multi `CODEX_HOME`), OpenCode provider/model config, Project AI config (per-repo Full/Symlink skeleton under a picked folder; see `project_config.rs` / `PROJECT_AI_CONFIG_IMPROVEMENTS.md`), Preferences (theme), WebDAV, Backup manage (pack + multi-WebDAV upload; restore is future). See `BACKUP_MANAGE_PLAN.md`.
 
 Path alias: `@/*` → `./src/*` (Vite + tsconfig).
 

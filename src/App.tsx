@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import AgentSniff from "./components/pages/AgentSniff";
 import BackupManage from "./components/pages/BackupManage";
 import OpenCodeConfig from "./components/pages/OpenCodeConfig";
+import ProjectConfig from "./components/pages/ProjectConfig";
 import SkillsManage from "./components/pages/SkillsManage";
 import McpManage from "./components/pages/McpManage";
 import ClaudeEnv from "./components/pages/ClaudeEnv";
@@ -16,6 +17,7 @@ export type MainView =
   | "agent-sniff"
   | "backup-manage"
   | "opencode-config"
+  | "project-config"
   | "skills-manage"
   | "mcp-manage"
   | "claude-env"
@@ -80,6 +82,7 @@ export default function App() {
         {activeView === "agent-sniff" && <AgentSniff />}
         {activeView === "backup-manage" && <BackupManage />}
         {activeView === "opencode-config" && <OpenCodeConfig />}
+        {activeView === "project-config" && <ProjectConfig />}
         {activeView === "skills-manage" && <SkillsManage />}
         {activeView === "mcp-manage" && <McpManage />}
         {activeView === "claude-env" && <ClaudeEnv />}

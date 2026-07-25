@@ -10,6 +10,7 @@ mod http_client;
 mod mcp_config;
 mod opencode_config;
 mod platform;
+mod project_config;
 mod skills;
 mod sniff;
 mod webdav;
@@ -873,6 +874,43 @@ async fn fetch_codex_env_remote_models(
         .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
 }
 
+#[tauri::command]
+async fn pick_project_folder() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        platform::pick_folder("选择项目目录")
+            .map(|opt| opt.map(|pb| pb.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("选择目录任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn check_project_config_exists(
+    target_dir: String,
+    selected_agents: Vec<project_config::AgentConfigRequest>,
+    mode: project_config::InitMode,
+) -> Result<project_config::CheckResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        project_config::check_project_config_exists(&target_dir, &selected_agents, &mode)
+    })
+    .await
+    .map_err(|e| format!("检查项目配置任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn init_project_config(
+    target_dir: String,
+    selected_agents: Vec<project_config::AgentConfigRequest>,
+    mode: project_config::InitMode,
+    overwrite: bool,
+) -> Result<project_config::InitResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        project_config::init_project_config(&target_dir, &selected_agents, &mode, overwrite)
+    })
+    .await
+    .map_err(|e| format!("初始化项目配置任务失败: {e}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -975,6 +1013,9 @@ pub fn run() {
             get_opencode_fork_sync_status,
             sync_opencode_to_fork,
             sync_opencode_to_all_forks,
+            pick_project_folder,
+            check_project_config_exists,
+            init_project_config,
         ])
         .setup(|_app| {
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.
