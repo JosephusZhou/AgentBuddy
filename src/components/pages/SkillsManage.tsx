@@ -46,12 +46,12 @@ import {
   IconGitcode,
   IconSkill,
   IconMigrate,
-  IconCopy,
   IconTrash,
-  IconEdit,
   IconCheckSquare,
   IconScan,
   IconPull,
+  IconTags,
+  IconApplyDir,
 } from "./skills/icons";
 import {
   TagSelect,
@@ -1379,7 +1379,7 @@ export default function SkillsManage() {
                               onClick={() => void doUpdateSkill(skill)}
                               disabled={updatingId === skill.id || isDeleting || isBatchRunning}
                             >
-                              <IconRefresh />
+                              <IconPull />
                             </button>
                           )}
                           <button
@@ -1389,7 +1389,7 @@ export default function SkillsManage() {
                             onClick={() => openEdit(skill)}
                             disabled={isDeleting || exportingId === skill.id || isBatchRunning}
                           >
-                            <IconEdit />
+                            <IconTags />
                           </button>
                           <button
                             type="button"
@@ -1398,7 +1398,7 @@ export default function SkillsManage() {
                             onClick={() => openDirectoryApply(skill)}
                             disabled={exportingId === skill.id || isBatchRunning}
                           >
-                            <IconCopy />
+                            <IconApplyDir />
                           </button>
                           <button
                             type="button"

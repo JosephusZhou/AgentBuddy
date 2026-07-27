@@ -28,7 +28,7 @@ import {
   invokeSyncSkills,
   invokeSyncAllMcp,
 } from "./claude-env/api";
-import { ChevronDown, Copy, Download, Eye, EyeOff, FileText, Folder, Pencil, Radar, RefreshCw, Terminal, Trash2, X } from "lucide-react";
+import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
 
@@ -57,11 +57,11 @@ const IconClose = () => (
 );
 
 const IconFolder = () => (
-  <Folder size={16} strokeWidth={1.8} />
+  <FolderOpen size={16} strokeWidth={1.8} />
 );
 
 const IconFile = () => (
-  <FileText size={16} strokeWidth={1.8} />
+  <FileJson size={16} strokeWidth={1.8} />
 );
 
 const IconCopy = () => (
@@ -76,8 +76,12 @@ const IconEyeOff = () => (
   <EyeOff size={16} strokeWidth={1.8} />
 );
 
-const IconSync = () => (
-  <RefreshCw size={16} strokeWidth={1.8} />
+const IconSyncSkills = () => (
+  <Sparkles size={16} strokeWidth={1.8} />
+);
+
+const IconSyncMcp = () => (
+  <Blocks size={16} strokeWidth={1.8} />
 );
 
 const IconDownload = () => (
@@ -885,7 +889,7 @@ export default function ClaudeEnv() {
                       onClick={() => void handleSyncSkills(env)}
                       disabled={busy || !env.dirExists}
                     >
-                      <IconSync />
+                      <IconSyncSkills />
                     </button>
                   )}
                   {!env.isDefault && (
@@ -896,7 +900,7 @@ export default function ClaudeEnv() {
                       onClick={() => void handleSyncMcp(env)}
                       disabled={busy || !env.dirExists}
                     >
-                      <IconSync />
+                      <IconSyncMcp />
                     </button>
                   )}
                   {!env.isDefault && (

@@ -8,12 +8,14 @@ import {
   ExternalLink,
   Folder,
   FolderInput,
+  FolderOutput,
   ListChecks,
   Plus,
   Radar,
   RefreshCw,
   Search,
   SquarePen,
+  Tags,
   Trash,
   X,
 } from "lucide-react";
@@ -71,3 +73,9 @@ export const IconScan = () => <Radar strokeWidth={1.8} />;
 
 /** 头部「拉取更新」按钮：CloudDownload（与「检查更新」的 RefreshCw 区分） */
 export const IconPull = () => <CloudDownload strokeWidth={1.8} />;
+
+/** item「编辑标签与应用 Agent」：Tags */
+export const IconTags = () => <Tags size={16} strokeWidth={1.8} />;
+
+/** item「应用到目录」：FolderOutput（与「迁移」的 FolderInput 方向相对） */
+export const IconApplyDir = () => <FolderOutput size={16} strokeWidth={1.8} />;

@@ -3,7 +3,7 @@ import { getAgentIcon } from "../agent-icons";
 import { useOverlayDismiss } from "../ui";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
-import { FileText, Folder, Plus, Radar, X } from "lucide-react";
+import { Blocks, FileCog, FolderOpen, Plus, Radar, X } from "lucide-react";
 
 /* ===== Types ===== */
 interface AgentResult {
@@ -46,11 +46,15 @@ const IconClose = () => (
 );
 
 const IconFolder = () => (
-  <Folder size={16} strokeWidth={1.8} />
+  <FolderOpen size={16} strokeWidth={1.8} />
 );
 
-const IconFile = () => (
-  <FileText size={16} strokeWidth={1.8} />
+const IconFileSettings = () => (
+  <FileCog size={16} strokeWidth={1.8} />
+);
+
+const IconFileMcp = () => (
+  <Blocks size={16} strokeWidth={1.8} />
 );
 
 /* ===== Helpers ===== */
@@ -356,7 +360,7 @@ export default function AgentSniff() {
                         onClick={() => handleOpenFile(agent.name, "settings")}
                         disabled={busy}
                       >
-                        <IconFile />
+                        <IconFileSettings />
                       </button>
                     )}
                     {mcpFile && (
@@ -371,7 +375,7 @@ export default function AgentSniff() {
                         onClick={() => handleOpenFile(agent.name, "mcp")}
                         disabled={busy}
                       >
-                        <IconFile />
+                        <IconFileMcp />
                       </button>
                     )}
                     {configDir && (
