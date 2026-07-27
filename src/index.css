@@ -880,7 +880,7 @@
   --seed-active-bg: rgba(255, 126, 219, 0.15);
   --seed-active-fg: #ff7edb;
   --seed-overlay: rgba(12, 10, 20, 0.75);
-  --seed-danger: #fe4450;
+  --seed-danger: #fe4955;
   --seed-danger-fg: #262335;
   --seed-danger-bg: rgba(254, 68, 80, 0.15);
   --seed-input-border: #463a6b;
@@ -1038,7 +1038,7 @@ label,
   width: 28px;
   height: 28px;
   background: var(--seed-primary);
-  border-radius: calc(var(--seed-radius) + 1px);
+  border-radius: var(--seed-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1056,6 +1056,9 @@ label,
   flex: 1;
   padding: 8px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .sidebar-bottom {
   padding: 8px;
@@ -1066,7 +1069,7 @@ label,
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 7px 12px;
   border-radius: var(--seed-radius);
   color: var(--seed-muted);
   font-size: var(--text-sm);
@@ -1076,7 +1079,7 @@ label,
   background: none;
   width: 100%;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
   position: relative;
 }
 .menu-item:hover {
@@ -1142,7 +1145,7 @@ label,
 .pref-section {
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
   padding: 24px;
   transition: background 0.25s ease, border-color 0.25s ease;
 }
@@ -1168,7 +1171,7 @@ label,
   border-radius: var(--seed-radius);
   border: 1px solid var(--seed-border);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
   background: transparent;
   /* <button> 默认 text-align:center，会让标题/描述水平居中 */
   text-align: left;
@@ -1259,7 +1262,7 @@ label,
   background: transparent;
   color: var(--seed-fg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .net-protocol-chip:hover:not(:disabled) {
   border-color: var(--seed-input-focus);
@@ -1307,12 +1310,12 @@ label,
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   border: 1px solid var(--seed-border);
   background: transparent;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .pref-theme-card:hover {
   border-color: var(--seed-input-focus);
@@ -1450,7 +1453,7 @@ label,
   background: var(--seed-surface);
   color: var(--seed-fg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .btn-add:hover {
   background: var(--seed-hover);
@@ -1469,8 +1472,8 @@ label,
   padding: 14px 16px;
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
-  transition: all 0.2s ease;
+  border-radius: var(--seed-radius-lg);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 .webdav-item:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 10%);
@@ -1522,7 +1525,7 @@ label,
   color: var(--seed-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
   opacity: 0;
 }
 .webdav-item:hover .btn-delete { opacity: 1; }
@@ -1545,7 +1548,7 @@ label,
 .modal {
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 6px);
+  border-radius: var(--seed-radius-lg);
   width: 440px;
   max-width: 90vw;
   box-shadow: var(--seed-shadow-modal);
@@ -1574,7 +1577,7 @@ label,
   background: none;
   color: var(--seed-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .modal-close:hover {
   background: var(--seed-hover);
@@ -1713,7 +1716,7 @@ label,
   padding: 6px;
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   box-shadow: var(--seed-shadow-modal);
 }
 .app-select-empty {
@@ -1810,13 +1813,16 @@ label,
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 8px 16px;
   font-size: var(--text-sm);
   font-weight: 500;
+  line-height: 1.4;
   border-radius: var(--seed-radius);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease, filter 0.15s ease, transform 0.1s ease;
   white-space: nowrap;
 }
 .btn:disabled,
@@ -1836,25 +1842,59 @@ label,
   background: var(--seed-hover);
   color: var(--seed-muted);
   border-color: var(--seed-border);
+  box-shadow: none;
 }
 .btn-primary {
   background: var(--seed-primary);
   color: var(--seed-primary-fg);
   border-color: var(--seed-primary);
+  box-shadow: var(--seed-shadow-card);
 }
-.btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: var(--seed-shadow-toggle-hover);
+}
+.btn-primary:active:not(:disabled) {
+  filter: brightness(0.95);
+  box-shadow: none;
+  transform: translateY(0.5px);
+}
 .btn-secondary {
   background: transparent;
   color: var(--seed-fg);
   border-color: var(--seed-border);
 }
 .btn-secondary:hover:not(:disabled) { background: var(--seed-hover); }
+.btn-secondary:active:not(:disabled) { background: var(--seed-fill-active); }
 .btn-danger {
   background: var(--seed-danger);
   color: var(--seed-danger-fg);
   border-color: var(--seed-danger);
+  box-shadow: var(--seed-shadow-card);
 }
-.btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-danger:active:not(:disabled) {
+  filter: brightness(0.95);
+  box-shadow: none;
+  transform: translateY(0.5px);
+}
+
+/* 键盘焦点环：仅 :focus-visible 触发（鼠标点击不出现）。
+   输入类控件已有各自的 focus 发光（.form-input / .app-select 等），不在此列。 */
+.btn:focus-visible,
+.action-btn:focus-visible,
+.menu-item:focus-visible,
+.modal-close:focus-visible,
+.form-input-action:focus-visible,
+.btn-add:focus-visible,
+.btn-delete:focus-visible,
+.btn-icon-action:focus-visible,
+.kv-add:focus-visible,
+.kv-remove:focus-visible,
+a[href]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--seed-primary) 55%, transparent);
+  outline-offset: 1px;
+}
 
 /* ===== CONFIRM DIALOG ===== */
 .confirm-body { padding: 20px 24px; }
@@ -2025,7 +2065,7 @@ label,
   background: var(--seed-surface);
   color: var(--seed-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .action-btn:hover {
   background: var(--seed-hover);
@@ -2069,7 +2109,7 @@ label,
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow: var(--seed-shadow-pop);
   z-index: 10;
 }
 .action-btn:hover::after {
@@ -2101,7 +2141,7 @@ label,
 .agent-icon {
   width: 32px;
   height: 32px;
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   background: var(--seed-surface-alt);
   border: 1px solid var(--seed-border);
   display: flex;
@@ -2239,7 +2279,7 @@ label,
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
   color: inherit;
 }
 .mcp-type-option:hover {
@@ -2299,7 +2339,7 @@ label,
   background: none;
   color: var(--seed-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .kv-remove:hover {
   background: var(--seed-danger-bg);
@@ -2387,12 +2427,12 @@ label,
   align-items: center;
   gap: 8px;
   padding: 8px 12px 8px 8px;
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   border: 1px solid var(--seed-border);
   background: var(--seed-surface);
   color: var(--seed-fg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
   max-width: 100%;
 }
 .mcp-agent-pick:hover,
@@ -2456,7 +2496,7 @@ label,
   font-size: var(--text-xs);
   color: transparent;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .mcp-agent-check.checked,
 .agent-pick-check.checked {
@@ -2554,7 +2594,7 @@ label,
 .mcp-card-icon {
   width: 32px;
   height: 32px;
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   background: var(--seed-active-bg);
   border: 1px solid color-mix(in srgb, var(--seed-primary) 30%, transparent);
   color: var(--seed-active-fg);
@@ -2632,7 +2672,7 @@ label,
   color: var(--seed-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .btn-icon-action:hover {
   background: var(--seed-hover);
@@ -2695,7 +2735,7 @@ label,
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--seed-shadow-pop);
   z-index: 10;
 }
 .agent-badge[data-tooltip]:hover::after {
@@ -2903,7 +2943,7 @@ label,
   padding: 10px 12px;
   text-align: left;
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   background: var(--seed-surface);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -3084,7 +3124,7 @@ label,
   line-height: 1.4;
   flex-shrink: 0;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .skill-source-link:hover {
   filter: brightness(1.05);
@@ -3174,7 +3214,7 @@ label,
   font-weight: 500;
   line-height: 1.4;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .skill-source-chip:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 18%);
@@ -3298,7 +3338,7 @@ label,
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
 }
 .skill-add-tab svg {
   width: 16px;
@@ -3387,7 +3427,7 @@ label,
   gap: 10px;
   padding: 12px 12px;
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   background: var(--seed-surface);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -3557,12 +3597,13 @@ label,
   gap: 12px;
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
   padding: 14px 16px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .claude-env-card:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 12%);
+  box-shadow: var(--seed-shadow-card);
 }
 .claude-env-card.is-default {
   border-color: color-mix(in srgb, var(--seed-primary) 35%, var(--seed-border));
@@ -3824,7 +3865,7 @@ label,
   margin-bottom: 12px;
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
 }
 .oc-defaults-main {
   flex: 1;
@@ -3861,7 +3902,7 @@ label,
   margin-bottom: 12px;
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
 }
 .oc-fork-sync-main {
   min-width: 0;
@@ -4771,7 +4812,7 @@ label,
   overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 2px);
+  border-radius: var(--seed-radius-md);
   background: var(--seed-surface);
 }
 
