@@ -116,7 +116,7 @@ export default function ProjectConfig() {
               readOnly
               placeholder="点击右侧按钮选择项目目录…"
             />
-            <button className="form-input-action" onClick={handlePickDir} disabled={busy} title="选择目录">
+            <button className="form-input-action" onClick={handlePickDir} disabled={busy} data-tooltip="选择目录">
               <IconFolder />
             </button>
           </div>

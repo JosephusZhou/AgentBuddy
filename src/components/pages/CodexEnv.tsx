@@ -901,7 +901,7 @@ export default function CodexEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn"
-                      title="同步默认环境 skills 到此环境"
+                      data-tooltip="同步默认环境 skills 到此环境"
                       onClick={() => void handleSyncSkills(env)}
                       disabled={busy || !env.dirExists}
                     >
@@ -912,7 +912,7 @@ export default function CodexEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn"
-                      title="同步默认环境 MCP 到此环境"
+                      data-tooltip="同步默认环境 MCP 到此环境"
                       onClick={() => void handleSyncMcp(env)}
                       disabled={busy || !env.dirExists}
                     >
@@ -924,7 +924,7 @@ export default function CodexEnv() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`移除别名 ${env.aliasName}`}
+                        data-tooltip={`移除别名 ${env.aliasName}`}
                         onClick={() => void handleRemoveEnvAlias(env)}
                         disabled={busy}
                       >
@@ -934,7 +934,7 @@ export default function CodexEnv() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`写入别名 ${env.aliasName}`}
+                        data-tooltip={`写入别名 ${env.aliasName}`}
                         onClick={() => void handleInstallEnvAlias(env)}
                         disabled={busy || !env.dirExists}
                       >
@@ -945,7 +945,7 @@ export default function CodexEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="打开 config.toml"
+                    data-tooltip="打开 config.toml"
                     onClick={() => void handleOpenConfig(env.id)}
                     disabled={!env.dirExists}
                   >
@@ -954,7 +954,7 @@ export default function CodexEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="在 Finder 中打开"
+                    data-tooltip="在 Finder 中打开"
                     onClick={() => void handleReveal(env.id)}
                     disabled={!env.dirExists}
                   >
@@ -963,7 +963,7 @@ export default function CodexEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="以此为源复制"
+                    data-tooltip="以此为源复制"
                     onClick={() => openClone(env)}
                     disabled={!env.dirExists}
                   >
@@ -972,7 +972,7 @@ export default function CodexEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="编辑环境信息"
+                    data-tooltip="编辑环境信息"
                     onClick={() => void openEdit(env)}
                   >
                     <IconEdit />
@@ -981,7 +981,7 @@ export default function CodexEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn danger"
-                      title="删除"
+                      data-tooltip="删除"
                       onClick={() => {
                         setDeleteTarget(env);
                         setDeleteFiles(false);
@@ -1167,7 +1167,7 @@ export default function CodexEnv() {
                 <button
                   type="button"
                   className="form-input-action"
-                  title={showCloneApiKey ? "隐藏 Token" : "显示 Token"}
+                  data-tooltip={showCloneApiKey ? "隐藏 Token" : "显示 Token"}
                   aria-label={showCloneApiKey ? "隐藏 Token" : "显示 Token"}
                   aria-pressed={showCloneApiKey}
                   onClick={() => setShowCloneApiKey((v) => !v)}
@@ -1184,7 +1184,7 @@ export default function CodexEnv() {
                 <button
                   type="button"
                   className="claude-env-fetch-models-btn"
-                  title="从当前 Base URL 拉取模型列表"
+                  data-tooltip="从当前 Base URL 拉取模型列表"
                   onClick={() => void fetchModels("clone")}
                   disabled={busy || cloneModelsLoading}
                 >
@@ -1397,7 +1397,7 @@ export default function CodexEnv() {
                     <button
                       type="button"
                       className="form-input-action"
-                      title={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
+                      data-tooltip={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
                       aria-label={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
                       aria-pressed={editApiKeyVisible}
                       onClick={() => setEditApiKeyVisible((v) => !v)}
@@ -1414,7 +1414,7 @@ export default function CodexEnv() {
                     <button
                       type="button"
                       className="claude-env-fetch-models-btn"
-                      title="从当前 Base URL 拉取模型列表"
+                      data-tooltip="从当前 Base URL 拉取模型列表"
                       onClick={() => void fetchModels("edit")}
                       disabled={busy || editModelsLoading}
                     >

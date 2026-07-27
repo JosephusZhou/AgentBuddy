@@ -785,14 +785,14 @@ export default function McpManage() {
                       <button
                         className="btn-icon-action mcp-card-action"
                         onClick={() => openEdit(server)}
-                        title="编辑"
+                        data-tooltip="编辑"
                       >
                         <IconEdit />
                       </button>
                       <button
                         className="btn-delete mcp-card-action"
                         onClick={() => openDelete(server.id)}
-                        title="删除"
+                        data-tooltip="删除"
                       >
                         <IconTrash />
                       </button>
@@ -933,7 +933,7 @@ export default function McpManage() {
                           type="button"
                           className="kv-remove"
                           onClick={() => removeEnvRow(item.id)}
-                          title="删除"
+                          data-tooltip="删除"
                         >
                           <IconClose />
                         </button>
@@ -989,7 +989,7 @@ export default function McpManage() {
                           type="button"
                           className="kv-remove"
                           onClick={() => removeHeaderRow(item.id)}
-                          title="删除"
+                          data-tooltip="删除"
                         >
                           <IconClose />
                         </button>
@@ -1027,7 +1027,7 @@ export default function McpManage() {
               {testResult && (
                 <pre
                   className="mcp-json-preview"
-                  style={{ borderColor: testResult.ok ? "#16a34a" : "#dc2626" }}
+                  style={{ borderColor: testResult.ok ? "var(--seed-status-connected)" : "var(--seed-status-disconnected)" }}
                 >
                   {(testResult.ok ? "✓ " : "✗ ") + testResult.message}
                   {testResult.detail ? "\n\n" + testResult.detail : ""}

@@ -61,7 +61,7 @@ export default function Preferences({ theme, onThemeChange }: PreferencesProps) 
                         className={`pref-theme-card ${selected ? "selected" : ""}`}
                         onClick={() => onThemeChange(item.id)}
                         aria-pressed={selected}
-                        title={item.description}
+                        data-tooltip={item.description}
                       >
                         {/* data-theme 局部作用域：让预览吃到对应主题令牌 */}
                         <div data-theme={item.id}>

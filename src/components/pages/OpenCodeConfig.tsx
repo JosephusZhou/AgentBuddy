@@ -452,10 +452,10 @@ function ModelChip({
         {thinking ? <div className="oc-model-chip-meta">{thinking}</div> : null}
       </div>
       <div className="oc-model-chip-actions">
-        <button type="button" className="btn-icon-action" title="编辑模型" onClick={onEdit}>
+        <button type="button" className="btn-icon-action" data-tooltip="编辑模型" onClick={onEdit}>
           <IconEdit />
         </button>
-        <button type="button" className="btn-delete" title="删除模型" onClick={onDelete}>
+        <button type="button" className="btn-delete" data-tooltip="删除模型" onClick={onDelete}>
           <IconTrash />
         </button>
       </div>
@@ -1122,7 +1122,7 @@ export default function OpenCodeConfig() {
                               <span className="oc-fork-sync-name">{t.displayName}</span>
                               <span
                                 className={`oc-fork-sync-badge oc-fork-sync-badge-${t.status}`}
-                                title={t.message}
+                                data-tooltip={t.message}
                               >
                                 {t.status === "in_sync"
                                   ? "已对齐"
@@ -1297,7 +1297,7 @@ export default function OpenCodeConfig() {
                       <button
                         type="button"
                         className="btn-icon-action mcp-card-action"
-                        title="添加模型"
+                        data-tooltip="添加模型"
                         onClick={() => openAddModel(p.id)}
                       >
                         <IconPlus />
@@ -1305,7 +1305,7 @@ export default function OpenCodeConfig() {
                       <button
                         type="button"
                         className="btn-icon-action mcp-card-action"
-                        title="编辑"
+                        data-tooltip="编辑"
                         onClick={() => void openEditProvider(p)}
                       >
                         <IconEdit />
@@ -1313,7 +1313,7 @@ export default function OpenCodeConfig() {
                       <button
                         type="button"
                         className="btn-delete mcp-card-action"
-                        title="删除"
+                        data-tooltip="删除"
                         onClick={() => {
                           setDeleteAuthToo(true);
                           setDeleteProvider(p);
@@ -1543,7 +1543,7 @@ export default function OpenCodeConfig() {
                     <button
                       type="button"
                       className="form-input-action"
-                      title={showApiKey ? "隐藏" : "显示"}
+                      data-tooltip={showApiKey ? "隐藏" : "显示"}
                       onClick={() => setShowApiKey((v) => !v)}
                       disabled={busy}
                     >

@@ -1202,7 +1202,7 @@ export default function SkillsManage() {
                 <button
                   type="button"
                   className="skill-search-clear"
-                  title="清空搜索"
+                  data-tooltip="清空搜索"
                   aria-label="清空搜索"
                   onClick={() => {
                     setSearchInput("");
@@ -1268,7 +1268,7 @@ export default function SkillsManage() {
                           type="button"
                           className={`skill-source-chip skill-source-chip-tag ${active ? "active" : ""}`}
                           aria-pressed={active}
-                          title={opt.label}
+                          data-tooltip={opt.label}
                           onClick={() => setActiveTag(opt.key)}
                         >
                           <span className="skill-source-chip-label">{opt.label}</span>
@@ -1332,7 +1332,7 @@ export default function SkillsManage() {
                                 <button
                                   type="button"
                                   className={`skill-source-link ${hostTag}`}
-                                  title={`打开仓库：${repoUrl}`}
+                                  data-tooltip={`打开仓库：${repoUrl}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     void openRepo(skill);
@@ -1371,7 +1371,7 @@ export default function SkillsManage() {
                             <button
                               type="button"
                               className="claude-env-action-btn"
-                              title={
+                              data-tooltip={
                                 skill.updateAvailable
                                   ? "有更新，点击拉取远端最新"
                                   : "更新到远端最新"
@@ -1385,7 +1385,7 @@ export default function SkillsManage() {
                           <button
                             type="button"
                             className="claude-env-action-btn"
-                            title="编辑标签与应用 Agent"
+                            data-tooltip="编辑标签与应用 Agent"
                             onClick={() => openEdit(skill)}
                             disabled={isDeleting || exportingId === skill.id || isBatchRunning}
                           >
@@ -1394,7 +1394,7 @@ export default function SkillsManage() {
                           <button
                             type="button"
                             className="claude-env-action-btn"
-                            title="应用到目录…"
+                            data-tooltip="应用到目录…"
                             onClick={() => openDirectoryApply(skill)}
                             disabled={exportingId === skill.id || isBatchRunning}
                           >
@@ -1403,7 +1403,7 @@ export default function SkillsManage() {
                           <button
                             type="button"
                             className="claude-env-action-btn danger"
-                            title="删除技能"
+                            data-tooltip="删除技能"
                             onClick={() => {
                               setDeleteTarget(skill);
                               setDeleteAgentCopies(false);
@@ -2098,7 +2098,7 @@ export default function SkillsManage() {
                           }`}
                           onClick={() => toggleEditAgent(agent.name)}
                           disabled={unsupported || isSavingEdit}
-                          title={unsupported ? "该 Agent 暂无标准 Skills 目录" : undefined}
+                          data-tooltip={unsupported ? "该 Agent 暂无标准 Skills 目录" : undefined}
                         >
                           <span className={`agent-pick-icon ${selected ? "found" : ""}`}>
                             {getAgentIcon(agent.name) ?? agent.icon}
@@ -2535,7 +2535,7 @@ export default function SkillsManage() {
                         }`}
                         onClick={() => toggleBatchApplyAgent(agent.name)}
                         disabled={unsupported || isBatchRunning}
-                        title={unsupported ? "该 Agent 暂无标准 Skills 目录" : undefined}
+                        data-tooltip={unsupported ? "该 Agent 暂无标准 Skills 目录" : undefined}
                       >
                         <span className={`agent-pick-icon ${selected ? "found" : ""}`}>
                           {getAgentIcon(agent.name) ?? agent.icon}

@@ -978,6 +978,15 @@ input, textarea, [contenteditable="true"] {
 button { font-family: inherit; cursor: pointer; }
 input { font-family: inherit; }
 
+/* 减少动态效果：系统开启 prefers-reduced-motion 时全局关停动画/过渡 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ===== APP LAYOUT ===== */
 .app {
   display: flex;
@@ -2099,8 +2108,10 @@ a[href]:focus-visible {
   to { transform: rotate(360deg); }
 }
 
-/* Tooltip — show below header buttons to avoid clipping at top edge */
-.action-btn::after {
+/* Tooltip —— 通用 data-tooltip 机制：悬停/键盘焦点即时弹出，替代原生 title。
+   显示在触发元素下方（header 与 card item 按钮共用），避免顶边裁剪。 */
+[data-tooltip] { position: relative; }
+[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   top: calc(100% + 6px);
@@ -2119,9 +2130,10 @@ a[href]:focus-visible {
   pointer-events: none;
   transition: opacity 0.15s ease;
   box-shadow: var(--seed-shadow-pop);
-  z-index: 10;
+  z-index: 50;
 }
-.action-btn:hover::after {
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
   opacity: 1;
 }
 

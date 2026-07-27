@@ -12,6 +12,7 @@ import Preferences from "./components/pages/Preferences";
 import NetworkSettings from "./components/pages/NetworkSettings";
 import WebDAV from "./components/pages/WebDAV";
 import { applyTheme, loadAppConfig, saveTheme, DEFAULT_THEME, type Theme } from "./lib/theme";
+import { useGlobalModalA11y } from "./components/ui";
 
 export type MainView =
   | "agent-sniff"
@@ -26,6 +27,8 @@ export type SettingsView = "preferences" | "network" | "webdav";
 export type AppMode = "main" | "settings";
 
 export default function App() {
+  // 全局弹窗可访问性：打开自动聚焦主输入框 + Tab 焦点圈定（见 ui.tsx）
+  useGlobalModalA11y();
   const [mode, setMode] = useState<AppMode>("main");
   const [mainView, setMainView] = useState<MainView>("agent-sniff");
   const [settingsView, setSettingsView] = useState<SettingsView>("preferences");

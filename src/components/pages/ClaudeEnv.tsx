@@ -885,7 +885,7 @@ export default function ClaudeEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn"
-                      title="同步全局 skills 到此环境"
+                      data-tooltip="同步全局 skills 到此环境"
                       onClick={() => void handleSyncSkills(env)}
                       disabled={busy || !env.dirExists}
                     >
@@ -896,7 +896,7 @@ export default function ClaudeEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn"
-                      title="同步全局 MCP 到此环境"
+                      data-tooltip="同步全局 MCP 到此环境"
                       onClick={() => void handleSyncMcp(env)}
                       disabled={busy || !env.dirExists}
                     >
@@ -908,7 +908,7 @@ export default function ClaudeEnv() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`移除别名 ${env.aliasName}`}
+                        data-tooltip={`移除别名 ${env.aliasName}`}
                         onClick={() => void handleRemoveEnvAlias(env)}
                         disabled={busy}
                       >
@@ -918,7 +918,7 @@ export default function ClaudeEnv() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`写入别名 ${env.aliasName}`}
+                        data-tooltip={`写入别名 ${env.aliasName}`}
                         onClick={() => void handleInstallEnvAlias(env)}
                         disabled={busy || !env.dirExists}
                       >
@@ -929,7 +929,7 @@ export default function ClaudeEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="打开 settings.json"
+                    data-tooltip="打开 settings.json"
                     onClick={() => void handleOpenSettings(env.id)}
                     disabled={!env.dirExists}
                   >
@@ -938,7 +938,7 @@ export default function ClaudeEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="在 Finder 中打开"
+                    data-tooltip="在 Finder 中打开"
                     onClick={() => void handleReveal(env.id)}
                     disabled={!env.dirExists}
                   >
@@ -947,7 +947,7 @@ export default function ClaudeEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="以此为源复制"
+                    data-tooltip="以此为源复制"
                     onClick={() => openClone(env)}
                     disabled={!env.dirExists}
                   >
@@ -956,7 +956,7 @@ export default function ClaudeEnv() {
                   <button
                     type="button"
                     className="claude-env-action-btn"
-                    title="编辑环境信息"
+                    data-tooltip="编辑环境信息"
                     onClick={() => void openEdit(env)}
                   >
                     <IconEdit />
@@ -965,7 +965,7 @@ export default function ClaudeEnv() {
                     <button
                       type="button"
                       className="claude-env-action-btn danger"
-                      title="删除"
+                      data-tooltip="删除"
                       onClick={() => {
                         setDeleteTarget(env);
                         setDeleteFiles(false);
@@ -1151,7 +1151,7 @@ export default function ClaudeEnv() {
                 <button
                   type="button"
                   className="form-input-action"
-                  title={showCloneApiKey ? "隐藏 API Key" : "显示 API Key"}
+                  data-tooltip={showCloneApiKey ? "隐藏 API Key" : "显示 API Key"}
                   aria-label={showCloneApiKey ? "隐藏 API Key" : "显示 API Key"}
                   aria-pressed={showCloneApiKey}
                   onClick={() => setShowCloneApiKey((v) => !v)}
@@ -1168,7 +1168,7 @@ export default function ClaudeEnv() {
                 <button
                   type="button"
                   className="claude-env-fetch-models-btn"
-                  title="从当前 Base URL 拉取模型列表"
+                  data-tooltip="从当前 Base URL 拉取模型列表"
                   onClick={() => void fetchModels("clone")}
                   disabled={busy || cloneModelsLoading}
                 >
@@ -1368,7 +1368,7 @@ export default function ClaudeEnv() {
                     <button
                       type="button"
                       className="form-input-action"
-                      title={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
+                      data-tooltip={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
                       aria-label={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
                       aria-pressed={editApiKeyVisible}
                       onClick={() => setEditApiKeyVisible((v) => !v)}
@@ -1385,7 +1385,7 @@ export default function ClaudeEnv() {
                     <button
                       type="button"
                       className="claude-env-fetch-models-btn"
-                      title="从当前 Base URL 拉取模型列表"
+                      data-tooltip="从当前 Base URL 拉取模型列表"
                       onClick={() => void fetchModels("edit")}
                       disabled={busy || editModelsLoading}
                     >

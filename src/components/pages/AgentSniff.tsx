@@ -356,7 +356,7 @@ export default function AgentSniff() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`打开主配置 ${basename(settingsFile)}`}
+                        data-tooltip={`打开主配置 ${basename(settingsFile)}`}
                         onClick={() => handleOpenFile(agent.name, "settings")}
                         disabled={busy}
                       >
@@ -367,7 +367,7 @@ export default function AgentSniff() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={
+                        data-tooltip={
                           settingsFile
                             ? `打开 MCP 配置 ${basename(mcpFile)}`
                             : `打开配置文件 ${basename(mcpFile)}`
@@ -382,7 +382,7 @@ export default function AgentSniff() {
                       <button
                         type="button"
                         className="claude-env-action-btn"
-                        title={`在 Finder 中打开 ${displayHomePath(configDir)}`}
+                        data-tooltip={`在 Finder 中打开 ${displayHomePath(configDir)}`}
                         onClick={() => handleRevealDir(agent.name)}
                         disabled={busy}
                       >

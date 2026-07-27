@@ -337,7 +337,7 @@ export default function WebDAV() {
           <span className="webdav-count">
             {loaded ? `${connections.length} 个连接` : "加载中…"}
           </span>
-          <button className="btn-add" onClick={openAdd} title="添加 WebDAV 连接">
+          <button className="btn-add" onClick={openAdd} data-tooltip="添加 WebDAV 连接">
             <IconPlus />
           </button>
         </div>
@@ -361,7 +361,7 @@ export default function WebDAV() {
                   <button
                     type="button"
                     className={`status-dot ${isTesting ? "checking" : conn.status}`}
-                    title={isTesting ? "检测中…" : "重新检测连接"}
+                    data-tooltip={isTesting ? "检测中…" : "重新检测连接"}
                     onClick={() => {
                       if (!isTesting) void runTest(conn.id, conn.name);
                     }}
@@ -386,7 +386,7 @@ export default function WebDAV() {
                   <button
                     className="btn-delete"
                     onClick={() => void runTest(conn.id, conn.name)}
-                    title="重新检测"
+                    data-tooltip="重新检测"
                     disabled={isTesting}
                     style={{ opacity: 1 }}
                   >
@@ -395,7 +395,7 @@ export default function WebDAV() {
                   <button
                     className="btn-delete"
                     onClick={() => openEdit(conn)}
-                    title="编辑连接"
+                    data-tooltip="编辑连接"
                     style={{ opacity: 1 }}
                   >
                     <IconEdit />
@@ -403,7 +403,7 @@ export default function WebDAV() {
                   <button
                     className="btn-delete"
                     onClick={() => setDeleteTarget(conn.id)}
-                    title="删除连接"
+                    data-tooltip="删除连接"
                     style={{ opacity: 1 }}
                   >
                     <IconTrash />
