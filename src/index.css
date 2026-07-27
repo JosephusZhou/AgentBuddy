@@ -2683,6 +2683,23 @@ a[href]:focus-visible {
 .mcp-card-action {
   opacity: 1;
 }
+
+/* ===== MCP 批量管理：可选卡片（对齐 skill-card 的批量选择态） ===== */
+.mcp-card.selectable {
+  cursor: pointer;
+}
+.mcp-card.selectable:hover {
+  border-color: color-mix(in srgb, var(--seed-primary), var(--seed-border) 55%);
+}
+.mcp-card.selected {
+  border-color: var(--seed-primary);
+  background: var(--seed-active-bg);
+}
+/* 卡片内复选框：顶部对齐标题行 */
+.mcp-card-check {
+  margin-top: 0;
+  flex-shrink: 0;
+}
 .btn-icon-action {
   display: flex;
   align-items: center;

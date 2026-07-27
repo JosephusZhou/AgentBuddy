@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Frontend build (Vite → dist, consumed by Tauri)
 dist/
