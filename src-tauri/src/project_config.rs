@@ -6,7 +6,7 @@
 //!
 //! Intentionally excluded (not typical repo-level skeletons):
 //! - `claude-desktop` — desktop app config, not project tree
-//! - `kiro` — no settled project-level layout yet
+//! - `codebuddy` — 国际版已移除支持，仅保留 CodeBuddy CN
 //!
 //! See also `PROJECT_AI_CONFIG_IMPROVEMENTS.md`.
 
@@ -92,13 +92,6 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("GEMINI.md"),
         config_dir: ".gemini",
         full_sub_dirs: &["commands"],
-        config_files: &[],
-    },
-    AgentProjectSpec {
-        name: "codebuddy",
-        root_file: Some("AGENTS.md"),
-        config_dir: ".codebuddy",
-        full_sub_dirs: &["rules", "skills"],
         config_files: &[],
     },
     AgentProjectSpec {
@@ -536,14 +529,9 @@ mod tests {
     }
 
     #[test]
-    fn full_mode_creates_shared_guide_and_dedupes_codebuddy_dir() {
+    fn full_mode_creates_shared_guide_and_codebuddy_cn_dir() {
         let base = scratch("full-dedupe");
-        let agents = vec![
-            req("codebuddy"),
-            req("codebuddy-cn"),
-            req("codex"),
-            req("opencode"),
-        ];
+        let agents = vec![req("codebuddy-cn"), req("codex"), req("opencode")];
         let result =
             init_project_config(base.to_str().unwrap(), &agents, &InitMode::Full, false).unwrap();
         assert!(

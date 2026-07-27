@@ -4,6 +4,10 @@
 > **日期**：2026-07-14  
 > **目的**：为「应用到 Agent / 删除时同步改配置文件 / Skills 管理」提供准确落盘规格  
 > **本阶段**：仅研究与方案；**不实现**写盘代码
+>
+> **变更（2026-07-27）**：`kiro` 与 `codebuddy`（国际版）支持已移除，仅保留
+> `codebuddy-cn`（CodeBuddy CN，独占 `~/.codebuddy`）。下文 §10/§11 为移除前的
+> 历史校验与来源记录，予以保留。
 
 ---
 
@@ -25,11 +29,9 @@
 | 3 | `claude-desktop` | Claude Desktop | `~/Library/Application Support/Claude*`（含 `claude_desktop_config.json`） |
 | 4 | `opencode` | OpenCode | `~/.config/opencode` |
 | 5 | `deveco-code` | DevEco Code | `~/.config/deveco` |
-| 6 | `kiro` | Kiro | `~/.kiro` |
-| 7 | `antigravity` | Antigravity | `~/.gemini` |
-| 8 | `codebuddy` | CodeBuddy | `~/.codebuddy` |
-| 9 | `codebuddy-cn` | CodeBuddy CN | `~/.codebuddy`（**与 CodeBuddy 共享**） |
-| 10 | `workbuddy` | WorkBuddy | `~/.workbuddy` |
+| 6 | `antigravity` | Antigravity | `~/.gemini` |
+| 7 | `codebuddy-cn` | CodeBuddy CN | `~/.codebuddy` |
+| 8 | `workbuddy` | WorkBuddy | `~/.workbuddy` |
 
 ---
 
@@ -42,7 +44,7 @@
 | dialect id | 顶层键 | 文件形态 | 代表 Agent |
 |------------|--------|----------|------------|
 | `toml.mcp_servers` | `[mcp_servers.<name>]` | TOML | Codex |
-| `json.mcpServers` | `mcpServers` | JSON | Claude Code / Desktop / Kiro / CodeBuddy / WorkBuddy |
+| `json.mcpServers` | `mcpServers` | JSON | Claude Code / Desktop / CodeBuddy CN / WorkBuddy |
 | `json.mcp` | `mcp` | JSON / JSONC | OpenCode / DevEco |
 | `json.gemini_mixed` | `mcpServers`（字段混用） | JSON | Antigravity（Gemini 系） |
 
@@ -52,7 +54,7 @@
 |------------|------|
 | `dir.SKILL.md` | `<root>/skills/<skill-name>/SKILL.md` |
 | `dir.agents_skills` | 官方新路径 `~/.agents/skills`（Codex）；本机仍见 `~/.codex/skills` |
-| `marketplace` | 市场目录与用户 skills 目录分离（如 CodeBuddy `skills-marketplace`） |
+| `marketplace` | 市场目录与用户 skills 目录分离（如 CodeBuddy CN `skills-marketplace`） |
 
 ### 3.3 写策略枚举（实现时复用）
 
@@ -63,7 +65,7 @@
 | `jsonc-aware-merge` | 支持注释与尾逗号 |
 | `create-if-missing` | 文件/目录不存在则建最小骨架 |
 | `scope-user-global` | 只写用户全局，不写项目 |
-| `shared-root-multi-agent` | 多 Agent 共用同一文件（CodeBuddy / CN） |
+| `shared-root-multi-agent` | 多 Agent 共用同一文件（机制保留；codebuddy 国际版移除后当前无实例） |
 | `skill-copy-or-symlink` | skills 目录复制或软链 |
 
 ---
@@ -77,10 +79,8 @@
 | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | `json.mcpServers` | 无明确全局 Skills（缺口） | MCP 高 / Skills 低 |
 | `opencode` | `~/.config/opencode/opencode.json`（或 `.jsonc`） | `json.mcp` | `~/.config/opencode/skills/` | 高 |
 | `deveco-code` | `~/.config/deveco/deveco.jsonc` | `json.mcp` + JSONC | `~/.config/deveco/skills/` | 中高 |
-| `kiro` | `~/.kiro/settings/mcp.json` | `json.mcpServers` | `~/.kiro/skills/`、项目 `.kiro/skills/` | 中高 |
 | `antigravity` | 主：`~/.gemini/settings.json`；兼容：`~/.gemini/config/mcp_config.json` | `json.gemini_mixed` | `~/.gemini/skills/`（迁移路径另有 `antigravity-cli/skills`） | 中 |
-| `codebuddy` | 优先 `~/.codebuddy/.mcp.json`，兼容 `mcp.json` | `json.mcpServers` | `~/.codebuddy/skills/`（可缺省；有 marketplace） | 中高 |
-| `codebuddy-cn` | **同上（共享 root）** | 同上 | 同上 | 中高 |
+| `codebuddy-cn` | 优先 `~/.codebuddy/.mcp.json`，兼容 `mcp.json` | `json.mcpServers` | `~/.codebuddy/skills/`（可缺省；有 marketplace） | 中高 |
 | `workbuddy` | `~/.workbuddy/.mcp.json` | `json.mcpServers` | `~/.workbuddy/skills/` | 中高 |
 
 置信度说明：
@@ -354,57 +354,7 @@ url = "https://example.com/mcp"
 
 ---
 
-### 5.6 Kiro (`kiro`)
-
-**配置根**：`~/.kiro`（可用 `KIRO_HOME` 覆盖，实现时可选支持）
-
-**MCP**
-
-| 项 | 值 |
-|----|-----|
-| 用户 | `~/.kiro/settings/mcp.json` |
-| 工作区 | `<project>/.kiro/settings/mcp.json`（更高优先级） |
-| 方言 | `json.mcpServers` |
-| 结构 | 标准 `mcpServers`：`command` / `args` / `env` / `disabled` 等 |
-
-示例骨架：
-
-```json
-{
-  "mcpServers": {
-    "example": {
-      "command": "uvx",
-      "args": ["some-mcp-server@latest"],
-      "env": {},
-      "disabled": false
-    }
-  }
-}
-```
-
-**Skills**
-
-| 项 | 值 |
-|----|-----|
-| 全局 | `~/.kiro/skills/<skill>/SKILL.md` |
-| 工作区 | `.kiro/skills/<skill>/SKILL.md` |
-| 约定 | 必须是**子目录 + SKILL.md**，不可直接散落 md |
-
-**推荐写策略**
-
-1. 全局应用：`create-if-missing` `~/.kiro/settings/mcp.json`  
-2. 本机可能尚无该文件——属于正常空状态  
-3. Skills：`~/.kiro/skills/`  
-
-**来源**
-
-- [Kiro CLI MCP](https://kiro.dev/docs/cli/mcp/)  
-- [Kiro MCP configuration](https://kiro.dev/docs/mcp/configuration/)  
-- [Kiro Skills](https://kiro.dev/docs/skills/)  
-
----
-
-### 5.7 Antigravity (`antigravity`)
+### 5.6 Antigravity (`antigravity`)
 
 **配置根**：`~/.gemini`  
 **说明**：Gemini CLI → Antigravity 迁移中，路径存在新旧两套；以**本机实测 + 官方迁移文档**双轨兼容。
@@ -459,10 +409,9 @@ Gemini 混用字段示例骨架：
 
 ---
 
-### 5.8 CodeBuddy / CodeBuddy CN（`codebuddy` / `codebuddy-cn`）
+### 5.7 CodeBuddy CN（`codebuddy-cn`）
 
-**配置根**：**共享** `~/.codebuddy`  
-**含义**：对任一端「应用 MCP」都会影响另一端可见配置。
+**配置根**：`~/.codebuddy`（原与国际版 CodeBuddy 共享；国际版移除后由 CN 独占）
 
 **MCP**
 
@@ -507,7 +456,7 @@ Gemini 混用字段示例骨架：
 
 1. 读优先级：`.mcp.json` → `mcp.json`  
 2. 写：若 `.mcp.json` 存在则写它，否则写/创建本机已在用的 `mcp.json`（或统一迁移到 `.mcp.json`）  
-3. `shared-root-multi-agent`：UI 若同时勾选 CodeBuddy 与 CN，只写一次  
+3. ~~`shared-root-multi-agent`~~：机制保留；国际版移除后当前无共享根实例  
 4. Skills：`~/.codebuddy/skills/`（`create-if-missing`）  
 
 **来源**
@@ -517,9 +466,9 @@ Gemini 混用字段示例骨架：
 
 ---
 
-### 5.9 WorkBuddy (`workbuddy`)
+### 5.8 WorkBuddy (`workbuddy`)
 
-**配置根**：`~/.workbuddy`（与 CodeBuddy 分离）
+**配置根**：`~/.workbuddy`（与 CodeBuddy CN 分离）
 
 **MCP**
 
@@ -546,7 +495,7 @@ Gemini 混用字段示例骨架：
 
 **来源**
 
-- CodeBuddy 生态发布说明中 WorkBuddy 独立目录约定  
+- CodeBuddy CN 生态发布说明中 WorkBuddy 独立目录约定  
 - 本机 `~/.workbuddy/.mcp.json` 结构校验  
 - 社区 Skills 安装路径惯例  
 
@@ -561,7 +510,7 @@ AgentBuddy UI 当前模型（`McpManage.tsx`）：
 - `command` / `args[]` / `env{}`  
 - `url` / `headers{}`  
 
-| UI | `json.mcpServers`（Claude/Kiro/CodeBuddy/WorkBuddy） | `json.mcp`（OpenCode/DevEco） | `toml.mcp_servers`（Codex） | `json.gemini_mixed` |
+| UI | `json.mcpServers`（Claude/CodeBuddy CN/WorkBuddy） | `json.mcp`（OpenCode/DevEco） | `toml.mcp_servers`（Codex） | `json.gemini_mixed` |
 |----|------------------------------------------------------|------------------------------|-----------------------------|---------------------|
 | title | 对象键 `mcpServers[title]` | 对象键 `mcp[title]` | 表名 `mcp_servers.title` | `mcpServers[title]` |
 | stdio | `command` + `args` + `env`；可选 `type: "stdio"` | `type: "local"` + `command: [cmd, ...args]` + `environment` | `type="stdio"` + `command` + `args` + `[.env]` | `command` + `args` + `env` |
@@ -599,7 +548,7 @@ for agent in selectedAgents:
 1. **只写用户全局**（见上表）  
 2. **同名覆盖，异名保留**  
 3. **原子写**，避免半截 JSON/TOML  
-4. CodeBuddy + CN 同时勾选 → **去重 path** 只写一次  
+4. 共享物理根的多个 agent 同时勾选 → **去重 path** 只写一次（机制保留）  
 5. Claude Code → 只动 `~/.claude.json` 的 `mcpServers`，不动其它大字段语义  
 
 ### 7.2 Delete（列表删除 + 可选同步配置）
@@ -646,9 +595,7 @@ interface McpAdapter {
 | Gemini `httpUrl` | 与 UI `url` 不一致 | 映射表强制转换；headers 需实测 |
 | Codex Skills 双路径 | `~/.codex/skills` vs `~/.agents/skills` | 写本机已存在者；两者都无则写 `~/.codex/skills` |
 | DevEco JSONC | 严格 JSON 写坏注释 | 必须 jsonc 库 |
-| CodeBuddy 共享 root | CN/国际版互相覆盖 | 路径去重 + UI 提示「共享配置」 |
 | Claude Code 大文件 | `~/.claude.json` 含大量状态 | 只改 `mcpServers` 键 |
-| Kiro 文件缺失 | 本机可能无 `mcp.json` | `create-if-missing` |
 | 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目 |
 | SSE 方言差异 | 各产品支持不一 | 能映射则映射，否则提示跳过 |
 | 密钥 | 配置中常含 token | AgentBuddy 永不日志打印 env/headers 值 |
@@ -657,7 +604,7 @@ interface McpAdapter {
 
 ## 9. 实现优先级建议（后续任务，非本次）
 
-1. **P0**：`json.mcpServers` 适配器（覆盖 Claude Code/Desktop、Kiro、CodeBuddy、WorkBuddy）  
+1. **P0**：`json.mcpServers` 适配器（覆盖 Claude Code/Desktop、CodeBuddy CN、WorkBuddy）  
 2. **P0**：`json.mcp` 适配器（OpenCode + DevEco JSONC）  
 3. **P1**：`toml.mcp_servers`（Codex）  
 4. **P1**：`json.gemini_mixed`（Antigravity）  

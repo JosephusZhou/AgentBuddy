@@ -9,7 +9,7 @@
 pub enum McpDialect {
     /// Codex: `config.toml` → `[mcp_servers.*]`
     TomlMcpServers,
-    /// Claude Desktop / Kiro / CodeBuddy* / WorkBuddy: 顶层 `mcpServers`
+    /// Claude Desktop / CodeBuddy CN / WorkBuddy: 顶层 `mcpServers`
     JsonMcpServers,
     /// OpenCode / DevEco: 顶层 `mcp`（JSON/JSONC）
     JsonMcp,
@@ -26,7 +26,7 @@ pub enum McpPath {
     Fixed(&'static str),
     /// OpenCode: `~/.config/opencode/opencode.{jsonc,json}`（存在优先，默认 `.json`）。
     OpencodeConfig,
-    /// CodeBuddy: `~/.codebuddy/{.mcp.json,mcp.json}`（存在优先，默认 `.mcp.json`）。
+    /// CodeBuddy CN: `~/.codebuddy/{.mcp.json,mcp.json}`（存在优先，默认 `.mcp.json`）。
     CodebuddyMcp,
     /// Claude Desktop: 在 `~/Library/Application Support` 下扫描。
     ClaudeDesktopScan,
@@ -64,7 +64,7 @@ pub struct AgentSpec {
     pub skills_roots: &'static [&'static str],
     pub skills_supported: bool,
 
-    /// 共享物理配置根标识（CodeBuddy 与 CodeBuddy CN 相同）；`None` 表示独立。
+    /// 共享物理配置根标识（多个 agent 指向同一物理根时使用）；`None` 表示独立。
     /// 用于 MCP/Skills 写入去重，避免对同一物理根写两次。
     pub shared_root: Option<&'static str>,
 }
@@ -125,10 +125,6 @@ pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
             );
             push(&mut out, windows_env_path("PROGRAMFILES", "OpenCode"));
         }
-        "kiro" => {
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Kiro"));
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Kiro/Kiro.exe"));
-        }
         "antigravity" => {
             push(
                 &mut out,
@@ -137,16 +133,6 @@ pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
             push(
                 &mut out,
                 windows_env_path("LOCALAPPDATA", "Programs/Antigravity/Antigravity.exe"),
-            );
-        }
-        "codebuddy" => {
-            push(
-                &mut out,
-                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy"),
-            );
-            push(
-                &mut out,
-                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy/CodeBuddy.exe"),
             );
         }
         "codebuddy-cn" => {
@@ -282,25 +268,7 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
-    // 6. Kiro CLI（AWS）
-    AgentSpec {
-        name: "kiro",
-        display_name: "Kiro",
-        icon: "Ki",
-        bin_paths: &["~/.local/bin/kiro-cli", "/Applications/Kiro CLI.app"],
-        search_names: &["kiro-cli", "kiro"],
-        config_paths: &["~/.kiro"],
-        scan_app_support: false,
-        mcp: McpSpec {
-            dialect: McpDialect::JsonMcpServers,
-            path: McpPath::Fixed(".kiro/settings/mcp.json"),
-            jsonc: false,
-        },
-        skills_roots: &["~/.kiro/skills"],
-        skills_supported: true,
-        shared_root: None,
-    },
-    // 7. Antigravity（Google）
+    // 6. Antigravity（Google）
     AgentSpec {
         name: "antigravity",
         display_name: "Antigravity",
@@ -318,25 +286,8 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
-    // 8. CodeBuddy（腾讯）
-    AgentSpec {
-        name: "codebuddy",
-        display_name: "CodeBuddy",
-        icon: "Cb",
-        bin_paths: &["~/.local/bin/codebuddy", "/Applications/CodeBuddy.app"],
-        search_names: &["codebuddy"],
-        config_paths: &["~/.codebuddy"],
-        scan_app_support: false,
-        mcp: McpSpec {
-            dialect: McpDialect::JsonMcpServers,
-            path: McpPath::CodebuddyMcp,
-            jsonc: false,
-        },
-        skills_roots: &["~/.codebuddy/skills"],
-        skills_supported: true,
-        shared_root: Some("codebuddy-shared"),
-    },
-    // 9. CodeBuddy CN（腾讯国内），与 CodeBuddy 共享 ~/.codebuddy
+    // 7. CodeBuddy CN（腾讯国内），独占 ~/.codebuddy
+    // （原国际版 CodeBuddy 已移除；历史共享根标识保留，旧配置不受影响）
     AgentSpec {
         name: "codebuddy-cn",
         display_name: "CodeBuddy CN",
@@ -354,7 +305,7 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: Some("codebuddy-shared"),
     },
-    // 10. WorkBuddy（腾讯）
+    // 8. WorkBuddy（腾讯）
     AgentSpec {
         name: "workbuddy",
         display_name: "WorkBuddy",

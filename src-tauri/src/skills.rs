@@ -509,7 +509,7 @@ fn agent_skills_targets() -> Vec<AgentSkillsTarget> {
 /// Map skill_id → set of agent names that have it installed.
 fn scan_applied_agents() -> HashMap<String, BTreeSet<String>> {
     let mut map: HashMap<String, BTreeSet<String>> = HashMap::new();
-    // Shared root: codebuddy + codebuddy-cn — mark both if either path has skill
+    // Shared root（shared_root 标识相同的 agent）— 任一路径有 skill 则标记同根所有 agent
     for target in agent_skills_targets() {
         if !target.supported {
             continue;
@@ -914,7 +914,7 @@ fn managed_entry_names(id: &str, skill_dir: &Path) -> Vec<String> {
 }
 
 /// 删除该技能在所有 Agent skills 目录下的副本（软链接 / 真实目录 / 悬空链接）。
-/// 共享物理根（codebuddy / codebuddy-cn）只处理一次；错误不致命，逐条收集。
+/// 共享物理根（shared_root 标识相同者）只处理一次；错误不致命，逐条收集。
 /// 返回清理成功的「物理根」数量，供上层提示。
 ///
 /// `managed_names` 通常由 `managed_entry_names` 生成，已含库 id 与 frontmatter 名。
@@ -1160,7 +1160,7 @@ fn remove_agent_skill_entry(root: &Path, entry_name: &str) -> Result<bool, Strin
 ///
 /// - `agents`: the desired set of agent sniff-names that should have this skill.
 /// - Newly desired agents get the requested installation under their first skills root (shared
-///   roots — codebuddy / codebuddy-cn — are written once).
+///   roots（shared_root 标识相同者）只写一次）。掉了右括号修正
 /// - Agents that were previously applied but are now unchecked have their entry
 ///   removed (symlink or real copy), unless the same root is still needed by a
 ///   desired agent.
@@ -2265,7 +2265,7 @@ fn skill_identity(dir_name: &str, doc: &SkillDoc) -> String {
 /// Scan every supported agent's skills dir, aggregating by skill identity so a
 /// skill installed in multiple agents becomes one entry with merged `found_agents`.
 /// Returns (scanned_agents, entries). The first physical dir seen wins as the
-/// import source. Mirrors `scan_applied_agents` for shared roots (codebuddy*),
+/// import source. Mirrors `scan_applied_agents` for shared roots,
 /// so both agents are credited.
 fn collect_sniff_scan() -> (usize, Vec<SniffScanEntry>) {
     let mut scanned_agents = 0usize;
@@ -2480,7 +2480,7 @@ pub fn sniff_skills() -> Result<SkillSniffResult, String> {
     let mut imported = 0usize;
     let mut found_entries = 0usize;
     let mut scanned_agents = 0usize;
-    // Avoid double-importing shared roots (codebuddy / codebuddy-cn)
+    // Avoid double-importing shared roots (shared_root 标识相同者)
     let mut seen_paths: BTreeSet<String> = BTreeSet::new();
 
     for target in agent_skills_targets() {

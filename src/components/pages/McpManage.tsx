@@ -77,12 +77,10 @@ function formatBatchMessage(result: McpBatchResult, action: "写入" | "删除")
   return `部分成功（${ok.length}/${result.results.length}）。失败：${detail}`;
 }
 
-/** 前端复现后端 dedupe_write_targets 的共享根归一：codebuddy / codebuddy-cn 写同一文件。
- *  用于把「实际写入失败」的 canonical 结果映射回用户选择的 agent。 */
-function canonicalWriteTarget(agent: string, selected: string[]): string {
-  if (agent === "codebuddy" || agent === "codebuddy-cn") {
-    return selected.includes("codebuddy") ? "codebuddy" : agent;
-  }
+/** 前端复现后端 dedupe_write_targets 的共享根归一。
+ *  codebuddy（国际版）移除后每个物理根只剩一个可选 agent，canonical 恒等于 agent 自身；
+ *  保留函数以隔离后端归一语义，未来再有共享根 agent 时在此扩展。 */
+function canonicalWriteTarget(agent: string, _selected: string[]): string {
   return agent;
 }
 

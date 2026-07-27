@@ -401,7 +401,7 @@ fn build_agents_group() -> BackupUnitNode {
     let mut seen_shared: HashSet<String> = HashSet::new();
 
     for spec in agents::agents() {
-        // Merge codebuddy-cn into codebuddy via shared_root
+        // 共享物理根的 agent 只建一个单元（shared_root 相同者跳过后续）
         if let Some(shared) = spec.shared_root {
             if !seen_shared.insert(shared.to_string()) {
                 continue;
@@ -420,15 +420,6 @@ fn build_agents_group() -> BackupUnitNode {
             }
             "codex" => {
                 children.push(build_codex_agent_unit(spec, is_found, &codex_envs));
-            }
-            "codebuddy" | "codebuddy-cn" => {
-                children.push(build_generic_agent_unit(
-                    "codebuddy",
-                    "CodeBuddy / CodeBuddy CN",
-                    spec,
-                    is_found || found.get("codebuddy-cn").map(|s| s.found).unwrap_or(false),
-                    sniff,
-                ));
             }
             _ => {
                 children.push(build_generic_agent_unit(
@@ -1842,15 +1833,7 @@ fn expand_unit_ids(unit_ids: &HashSet<String>) -> HashSet<String> {
     }
     if unit_ids.contains("agents") {
         for spec in agents::agents() {
-            if spec.name == "codebuddy-cn" {
-                continue;
-            }
-            let name = if spec.name == "codebuddy" {
-                "codebuddy"
-            } else {
-                spec.name
-            };
-            out.insert(format!("agent:{}", name));
+            out.insert(format!("agent:{}", spec.name));
         }
         // expand multi-env parents
         out.insert("agent:claude-code".into());
@@ -2004,14 +1987,10 @@ fn collect_codex_env(env_id: &str, out: &mut Vec<FileEntry>, warnings: &mut Vec<
 
 fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Vec<String>) {
     let unit = format!("agent:{}", name);
-    let spec_name = if name == "codebuddy" {
-        "codebuddy"
-    } else {
-        name
-    };
-    let Some(spec) = agents::find(spec_name).or_else(|| {
+    // 历史兼容：旧备份/配置可能引用已移除的 codebuddy（与 codebuddy-cn 同一物理根 ~/.codebuddy）
+    let Some(spec) = agents::find(name).or_else(|| {
         if name == "codebuddy" {
-            agents::find("codebuddy")
+            agents::find("codebuddy-cn")
         } else {
             None
         }

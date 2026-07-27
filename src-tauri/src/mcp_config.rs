@@ -171,7 +171,7 @@ pub fn remove_mcp_from_agents(title: &str, agents: &[String]) -> McpBatchResult 
 
 /// Scan all known agents' MCP configs and return unified records (grouped by title).
 pub fn sniff_mcp_servers() -> McpSniffResult {
-    // 扫描去重后的物理根：共享根（codebuddy*）只扫一次，两个名字由 agents_for_shared_root 归并。
+    // 扫描去重后的物理根：共享根（shared_root 标识相同者）只扫一次，名字由 agents_for_shared_root 归并。
     let mut seen_roots: BTreeSet<&str> = BTreeSet::new();
     let scan_agents: Vec<&str> = crate::agents::agents()
         .iter()
@@ -1805,15 +1805,12 @@ mod tests {
             "claude-desktop".into(),
             "opencode".into(),
             "deveco-code".into(),
-            "kiro".into(),
             "antigravity".into(),
-            "codebuddy".into(),
             "codebuddy-cn".into(),
             "workbuddy".into(),
         ];
         let r = apply_mcp_to_agents(&draft_stdio(title), &agents);
-        // codebuddy+cn deduped => 9 results
-        assert_eq!(r.results.len(), 9, "{:?}", r.results);
+        assert_eq!(r.results.len(), 8, "{:?}", r.results);
         assert!(r.all_ok, "{:?}", r.results);
 
         // dialect-specific checks
@@ -1824,12 +1821,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(oc["mcp"][title]["type"], "local");
-
-        let ki: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(home.join(".kiro/settings/mcp.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(ki["mcpServers"][title]["type"], "stdio");
 
         let gm: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(home.join(".gemini/settings.json")).unwrap(),
