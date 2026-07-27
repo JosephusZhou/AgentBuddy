@@ -5,11 +5,10 @@ import { useOverlayDismiss } from "../ui";
 import { getAgentIcon } from "../agent-icons";
 import { AGENT_PROJECT_INFOS, type InitMode, type CheckResult, type InitResult } from "./project-config/types";
 import { invokePickProjectFolder, invokeCheckProjectConfig, invokeInitProjectConfig } from "./project-config/api";
+import { Folder } from "lucide-react";
 
 const IconFolder = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-  </svg>
+  <Folder size={16} strokeWidth={1.8} />
 );
 
 export default function ProjectConfig() {

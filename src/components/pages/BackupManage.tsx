@@ -22,6 +22,7 @@ import type {
   RestoreBackupResult,
   WebDAVConnectionLite,
 } from "./backup-manage/types";
+import { ChevronDown, Search, Upload } from "lucide-react";
 
 const PHASE_LABEL: Record<string, string> = {
   collect: "收集",
@@ -155,57 +156,22 @@ function AppSelect({
 
 /* ===== Header icons（与 Agent/MCP 页 action-btn 一致） ===== */
 const IconSearch = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 21l-4.35-4.35" />
-    <circle cx="11" cy="11" r="7" />
-  </svg>
+  <Search strokeWidth={1.8} />
 );
 
 /** 上传到云端 / 开始备份 */
 const IconUpload = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
+  <Upload strokeWidth={1.8} />
 );
 
 /** app-select 下拉箭头：open 时朝上 */
 const IconSelectChevron = ({ open }: { open: boolean }) => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    style={{
-      transform: open ? "rotate(180deg)" : "rotate(0deg)",
-      transition: "transform 0.15s ease",
-    }}
-  >
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
+  <ChevronDown size={16} strokeWidth={1.8} style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }} />
 );
 
 /** 折叠箭头：open=true 朝下（展开），false 朝右（收起） */
 const IconChevron = ({ open }: { open: boolean }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    style={{
-      transform: open ? "rotate(0deg)" : "rotate(-90deg)",
-      transition: "transform 0.15s ease",
-    }}
-  >
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
+  <ChevronDown strokeWidth={2} style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s ease" }} />
 );
 
 function collectDefaultIds(nodes: BackupUnitNode[]): Set<string> {
