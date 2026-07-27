@@ -1015,9 +1015,8 @@ label,
 
 /* ===== SIDEBAR ===== */
 .sidebar {
-  width: 20%;
-  min-width: 210px;
-  max-width: 280px;
+  width: 224px;
+  flex-shrink: 0;
   /* Clear the Overlay drag strip / traffic lights so nav controls stay clickable */
   padding-top: 32px;
   background: var(--seed-surface);
@@ -1126,7 +1125,7 @@ label,
   flex-shrink: 0;
 }
 .content-title {
-  font-size: var(--text-xl);
+  font-size: var(--text-2xl);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.3;
@@ -1463,7 +1462,7 @@ label,
 .webdav-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 .webdav-item {
   display: flex;
@@ -2120,17 +2119,18 @@ a[href]:focus-visible {
 .agent-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 .agent-card {
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
   padding: 16px 18px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 .agent-card:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 12%);
+  box-shadow: var(--seed-shadow-card);
 }
 .agent-card-header {
   display: flex;
@@ -2574,17 +2574,18 @@ a[href]:focus-visible {
 .mcp-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 .mcp-card {
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
   padding: 16px 18px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 .mcp-card:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 12%);
+  box-shadow: var(--seed-shadow-card);
 }
 .mcp-card-header {
   display: flex;
@@ -2820,17 +2821,18 @@ a[href]:focus-visible {
 .skill-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .skill-card {
   background: var(--seed-surface);
   border: 1px solid var(--seed-border);
-  border-radius: calc(var(--seed-radius) + 4px);
+  border-radius: var(--seed-radius-lg);
   padding: 16px 18px;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .skill-card:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 12%);
+  box-shadow: var(--seed-shadow-card);
 }
 .skill-card-header {
   display: flex;
@@ -3588,7 +3590,7 @@ a[href]:focus-visible {
 .claude-env-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .claude-env-card {
   position: relative;
