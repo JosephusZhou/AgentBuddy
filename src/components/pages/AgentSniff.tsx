@@ -3,7 +3,7 @@ import { getAgentIcon } from "../agent-icons";
 import { useOverlayDismiss } from "../ui";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
-import { Blocks, FileCog, FolderOpen, Plus, Radar, X } from "lucide-react";
+import { FileCog, FileJson, FolderOpen, Plus, Radar, X } from "lucide-react";
 
 /* ===== Types ===== */
 interface AgentResult {
@@ -54,7 +54,7 @@ const IconFileSettings = () => (
 );
 
 const IconFileMcp = () => (
-  <Blocks size={16} strokeWidth={1.8} />
+  <FileJson size={16} strokeWidth={1.8} />
 );
 
 /* ===== Helpers ===== */
