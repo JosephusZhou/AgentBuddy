@@ -1023,6 +1023,12 @@ pub fn run() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
             }
 
+            // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
+            // 否则 Agent 管理页会一直展示 kiro / codebuddy 等已下线的 agent）。
+            if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy"]) {
+                eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
+            }
+
             // DevTools only in debug builds; Manager is only needed here.
             #[cfg(debug_assertions)]
             {
