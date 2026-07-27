@@ -33,6 +33,13 @@ export default function App() {
   const [themeReady, setThemeReady] = useState(false);
 
   useEffect(() => {
+    // 平台标记（纯表现层）：macOS 侧栏启用毛玻璃等原生质感微调。
+    document.documentElement.dataset.platform = /Mac|iPhone|iPad/.test(navigator.userAgent)
+      ? "macos"
+      : "other";
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     (async () => {

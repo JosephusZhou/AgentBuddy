@@ -13,14 +13,14 @@
   --seed-surface: #ffffff;
   --seed-surface-alt: #f0efec;
   --seed-border: #dddcd8;
-  --seed-primary: #00d47b;
+  --seed-primary: #00874f;
   --seed-primary-fg: #ffffff;
   --seed-muted: #404040;
   --seed-hover: #edece8;
   --seed-active-bg: #e6f7ec;
-  --seed-active-fg: #00a85e;
+  --seed-active-fg: #007f47;
   --seed-overlay: rgba(8, 8, 7, 0.4);
-  --seed-danger: #ff4d4f;
+  --seed-danger: #eb0003;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(255, 77, 79, 0.08);
   --seed-input-border: #cccac5;
@@ -77,7 +77,7 @@
   --seed-active-bg: rgba(0, 212, 123, 0.1);
   --seed-active-fg: #2adb5c;
   --seed-overlay: rgba(8, 8, 7, 0.7);
-  --seed-danger: #ff4d4f;
+  --seed-danger: #eb0003;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(255, 77, 79, 0.12);
   --seed-input-border: rgba(58, 57, 51, 0.6);
@@ -110,7 +110,7 @@
   --seed-surface: #fdfcf8;
   --seed-surface-alt: #efeadf;
   --seed-border: #e2dccd;
-  --seed-primary: #d97757;
+  --seed-primary: #c4522c;
   --seed-primary-fg: #ffffff;
   --seed-muted: #625e51;
   --seed-hover: #efeadf;
@@ -150,14 +150,14 @@
   --seed-surface: #ffffff;
   --seed-surface-alt: #f0f0f0;
   --seed-border: #e5e5e6;
-  --seed-primary: #4078f2;
+  --seed-primary: #2f6cf1;
   --seed-primary-fg: #ffffff;
   --seed-muted: #56575c;
   --seed-hover: #ececed;
   --seed-active-bg: rgba(64, 120, 242, 0.1);
   --seed-active-fg: #4078f2;
   --seed-overlay: rgba(56, 58, 66, 0.35);
-  --seed-danger: #e45649;
+  --seed-danger: #de3323;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(228, 86, 73, 0.08);
   --seed-input-border: #d4d4d5;
@@ -230,14 +230,14 @@
   --seed-surface: #fdf9ef;
   --seed-surface-alt: #eee8d5;
   --seed-border: #ddd6c1;
-  --seed-primary: #268bd2;
+  --seed-primary: #2074af;
   --seed-primary-fg: #fdf6e3;
   --seed-muted: #535f5f;
   --seed-hover: #eee8d5;
   --seed-active-bg: rgba(38, 139, 210, 0.12);
   --seed-active-fg: #268bd2;
   --seed-overlay: rgba(88, 110, 117, 0.3);
-  --seed-danger: #dc322f;
+  --seed-danger: #d72724;
   --seed-danger-fg: #fdf6e3;
   --seed-danger-bg: rgba(220, 50, 47, 0.1);
   --seed-input-border: #d3ccb6;
@@ -270,7 +270,7 @@
   --seed-surface: #f9f5d7;
   --seed-surface-alt: #ebdbb2;
   --seed-border: #d5c4a1;
-  --seed-primary: #d65d0e;
+  --seed-primary: #b44e0c;
   --seed-primary-fg: #fbf1c7;
   --seed-muted: #635850;
   --seed-hover: #ebdbb2;
@@ -311,14 +311,14 @@
   --seed-surface: #ffffff;
   --seed-surface-alt: #f0f0f0;
   --seed-border: #e6e6e6;
-  --seed-primary: #ff9940;
+  --seed-primary: #bd5800;
   --seed-primary-fg: #ffffff;
   --seed-muted: #53585f;
   --seed-hover: #ececec;
   --seed-active-bg: rgba(255, 153, 64, 0.14);
   --seed-active-fg: #f08c00;
   --seed-overlay: rgba(92, 103, 115, 0.3);
-  --seed-danger: #f51818;
+  --seed-danger: #ec0a0a;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(245, 24, 24, 0.07);
   --seed-input-border: #dcdcdc;
@@ -438,7 +438,7 @@
   --seed-active-bg: rgba(97, 175, 239, 0.14);
   --seed-active-fg: #61afef;
   --seed-overlay: rgba(16, 18, 22, 0.7);
-  --seed-danger: #e06c75;
+  --seed-danger: #e1727b;
   --seed-danger-fg: #282c34;
   --seed-danger-bg: rgba(224, 108, 117, 0.14);
   --seed-input-border: #3b4048;
@@ -478,7 +478,7 @@
   --seed-active-bg: rgba(166, 226, 46, 0.14);
   --seed-active-fg: #a6e22e;
   --seed-overlay: rgba(15, 15, 12, 0.7);
-  --seed-danger: #f92672;
+  --seed-danger: #de0654;
   --seed-danger-fg: #f8f8f2;
   --seed-danger-bg: rgba(249, 38, 114, 0.14);
   --seed-input-border: #49483e;
@@ -511,14 +511,14 @@
   --seed-surface: #073642;
   --seed-surface-alt: #0a3c48;
   --seed-border: #0f4a58;
-  --seed-primary: #268bd2;
+  --seed-primary: #3094da;
   --seed-primary-fg: #002b36;
   --seed-muted: #adbdc2;
   --seed-hover: #0e4552;
   --seed-active-bg: rgba(38, 139, 210, 0.16);
   --seed-active-fg: #2aa198;
   --seed-overlay: rgba(0, 15, 20, 0.7);
-  --seed-danger: #dc322f;
+  --seed-danger: #d72724;
   --seed-danger-fg: #fdf6e3;
   --seed-danger-bg: rgba(220, 50, 47, 0.16);
   --seed-input-border: #0f4a58;
@@ -558,7 +558,7 @@
   --seed-active-bg: rgba(136, 192, 208, 0.16);
   --seed-active-fg: #88c0d0;
   --seed-overlay: rgba(20, 24, 32, 0.7);
-  --seed-danger: #bf616a;
+  --seed-danger: #b24852;
   --seed-danger-fg: #eceff4;
   --seed-danger-bg: rgba(191, 97, 106, 0.16);
   --seed-input-border: #4c566a;
@@ -598,7 +598,7 @@
   --seed-active-bg: rgba(254, 128, 25, 0.15);
   --seed-active-fg: #fe8019;
   --seed-overlay: rgba(15, 15, 15, 0.7);
-  --seed-danger: #fb4934;
+  --seed-danger: #fb5643;
   --seed-danger-fg: #282828;
   --seed-danger-bg: rgba(251, 73, 52, 0.15);
   --seed-input-border: #504945;
@@ -711,14 +711,14 @@
   --seed-surface: #161b22;
   --seed-surface-alt: #1c2128;
   --seed-border: #30363d;
-  --seed-primary: #2f81f7;
+  --seed-primary: #0f6ef6;
   --seed-primary-fg: #ffffff;
   --seed-muted: #b2b7bd;
   --seed-hover: #21262d;
   --seed-active-bg: rgba(47, 129, 247, 0.15);
   --seed-active-fg: #58a6ff;
   --seed-overlay: rgba(1, 4, 9, 0.7);
-  --seed-danger: #f85149;
+  --seed-danger: #e91309;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(248, 81, 73, 0.15);
   --seed-input-border: #30363d;
@@ -758,7 +758,7 @@
   --seed-active-bg: rgba(199, 146, 234, 0.15);
   --seed-active-fg: #c792ea;
   --seed-overlay: rgba(15, 17, 25, 0.7);
-  --seed-danger: #ff5370;
+  --seed-danger: #ff5b76;
   --seed-danger-fg: #292d3e;
   --seed-danger-bg: rgba(255, 83, 112, 0.15);
   --seed-input-border: #444a67;
@@ -799,7 +799,7 @@
   --seed-active-bg: rgba(255, 198, 0, 0.15);
   --seed-active-fg: #ffc600;
   --seed-overlay: rgba(5, 15, 22, 0.72);
-  --seed-danger: #ff0088;
+  --seed-danger: #e5007a;
   --seed-danger-fg: #ffffff;
   --seed-danger-bg: rgba(255, 0, 136, 0.15);
   --seed-input-border: #2a5372;
@@ -971,6 +971,10 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
 }
+/* 选区跟随主色（仅输入类控件可选中，但表单/代码区选中态更精致） */
+::selection {
+  background: color-mix(in srgb, var(--seed-primary) 28%, transparent);
+}
 button { font-family: inherit; cursor: pointer; }
 input { font-family: inherit; }
 
@@ -1024,6 +1028,12 @@ label,
   display: flex;
   flex-direction: column;
   transition: background 0.25s ease, border-color 0.25s ease;
+}
+/* macOS 原生质感：侧栏半透明 + 背景模糊（Windows 保持实色，观感更扎实） */
+[data-platform="macos"] .sidebar {
+  background: color-mix(in srgb, var(--seed-surface) 78%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
 }
 .sidebar-header {
   padding: 20px 16px 12px;
