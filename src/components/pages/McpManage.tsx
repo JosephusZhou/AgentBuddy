@@ -3,7 +3,7 @@ import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { AgentBadge, getAgentIcon } from "../agent-icons";
 import { useOverlayDismiss } from "../ui";
-import { Pencil, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Radar, Settings, Trash2, X } from "lucide-react";
 
 /* ===== Types ===== */
 type McpType = "stdio" | "http" | "sse";
@@ -301,8 +301,8 @@ const IconPlus = () => (
   <Plus strokeWidth={2} />
 );
 
-const IconSearch = () => (
-  <Search strokeWidth={1.8} />
+const IconScan = () => (
+  <Radar strokeWidth={1.8} />
 );
 
 const IconClose = () => (
@@ -749,7 +749,7 @@ export default function McpManage() {
               onClick={() => void doSniffMcp()}
               disabled={isSniffing}
             >
-              <IconSearch />
+              <IconScan />
             </button>
             <button className="action-btn" data-tooltip="添加 MCP" onClick={openAdd}>
               <IconPlus />

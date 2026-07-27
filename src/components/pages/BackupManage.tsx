@@ -22,7 +22,7 @@ import type {
   RestoreBackupResult,
   WebDAVConnectionLite,
 } from "./backup-manage/types";
-import { ChevronDown, Search, Upload } from "lucide-react";
+import { ChevronDown, CloudUpload, Radar } from "lucide-react";
 
 const PHASE_LABEL: Record<string, string> = {
   collect: "收集",
@@ -155,13 +155,13 @@ function AppSelect({
 }
 
 /* ===== Header icons（与 Agent/MCP 页 action-btn 一致） ===== */
-const IconSearch = () => (
-  <Search strokeWidth={1.8} />
+const IconScan = () => (
+  <Radar strokeWidth={1.8} />
 );
 
 /** 上传到云端 / 开始备份 */
-const IconUpload = () => (
-  <Upload strokeWidth={1.8} />
+const IconBackup = () => (
+  <CloudUpload strokeWidth={1.8} />
 );
 
 /** app-select 下拉箭头：open 时朝上 */
@@ -617,7 +617,7 @@ export default function BackupManage() {
               onClick={() => void reload()}
               disabled={loading || running}
             >
-              <IconSearch />
+              <IconScan />
             </button>
             <button
               type="button"
@@ -634,7 +634,7 @@ export default function BackupManage() {
               onClick={() => void startBackup()}
               disabled={!canStart}
             >
-              <IconUpload />
+              <IconBackup />
             </button>
           </div>
         </div>

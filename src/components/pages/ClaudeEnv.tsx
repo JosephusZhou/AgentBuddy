@@ -28,16 +28,16 @@ import {
   invokeSyncSkills,
   invokeSyncAllMcp,
 } from "./claude-env/api";
-import { ChevronDown, Copy, Download, Eye, EyeOff, FileText, Folder, Pencil, Plus, RefreshCw, Search, Terminal, Trash2, X } from "lucide-react";
+import { ChevronDown, Copy, Download, Eye, EyeOff, FileText, Folder, Pencil, Radar, RefreshCw, Terminal, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
 
-const IconPlus = () => (
-  <Plus size={16} strokeWidth={2} />
+const IconClone = () => (
+  <Copy size={16} strokeWidth={1.8} />
 );
 
-const IconSearch = () => (
-  <Search size={16} strokeWidth={1.8} />
+const IconScan = () => (
+  <Radar size={16} strokeWidth={1.8} />
 );
 
 const IconTerminal = () => (
@@ -728,7 +728,7 @@ export default function ClaudeEnv() {
               onClick={() => void handleScan()}
               disabled={busy || (loaded && envs.length === 0)}
             >
-              <IconSearch />
+              <IconScan />
             </button>
             <button
               className="action-btn"
@@ -740,7 +740,7 @@ export default function ClaudeEnv() {
               onClick={() => openClone()}
               disabled={busy || envs.length === 0}
             >
-              <IconPlus />
+              <IconClone />
             </button>
           </div>
         </div>

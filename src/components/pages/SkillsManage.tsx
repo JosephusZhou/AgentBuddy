@@ -50,6 +50,8 @@ import {
   IconTrash,
   IconEdit,
   IconCheckSquare,
+  IconScan,
+  IconPull,
 } from "./skills/icons";
 import {
   TagSelect,
@@ -1099,7 +1101,7 @@ export default function SkillsManage() {
                   isAdding
                 }
               >
-                <IconRefresh />
+                <IconPull />
               </button>
             )}
             <button
@@ -1145,7 +1147,7 @@ export default function SkillsManage() {
               onClick={() => void openSniff()}
               disabled={isSniffing || isChecking || isMigrating || isImportingSniff}
             >
-              <IconSearch />
+              <IconScan />
             </button>
             <button
               className="action-btn"

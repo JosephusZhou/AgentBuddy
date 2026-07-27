@@ -3,7 +3,7 @@ import { getAgentIcon } from "../agent-icons";
 import { useOverlayDismiss } from "../ui";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
-import { FileText, Folder, Plus, Search, X } from "lucide-react";
+import { FileText, Folder, Plus, Radar, X } from "lucide-react";
 
 /* ===== Types ===== */
 interface AgentResult {
@@ -33,8 +33,8 @@ interface AgentConfigStat {
 }
 
 /* ===== SVG Icons ===== */
-const IconSearch = () => (
-  <Search strokeWidth={1.8} />
+const IconScan = () => (
+  <Radar strokeWidth={1.8} />
 );
 
 const IconPlus = () => (
@@ -307,7 +307,7 @@ export default function AgentSniff() {
               onClick={doSniff}
               disabled={isSniffing}
             >
-              <IconSearch />
+              <IconScan />
             </button>
             <button
               className="action-btn"

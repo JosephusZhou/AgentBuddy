@@ -1,16 +1,18 @@
 /** SkillsManage 页用到的图标（从页面组件抽出，供页面与控件复用）。
  *  标准图标统一使用 lucide-react；IconGithub / IconGitcode 为品牌图标，保留手写 SVG。 */
 import {
-  ArrowDownToLine,
   Briefcase,
   ChevronDown,
+  CloudDownload,
   Copy,
   ExternalLink,
   Folder,
+  FolderInput,
+  ListChecks,
   Plus,
+  Radar,
   RefreshCw,
   Search,
-  SquareCheckBig,
   SquarePen,
   Trash,
   X,
@@ -54,7 +56,7 @@ export const IconGitcode = () => (
 
 export const IconSkill = () => <Briefcase strokeWidth={1.8} />;
 
-export const IconMigrate = () => <ArrowDownToLine strokeWidth={1.8} />;
+export const IconMigrate = () => <FolderInput strokeWidth={1.8} />;
 
 export const IconCopy = () => <Copy size={16} strokeWidth={1.8} />;
 
@@ -62,4 +64,10 @@ export const IconTrash = () => <Trash size={16} strokeWidth={1.8} />;
 
 export const IconEdit = () => <SquarePen size={16} strokeWidth={1.8} />;
 
-export const IconCheckSquare = () => <SquareCheckBig strokeWidth={1.8} />;
+export const IconCheckSquare = () => <ListChecks strokeWidth={1.8} />;
+
+/** 头部「扫描」按钮：Radar（与搜索框的放大镜区分语义） */
+export const IconScan = () => <Radar strokeWidth={1.8} />;
+
+/** 头部「拉取更新」按钮：CloudDownload（与「检查更新」的 RefreshCw 区分） */
+export const IconPull = () => <CloudDownload strokeWidth={1.8} />;

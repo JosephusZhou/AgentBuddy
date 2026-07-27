@@ -28,7 +28,7 @@ import {
   invokeUpsertModel,
   invokeUpsertProvider,
 } from "./opencode-config/api";
-import { ChevronDown, Code, Eye, EyeOff, Folder, Key, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { ChevronDown, Code, Eye, EyeOff, FolderOpen, Key, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
 
@@ -40,8 +40,8 @@ const IconRefresh = () => (
   <RefreshCw size={16} strokeWidth={1.8} />
 );
 
-const IconFolder = () => (
-  <Folder size={16} strokeWidth={1.8} />
+const IconFolderOpen = () => (
+  <FolderOpen size={16} strokeWidth={1.8} />
 );
 
 const IconTrash = () => (
@@ -1037,7 +1037,7 @@ export default function OpenCodeConfig() {
               onClick={() => void reveal()}
               disabled={busy || !!(view && !view.opencodeInstalled)}
             >
-              <IconFolder />
+              <IconFolderOpen />
             </button>
             <button
               type="button"
