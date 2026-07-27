@@ -34,18 +34,35 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #00d47b;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
 
-  /* Typography Scale (Scaled up for better readability) */
+  /* Typography Scale（桌面工具密度：正文 13/14，标题 16/18，页面主标题用 2xl）
+     仅定义于 :root，对全部主题全局生效（与 --seed-* 的块自包含策略不同，有意为之）。 */
   --text-xs: 12px;
-  --text-sm: 14px;
-  --text-base: 16px;
-  --text-lg: 18px;
-  --text-xl: 22px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+
+  /* Spacing rhythm（4px 基网，供布局/卡片/页面留白统一取用） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
 }
 [data-theme="qoder-dark"] {
   --seed-bg: #080807;
@@ -74,7 +91,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #00d47b;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -109,7 +131,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #d97757;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -144,7 +171,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #4078f2;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -179,7 +211,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #0969da;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -214,7 +251,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #268bd2;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -249,7 +291,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #d65d0e;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -285,7 +332,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #ff9940;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -320,7 +372,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(0,0,0,0.08);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #8839ef;
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
@@ -355,7 +412,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #bd93f9;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -390,7 +452,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #61afef;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -425,7 +492,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #a6e22e;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -460,7 +532,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #268bd2;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -495,7 +572,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #88c0d0;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -530,7 +612,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #fe8019;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -565,7 +652,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #7aa2f7;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -600,7 +692,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #82aaff;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -635,7 +732,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #2f81f7;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -670,7 +772,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #c792ea;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -706,7 +813,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #ffc600;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -742,7 +854,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #e6b450;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -777,7 +894,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #ff7edb;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -813,7 +935,12 @@
   --seed-shadow-toggle: none;
   --seed-shadow-toggle-hover: 0 1px 4px rgba(255,255,255,0.06);
   --seed-shadow-modal: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --seed-shadow-card: 0 1px 2px rgba(0,0,0,0.3);
+  --seed-shadow-pop: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
   --seed-radius: 6px;
+  --seed-radius-sm: 4px;
+  --seed-radius-md: 8px;
+  --seed-radius-lg: 12px;
   --seed-accent: #cba6f7;
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
@@ -824,7 +951,10 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
   height: 100%;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* 平台原生字体栈：macOS 用 SF，Windows 用 Segoe UI Variable，中文分别落到苹方/雅黑。
+     （原栈首位的 Inter 从未打包或远程加载，实际一直静默回退系统字体，故移除。） */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   font-size: var(--text-base);
   line-height: 1.5;
   color: var(--seed-fg);
