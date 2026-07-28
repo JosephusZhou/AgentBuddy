@@ -4,6 +4,7 @@ import { useOverlayDismiss } from "../ui";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import AgentDetail from "./AgentDetail";
+import type { MainView } from "../../App";
 import { ChevronRight, FileCog, FileJson, FolderOpen, Plus, Radar, X } from "lucide-react";
 
 /* ===== Types ===== */
@@ -78,7 +79,12 @@ function displayHomePath(path: string | null | undefined): string {
 }
 
 /* ===== Component ===== */
-export default function AgentSniff() {
+interface AgentSniffProps {
+  /** 跳转到其他主视图（详情页的"前往管理"入口用） */
+  onNavigate?: (view: MainView) => void;
+}
+
+export default function AgentSniff({ onNavigate }: AgentSniffProps) {
   const [agents, setAgents] = useState<AgentResult[]>([]);
   const [isSniffing, setIsSniffing] = useState(false);
   const [summary, setSummary] = useState("");
@@ -312,6 +318,8 @@ export default function AgentSniff() {
         displayName={selected.display_name}
         icon={selected.icon}
         onBack={() => setSelectedAgent(null)}
+        onManageMcps={onNavigate ? () => onNavigate("mcp-manage") : undefined}
+        onManageSkills={onNavigate ? () => onNavigate("skills-manage") : undefined}
       />
     );
   }

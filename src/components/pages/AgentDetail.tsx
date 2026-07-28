@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
+  ChevronRight,
   FileCog,
   FileJson,
   FolderOpen,
@@ -53,6 +54,10 @@ export interface AgentDetailProps {
   displayName: string;
   icon: string;
   onBack: () => void;
+  /** 跳转到 MCP 管理页（缺省时隐藏入口） */
+  onManageMcps?: () => void;
+  /** 跳转到 Skills 管理页（缺省时隐藏入口） */
+  onManageSkills?: () => void;
 }
 
 function basename(path: string | null | undefined): string {
@@ -61,7 +66,7 @@ function basename(path: string | null | undefined): string {
   return parts[parts.length - 1] ?? path;
 }
 
-export default function AgentDetail({ name, displayName, icon, onBack }: AgentDetailProps) {
+export default function AgentDetail({ name, displayName, icon, onBack, onManageMcps, onManageSkills }: AgentDetailProps) {
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -260,6 +265,16 @@ export default function AgentDetail({ name, displayName, icon, onBack }: AgentDe
               <h2 className="agent-detail-section-title">
                 <Puzzle size={14} strokeWidth={1.8} />
                 MCP 服务（{mcps.length}）
+                {onManageMcps && (
+                  <button
+                    type="button"
+                    className="agent-detail-manage-link"
+                    onClick={onManageMcps}
+                  >
+                    前往管理
+                    <ChevronRight size={13} strokeWidth={2} />
+                  </button>
+                )}
               </h2>
               {mcps.length === 0 ? (
                 <div className="agent-detail-empty">未配置 MCP 服务</div>
@@ -292,6 +307,16 @@ export default function AgentDetail({ name, displayName, icon, onBack }: AgentDe
               <h2 className="agent-detail-section-title">
                 <Sparkles size={14} strokeWidth={1.8} />
                 Skills（{skills.length}）
+                {onManageSkills && (
+                  <button
+                    type="button"
+                    className="agent-detail-manage-link"
+                    onClick={onManageSkills}
+                  >
+                    前往管理
+                    <ChevronRight size={13} strokeWidth={2} />
+                  </button>
+                )}
               </h2>
               {skills.length === 0 ? (
                 <div className="agent-detail-empty">未安装 Skills</div>

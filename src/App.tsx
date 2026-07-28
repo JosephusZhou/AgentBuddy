@@ -89,7 +89,7 @@ export default function App() {
         onExitSettings={() => setMode("main")}
       />
       <main className="main-content">
-        {activeView === "agent-sniff" && <AgentSniff />}
+        {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
         {activeView === "backup-manage" && <BackupManage />}
         {activeView === "opencode-config" && <OpenCodeConfig />}
         {activeView === "project-config" && <ProjectConfig />}
