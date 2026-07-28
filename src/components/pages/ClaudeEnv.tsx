@@ -156,8 +156,10 @@ export default function ClaudeEnv() {
   const [cloneRemoteModels, setCloneRemoteModels] = useState<string[]>([]);
   const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
   const [cloneModelSelectOpen, setCloneModelSelectOpen] = useState(false);
-  const [cloneSyncMcp, setCloneSyncMcp] = useState(false);
-  const [cloneInstallAlias, setCloneInstallAlias] = useState(false);
+  const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
+  const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
+  const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
+  const [cloneInstallAlias, setCloneInstallAlias] = useState(true);
   const [cloneError, setCloneError] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [aliasTouched, setAliasTouched] = useState(false);
@@ -310,8 +312,10 @@ export default function ClaudeEnv() {
     setCloneRemoteModels([]);
     setCloneModelsLoading(false);
     setCloneModelSelectOpen(false);
-    setCloneSyncMcp(false);
-    setCloneInstallAlias(false);
+    setCloneSyncMcp(true);
+    setCloneSyncSkills(true);
+    setCloneSyncAgents(true);
+    setCloneInstallAlias(true);
     setCloneError("");
     setSlugTouched(false);
     setAliasTouched(false);
@@ -385,6 +389,8 @@ export default function ClaudeEnv() {
         apiKey: cloneApiKey.trim() || undefined,
         model: cloneModel.trim() || undefined,
         syncMcp: cloneSyncMcp,
+        syncSkills: cloneSyncSkills,
+        syncAgents: cloneSyncAgents,
         installAlias: cloneInstallAlias,
       });
       if (!result.ok) {
@@ -410,6 +416,8 @@ export default function ClaudeEnv() {
     cloneApiKey,
     cloneModel,
     cloneSyncMcp,
+    cloneSyncSkills,
+    cloneSyncAgents,
     cloneInstallAlias,
     refresh,
   ]);
@@ -799,8 +807,8 @@ export default function ClaudeEnv() {
 
         {loaded && envs.length > 0 && (
           <div className="claude-env-disclaimer">
-            通过 <code>CLAUDE_CONFIG_DIR</code> 隔离多套 Claude Code 配置目录。复制仅包含
-            settings / CLAUDE.md / skills / agents；不含会话与登录态。默认环境的 MCP 在{" "}
+            通过 <code>CLAUDE_CONFIG_DIR</code> 隔离多套 Claude Code 配置目录。复制始终包含
+            settings / CLAUDE.md，skills / agents 可在新建时勾选；不含会话与登录态。默认环境的 MCP 在{" "}
             <code>~/.claude.json</code>；自定义环境在 <code>$配置目录/.claude.json</code>
             ，默认隔离，可用「同步 MCP」把全局顶层 <code>mcpServers</code> 覆盖同步过去。
           </div>
@@ -1227,6 +1235,34 @@ export default function ClaudeEnv() {
               )}
             </div>
             <div className="form-group">
+              <label className="ui-check" htmlFor="ce-sync-skills">
+                <input
+                  id="ce-sync-skills"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncSkills}
+                  onChange={(e) => setCloneSyncSkills(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步 skills（复制源环境 <code>skills/</code> 目录到新环境）
+                </span>
+              </label>
+              <label className="ui-check" htmlFor="ce-sync-agents">
+                <input
+                  id="ce-sync-agents"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncAgents}
+                  onChange={(e) => setCloneSyncAgents(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步 agents（复制源环境 <code>agents/</code> 目录到新环境）
+                </span>
+              </label>
               <label className="ui-check" htmlFor="ce-sync-mcp">
                 <input
                   id="ce-sync-mcp"
@@ -1258,7 +1294,7 @@ export default function ClaudeEnv() {
               </label>
             </div>
             <div className="claude-env-form-hint">
-              仅复制 settings.json、CLAUDE.md、skills/、agents/。不会复制会话与历史。
+              始终复制 settings.json、CLAUDE.md；skills/、agents/ 按上方勾选决定是否复制。不会复制会话与历史。
               Base URL / API Key 留空时沿用源环境；填写后会写入新环境 settings.json 的
               env.ANTHROPIC_BASE_URL / env.ANTHROPIC_AUTH_TOKEN。
               自定义模型留空则不指定，填写后同步写入 env.ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。

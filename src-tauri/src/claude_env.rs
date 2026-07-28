@@ -118,6 +118,12 @@ pub struct ClaudeEnvClonePayload {
     /// When true (default if omitted), copy top-level mcpServers from ~/.claude.json
     /// into the new environment's `$config_dir/.claude.json`.
     pub sync_mcp: Option<bool>,
+    /// When true (default if omitted), copy the source environment's skills/ directory
+    /// into the new environment.
+    pub sync_skills: Option<bool>,
+    /// When true (default if omitted), copy the source environment's agents/ directory
+    /// into the new environment.
+    pub sync_agents: Option<bool>,
     /// When true, immediately write the shell alias into ~/.zshrc after creation.
     /// Defaults to false — alias管理默认保持独立一步，避免擅自改写 ~/.zshrc。
     pub install_alias: Option<bool>,
@@ -643,7 +649,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
+fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Result<(), String> {
     if !src.is_dir() {
         return Err(format!("源环境目录不存在: {}", src.display()));
     }
@@ -657,6 +663,14 @@ fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
         }
     }
     for name in CORE_DIRS {
+        let include = match *name {
+            "skills" => sync_skills,
+            "agents" => sync_agents,
+            _ => true,
+        };
+        if !include {
+            continue;
+        }
         let from = src.join(name);
         if from.is_dir() {
             let to = dst.join(name);
@@ -1552,7 +1566,9 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     let id = format!("env-{}-{}", slug, now_secs());
     ensure_unique_fields(&id, &slug, &dst_str, &alias)?;
 
-    if let Err(e) = copy_core(&src_path, &dst) {
+    let sync_skills = payload.sync_skills.unwrap_or(true);
+    let sync_agents = payload.sync_agents.unwrap_or(true);
+    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents) {
         // best-effort cleanup
         let _ = fs::remove_dir_all(&dst);
         return Err(e);
@@ -1596,6 +1612,16 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     db::upsert_claude_environment_row(&row)?;
 
     let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+    let mut skipped: Vec<&str> = Vec::new();
+    if !sync_skills {
+        skipped.push("skills");
+    }
+    if !sync_agents {
+        skipped.push("agents");
+    }
+    if !skipped.is_empty() {
+        message.push_str(&format!("已按选择跳过 {} 的复制。", skipped.join("、")));
+    }
     if override_fields.is_empty() {
         message.push_str("Base URL / API Key 沿用源环境。");
     } else {

@@ -42,6 +42,8 @@ export async function invokeClone(payload: {
   baseUrl?: string;
   apiKey?: string;
   syncMcp?: boolean;
+  syncSkills?: boolean;
+  syncAgents?: boolean;
   installAlias?: boolean;
 }): Promise<CodexEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");

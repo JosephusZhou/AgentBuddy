@@ -157,8 +157,10 @@ export default function CodexEnv() {
   const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
   const [cloneModelSelectOpen, setCloneModelSelectOpen] = useState(false);
   const [cloneModelProvider, setCloneModelProvider] = useState("");
-  const [cloneSyncMcp, setCloneSyncMcp] = useState(false);
-  const [cloneInstallAlias, setCloneInstallAlias] = useState(false);
+  const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
+  const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
+  const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
+  const [cloneInstallAlias, setCloneInstallAlias] = useState(true);
   const [cloneError, setCloneError] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [aliasTouched, setAliasTouched] = useState(false);
@@ -313,8 +315,10 @@ export default function CodexEnv() {
     setCloneModelsLoading(false);
     setCloneModelSelectOpen(false);
     setCloneModelProvider("");
-    setCloneSyncMcp(false);
-    setCloneInstallAlias(false);
+    setCloneSyncMcp(true);
+    setCloneSyncSkills(true);
+    setCloneSyncAgents(true);
+    setCloneInstallAlias(true);
     setCloneError("");
     setSlugTouched(false);
     setAliasTouched(false);
@@ -389,6 +393,8 @@ export default function CodexEnv() {
         model: cloneModel.trim() || undefined,
         modelProvider: cloneModelProvider.trim() || undefined,
         syncMcp: cloneSyncMcp,
+        syncSkills: cloneSyncSkills,
+        syncAgents: cloneSyncAgents,
         installAlias: cloneInstallAlias,
       });
       if (!result.ok) {
@@ -415,6 +421,8 @@ export default function CodexEnv() {
     cloneModel,
     cloneModelProvider,
     cloneSyncMcp,
+    cloneSyncSkills,
+    cloneSyncAgents,
     cloneInstallAlias,
     refresh,
   ]);
@@ -808,8 +816,8 @@ export default function CodexEnv() {
 
         {loaded && envs.length > 0 && (
           <div className="claude-env-disclaimer">
-            通过 <code>CODEX_HOME</code> 隔离多套 Codex CLI 配置目录（主要服务 CLI）。复制仅包含
-            config.toml / AGENTS.md / skills，不含 auth / 会话。MCP 源为默认{" "}
+            通过 <code>CODEX_HOME</code> 隔离多套 Codex CLI 配置目录（主要服务 CLI）。复制始终包含
+            config.toml，AGENTS.md / skills 可在新建时勾选，不含 auth / 会话。MCP 源为默认{" "}
             <code>~/.codex/config.toml</code> 的 <code>[mcp_servers]</code>
             ；可用「同步 MCP」覆盖写入各自定义环境。全局 MCP 管理页仍只写默认根。
           </div>
@@ -1256,6 +1264,34 @@ export default function CodexEnv() {
               />
             </div>
             <div className="form-group">
+              <label className="ui-check" htmlFor="xe-sync-skills">
+                <input
+                  id="xe-sync-skills"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncSkills}
+                  onChange={(e) => setCloneSyncSkills(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步 skills（复制源环境 <code>skills/</code> 目录到新环境）
+                </span>
+              </label>
+              <label className="ui-check" htmlFor="xe-sync-agents">
+                <input
+                  id="xe-sync-agents"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncAgents}
+                  onChange={(e) => setCloneSyncAgents(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步 AGENTS.md（复制源环境 <code>AGENTS.md</code> 到新环境）
+                </span>
+              </label>
               <label className="ui-check" htmlFor="xe-sync-mcp">
                 <input
                   id="xe-sync-mcp"
@@ -1287,7 +1323,7 @@ export default function CodexEnv() {
               </label>
             </div>
             <div className="claude-env-form-hint">
-              仅复制 config.toml、AGENTS.md、skills/。不会复制 auth.json、会话与历史。
+              始终复制 config.toml；AGENTS.md、skills/ 按上方勾选决定是否复制。不会复制 auth.json、会话与历史。
               model / provider / Base URL 留空时沿用源环境 config.toml；填写后写入目标 config.toml。
               Token 留空不写 auth.json；填写后写入目标环境{" "}
               <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>。

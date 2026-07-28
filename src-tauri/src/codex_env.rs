@@ -110,6 +110,12 @@ pub struct CodexEnvClonePayload {
     pub api_key: Option<String>,
     /// When true, copy [mcp_servers] from default ~/.codex/config.toml.
     pub sync_mcp: Option<bool>,
+    /// When true (default if omitted), copy the source environment's skills/ directory
+    /// into the new environment.
+    pub sync_skills: Option<bool>,
+    /// When true (default if omitted), copy the source environment's AGENTS.md file
+    /// into the new environment.
+    pub sync_agents: Option<bool>,
     /// When true, write shell alias after creation. Defaults to false.
     pub install_alias: Option<bool>,
 }
@@ -975,13 +981,17 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
+fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Result<(), String> {
     if !src.is_dir() {
         return Err(format!("源环境目录不存在: {}", src.display()));
     }
     fs::create_dir_all(dst).map_err(|e| format!("创建目标目录 {} 失败: {}", dst.display(), e))?;
 
     for name in CORE_FILES {
+        // AGENTS.md 对应 Claude 环境的 agents/：按 sync_agents 标志决定是否复制。
+        if *name == "AGENTS.md" && !sync_agents {
+            continue;
+        }
         let from = src.join(name);
         if from.is_file() {
             let to = dst.join(name);
@@ -989,6 +999,9 @@ fn copy_core(src: &Path, dst: &Path) -> Result<(), String> {
         }
     }
     for name in CORE_DIRS {
+        if *name == "skills" && !sync_skills {
+            continue;
+        }
         let from = src.join(name);
         if from.is_dir() {
             let to = dst.join(name);
@@ -1651,7 +1664,9 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
     let id = format!("env-{}-{}", slug, now_secs());
     ensure_unique_fields(&id, &slug, &dst_str, &alias)?;
 
-    if let Err(e) = copy_core(&src_path, &dst) {
+    let sync_skills = payload.sync_skills.unwrap_or(true);
+    let sync_agents = payload.sync_agents.unwrap_or(true);
+    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents) {
         let _ = fs::remove_dir_all(&dst);
         return Err(e);
     }
@@ -1687,6 +1702,16 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
     db::upsert_codex_environment_row(&row)?;
 
     let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+    let mut skipped: Vec<&str> = Vec::new();
+    if !sync_skills {
+        skipped.push("skills");
+    }
+    if !sync_agents {
+        skipped.push("AGENTS.md");
+    }
+    if !skipped.is_empty() {
+        message.push_str(&format!("已按选择跳过 {} 的复制。", skipped.join("、")));
+    }
     if override_fields.is_empty() {
         message
             .push_str("model / provider / base_url / Token 沿用源环境（Token 不会从源环境复制）。");

@@ -41,6 +41,8 @@ export async function invokeClone(payload: {
   apiKey?: string;
   model?: string;
   syncMcp?: boolean;
+  syncSkills?: boolean;
+  syncAgents?: boolean;
   installAlias?: boolean;
 }): Promise<ClaudeEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
