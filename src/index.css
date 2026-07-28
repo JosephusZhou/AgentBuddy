@@ -1642,7 +1642,8 @@ label,
 .form-input-with-action .form-input {
   padding-right: 40px;
 }
-.form-input-action {
+/* 与 [data-tooltip]{position:relative} 同优先级时会被其覆盖，故用双类选择器提升优先级，保持绝对定位 */
+.form-input-with-action .form-input-action {
   position: absolute;
   top: 50%;
   right: 6px;
