@@ -975,9 +975,10 @@ async fn check_project_config_exists(
     target_dir: String,
     selected_agents: Vec<project_config::AgentConfigRequest>,
     mode: project_config::InitMode,
+    skill_ids: Vec<String>,
 ) -> Result<project_config::CheckResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        project_config::check_project_config_exists(&target_dir, &selected_agents, &mode)
+        project_config::check_project_config_exists(&target_dir, &selected_agents, &mode, &skill_ids)
     })
     .await
     .map_err(|e| format!("检查项目配置任务失败: {e}"))?
@@ -989,9 +990,20 @@ async fn init_project_config(
     selected_agents: Vec<project_config::AgentConfigRequest>,
     mode: project_config::InitMode,
     overwrite: bool,
+    mcp_servers: Vec<mcp_config::McpDraft>,
+    skill_ids: Vec<String>,
+    skill_mode: Option<String>,
 ) -> Result<project_config::InitResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        project_config::init_project_config(&target_dir, &selected_agents, &mode, overwrite)
+        project_config::init_project_config(
+            &target_dir,
+            &selected_agents,
+            &mode,
+            overwrite,
+            &mcp_servers,
+            &skill_ids,
+            skills::SkillInstallMode::from_wire(skill_mode.as_deref()),
+        )
     })
     .await
     .map_err(|e| format!("初始化项目配置任务失败: {e}"))?

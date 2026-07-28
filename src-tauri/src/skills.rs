@@ -466,6 +466,22 @@ fn is_skill_dir(path: &Path) -> bool {
     path.is_dir() && (path.join("SKILL.md").exists() || path.join("skill.md").exists())
 }
 
+/// Resolve a library skill directory by id: the id must be a single plain path
+/// component, stay inside the skills library, and contain a SKILL.md.
+/// Used by project-level init to install library skills into `<repo>/.agents/skills`.
+pub(crate) fn library_skill_dir(id: &str) -> Result<PathBuf, String> {
+    let id = id.trim();
+    if !is_plain_entry_name(id) {
+        return Err(format!("非法的技能标识: {}", id));
+    }
+    let lib = skills_library_dir()?;
+    let dir = lib.join(id);
+    if !dir.starts_with(&lib) || !is_skill_dir(&dir) {
+        return Err(format!("技能不存在或缺少 SKILL.md: {}", id));
+    }
+    Ok(dir)
+}
+
 /// Returns true when an entry is a visible skill directory (including a directory symlink).
 pub(crate) fn is_visible_skill_dir(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {

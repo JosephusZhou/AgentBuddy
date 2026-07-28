@@ -15,7 +15,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::agents::McpDialect;
+use crate::mcp_config::McpDraft;
 use crate::platform;
+use crate::skills::SkillInstallMode;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,13 @@ pub struct InitResult {
     pub errors: Vec<String>,
 }
 
+/// Project-level MCP config file spec for one agent (path relative to the repo root).
+struct ProjectMcpSpec {
+    file: &'static str,
+    dialect: McpDialect,
+    jsonc: bool,
+}
+
 struct AgentProjectSpec {
     name: &'static str,
     root_file: Option<&'static str>,
@@ -59,6 +69,8 @@ struct AgentProjectSpec {
     full_sub_dirs: &'static [&'static str],
     /// extra files to create inside config_dir in Full mode
     config_files: &'static [(&'static str, &'static str)], // (name, content)
+    /// project-level MCP config file (written as a merge, keyed by server title)
+    mcp: Option<ProjectMcpSpec>,
 }
 
 /// Shared sub-dirs under `.agents/` and symlinked into each agent config dir (Symlink mode).
@@ -72,6 +84,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".claude",
         full_sub_dirs: &["commands", "agents"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".mcp.json",
+            dialect: McpDialect::JsonMcpServers,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "codex",
@@ -79,6 +96,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".codex",
         full_sub_dirs: &[],
         config_files: &[("instructions.md", "")],
+        mcp: Some(ProjectMcpSpec {
+            file: ".codex/config.toml",
+            dialect: McpDialect::TomlMcpServers,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "opencode",
@@ -86,6 +108,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".opencode",
         full_sub_dirs: &["agent", "command", "plugin", "tool"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: "opencode.json",
+            dialect: McpDialect::JsonMcp,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "antigravity",
@@ -93,6 +120,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".gemini",
         full_sub_dirs: &["commands"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".gemini/settings.json",
+            dialect: McpDialect::JsonGeminiMixed,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "codebuddy-cn",
@@ -100,6 +132,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".codebuddy",
         full_sub_dirs: &["rules", "skills"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".mcp.json",
+            dialect: McpDialect::JsonMcpServers,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "workbuddy",
@@ -107,6 +144,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".workbuddy",
         full_sub_dirs: &["rules", "skills"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".mcp.json",
+            dialect: McpDialect::JsonMcpServers,
+            jsonc: false,
+        }),
     },
     AgentProjectSpec {
         name: "deveco-code",
@@ -114,6 +156,11 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_dir: ".deveco",
         full_sub_dirs: &["rules", "skills"],
         config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".deveco/deveco.jsonc",
+            dialect: McpDialect::JsonMcp,
+            jsonc: true,
+        }),
     },
 ];
 
@@ -291,6 +338,7 @@ pub fn check_project_config_exists(
     target_dir: &str,
     selected_agents: &[AgentConfigRequest],
     mode: &InitMode,
+    skill_ids: &[String],
 ) -> Result<CheckResult, String> {
     let base = resolve_target_dir(target_dir)?;
     let mut existing = Vec::new();
@@ -309,8 +357,17 @@ pub fn check_project_config_exists(
 
     push_existing(base.join("AGENTS.md"), false);
 
-    if *mode == InitMode::Symlink {
+    let skill_ids = sanitize_skill_ids(skill_ids);
+    let with_skills = !skill_ids.is_empty();
+
+    if *mode == InitMode::Symlink || with_skills {
         push_existing(base.join(".agents"), true);
+    }
+    if with_skills {
+        push_existing(base.join(".agents").join("skills"), true);
+        for id in &skill_ids {
+            push_existing(base.join(".agents").join("skills").join(id), true);
+        }
     }
 
     for req in selected_agents {
@@ -326,9 +383,31 @@ pub fn check_project_config_exists(
         }
 
         push_existing(base.join(spec.config_dir), true);
+
+        // Full mode + selected skills: each agent's skills dir becomes a link.
+        if with_skills && *mode == InitMode::Full {
+            push_existing(base.join(spec.config_dir).join("skills"), true);
+        }
     }
 
     Ok(CheckResult { existing })
+}
+
+/// Trim / dedupe skill ids, keeping order; silently drops invalid entries
+/// (empty or containing path separators).
+fn sanitize_skill_ids(skill_ids: &[String]) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for raw in skill_ids {
+        let id = raw.trim();
+        if id.is_empty() || id.contains('/') || id.contains('\\') || id == "." || id == ".." {
+            continue;
+        }
+        if seen.insert(id.to_string()) {
+            out.push(id.to_string());
+        }
+    }
+    out
 }
 
 pub fn init_project_config(
@@ -336,11 +415,49 @@ pub fn init_project_config(
     selected_agents: &[AgentConfigRequest],
     mode: &InitMode,
     overwrite: bool,
+    mcp_servers: &[McpDraft],
+    skill_ids: &[String],
+    skill_mode: SkillInstallMode,
 ) -> Result<InitResult, String> {
     let base = resolve_target_dir(target_dir)?;
+
+    // Resolve library skill ids to their on-disk source dirs up front.
+    let mut skill_sources: Vec<(String, PathBuf)> = Vec::new();
+    let mut resolve_errors: Vec<String> = Vec::new();
+    for id in sanitize_skill_ids(skill_ids) {
+        match crate::skills::library_skill_dir(&id) {
+            Ok(src) => skill_sources.push((id, src)),
+            Err(e) => resolve_errors.push(e),
+        }
+    }
+
+    let mut result = run_init(
+        &base,
+        selected_agents,
+        mode,
+        overwrite,
+        mcp_servers,
+        &skill_sources,
+        skill_mode,
+    );
+    result.errors.extend(resolve_errors);
+    Ok(result)
+}
+
+fn run_init(
+    base: &Path,
+    selected_agents: &[AgentConfigRequest],
+    mode: &InitMode,
+    overwrite: bool,
+    mcp_servers: &[McpDraft],
+    skill_sources: &[(String, PathBuf)],
+    skill_mode: SkillInstallMode,
+) -> InitResult {
     let mut created = Vec::new();
     let mut skipped = Vec::new();
     let mut errors = Vec::new();
+
+    let with_skills = !skill_sources.is_empty();
 
     write_file(
         &base.join("AGENTS.md"),
@@ -389,6 +506,12 @@ pub fn init_project_config(
                 create_dir(&config_dir, &mut created, &mut skipped, &mut errors);
 
                 for sub in spec.full_sub_dirs {
+                    // When skills were selected, `.agents/skills` is the shared
+                    // store and each agent's skills dir becomes a link to it
+                    // (created below) — do not create a real dir here.
+                    if with_skills && *sub == "skills" {
+                        continue;
+                    }
                     create_dir(
                         &config_dir.join(sub),
                         &mut created,
@@ -477,11 +600,136 @@ pub fn init_project_config(
         }
     }
 
-    Ok(InitResult {
+    // --- Project-level MCP files (merge by server title; never gated on overwrite) ---
+    if !mcp_servers.is_empty() {
+        // Dedupe target files across selected agents (claude-code / codebuddy-cn /
+        // workbuddy all share the repo-root `.mcp.json`).
+        let mut mcp_files: Vec<(PathBuf, McpDialect, bool)> = Vec::new();
+        for req in selected_agents {
+            let spec = match find_spec(&req.name) {
+                Some(s) => s,
+                None => continue, // unknown agent already reported above
+            };
+            if let Some(mcp) = &spec.mcp {
+                let path = base.join(mcp.file);
+                if !mcp_files.iter().any(|(p, _, _)| p == &path) {
+                    mcp_files.push((path, mcp.dialect, mcp.jsonc));
+                }
+            }
+        }
+        for (path, dialect, jsonc) in mcp_files {
+            let mut ok_count = 0usize;
+            for draft in mcp_servers {
+                match crate::mcp_config::apply_draft_to_file(&path, dialect, jsonc, draft) {
+                    Ok(_) => ok_count += 1,
+                    Err(e) => errors.push(format!("写入 MCP「{}」失败: {}", draft.title, e)),
+                }
+            }
+            if ok_count > 0 {
+                created.push(format!("{} (MCP {} 项)", path.display(), ok_count));
+            }
+        }
+    }
+
+    // --- Shared skills store under .agents/skills (copy or symlink from library) ---
+    if with_skills {
+        let agents_dir = base.join(".agents");
+        create_dir(&agents_dir, &mut created, &mut skipped, &mut errors);
+        let skills_dir = agents_dir.join("skills");
+        create_dir(&skills_dir, &mut created, &mut skipped, &mut errors);
+
+        for (id, src) in skill_sources {
+            install_project_skill(
+                src,
+                &skills_dir.join(id),
+                skill_mode,
+                overwrite,
+                &mut created,
+                &mut skipped,
+                &mut errors,
+            );
+        }
+
+        // Full mode: link each agent's skills dir to the shared store so every
+        // selected agent sees the same skills. Symlink mode already links
+        // `<config_dir>/skills` above via SHARED_SUB_DIRS.
+        if *mode == InitMode::Full {
+            let mut seen_config_dirs: HashSet<String> = HashSet::new();
+            for req in selected_agents {
+                let spec = match find_spec(&req.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if !seen_config_dirs.insert(spec.config_dir.to_string()) {
+                    continue;
+                }
+                let config_dir = base.join(spec.config_dir);
+                create_dir(&config_dir, &mut created, &mut skipped, &mut errors);
+                create_dir_symlink(
+                    &PathBuf::from("..").join(".agents").join("skills"),
+                    &config_dir.join("skills"),
+                    overwrite,
+                    &mut created,
+                    &mut skipped,
+                    &mut errors,
+                );
+            }
+        }
+    }
+
+    InitResult {
         created,
         skipped,
         errors,
-    })
+    }
+}
+
+/// Install one library skill into `<repo>/.agents/skills/<id>` as a copy or a
+/// symlink. Existing entries follow the same safety rules as the skeleton:
+/// skip without `overwrite`; overwrite replaces symlinks / empty dirs but
+/// never deletes a non-empty real directory.
+fn install_project_skill(
+    src: &Path,
+    dest: &Path,
+    mode: SkillInstallMode,
+    overwrite: bool,
+    created: &mut Vec<String>,
+    skipped: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) {
+    if entry_present(dest) {
+        if !overwrite {
+            skipped.push(dest.to_string_lossy().to_string());
+            return;
+        }
+        if let Err(e) = remove_entry_for_overwrite(dest) {
+            errors.push(e);
+            return;
+        }
+    }
+    if let Some(parent) = dest.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            errors.push(format!("创建目录 {} 失败: {}", parent.display(), e));
+            return;
+        }
+    }
+    let result = match mode {
+        SkillInstallMode::Link => platform::symlink_any(src, dest),
+        SkillInstallMode::Copy => platform::copy_dir_recursive(src, dest),
+    };
+    match result {
+        Ok(_) => match mode {
+            SkillInstallMode::Link => {
+                created.push(format!("{} -> {}", dest.display(), src.display()))
+            }
+            SkillInstallMode::Copy => created.push(dest.to_string_lossy().to_string()),
+        },
+        Err(e) => errors.push(format!(
+            "安装技能到 {} 失败（Windows 软链接需开启开发者模式）: {}",
+            dest.display(),
+            e
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -512,7 +760,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_or_missing_target_dir() {
-        let err = init_project_config("", &[req("claude-code")], &InitMode::Full, false)
+        let err = init_project_config("", &[req("claude-code")], &InitMode::Full, false, &[], &[], SkillInstallMode::Link)
             .unwrap_err();
         assert!(err.contains("空"), "{err}");
 
@@ -523,6 +771,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Full,
             false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap_err();
         assert!(err.contains("不存在") || err.contains("不是目录"), "{err}");
@@ -533,7 +784,7 @@ mod tests {
         let base = scratch("full-dedupe");
         let agents = vec![req("codebuddy-cn"), req("codex"), req("opencode")];
         let result =
-            init_project_config(base.to_str().unwrap(), &agents, &InitMode::Full, false).unwrap();
+            init_project_config(base.to_str().unwrap(), &agents, &InitMode::Full, false, &[], &[], SkillInstallMode::Link).unwrap();
         assert!(
             result.errors.is_empty(),
             "errors: {:?}",
@@ -572,6 +823,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Full,
             false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -591,6 +845,9 @@ mod tests {
             &[req("antigravity")],
             &InitMode::Full,
             false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -610,6 +867,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Full,
             false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.skipped.iter().any(|p| p.ends_with("CLAUDE.md")));
@@ -634,6 +894,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Full,
             true,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -650,6 +913,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Symlink,
             true,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(
@@ -673,6 +939,7 @@ mod tests {
             base.to_str().unwrap(),
             &[req("claude-code")],
             &InitMode::Full,
+            &[],
         )
         .unwrap();
         let paths: Vec<_> = result.existing.iter().map(|e| e.path.clone()).collect();
@@ -697,6 +964,9 @@ mod tests {
             &[req("claude-code"), req("codex")],
             &InitMode::Symlink,
             false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -742,6 +1012,9 @@ mod tests {
             &[req("claude-code")],
             &InitMode::Symlink,
             true,
+            &[],
+            &[],
+            SkillInstallMode::Link,
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -753,6 +1026,257 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
+        cleanup(&base);
+    }
+
+    fn mcp_draft(title: &str) -> McpDraft {
+        McpDraft {
+            title: title.to_string(),
+            transport: "stdio".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "some-mcp-package".into()],
+            env: std::collections::HashMap::new(),
+            url: String::new(),
+            headers: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn mcp_written_to_project_files_and_deduped() {
+        let base = scratch("mcp");
+        let agents = vec![req("claude-code"), req("codebuddy-cn"), req("codex")];
+        let mcps = vec![mcp_draft("shared-server")];
+        let result = init_project_config(
+            base.to_str().unwrap(),
+            &agents,
+            &InitMode::Full,
+            false,
+            &mcps,
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        // claude-code + codebuddy-cn share the repo-root .mcp.json, written once
+        let mcp_json = base.join(".mcp.json");
+        assert!(mcp_json.is_file());
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&mcp_json).unwrap()).unwrap();
+        let server = &doc["mcpServers"]["shared-server"];
+        assert_eq!(server["command"], "npx");
+        assert_eq!(server["args"][0], "-y");
+        let mcp_lines = result
+            .created
+            .iter()
+            .filter(|p| p.contains(".mcp.json"))
+            .count();
+        assert_eq!(mcp_lines, 1, "created: {:?}", result.created);
+
+        // codex project MCP lands in TOML dialect
+        let toml_text = fs::read_to_string(base.join(".codex/config.toml")).unwrap();
+        assert!(toml_text.contains("mcp_servers"), "{toml_text}");
+        assert!(toml_text.contains("shared-server"), "{toml_text}");
+        assert!(toml_text.contains("command = \"npx\""), "{toml_text}");
+        cleanup(&base);
+    }
+
+    #[test]
+    fn mcp_merge_preserves_existing_file_content() {
+        let base = scratch("mcp-merge");
+        fs::create_dir_all(base.join(".gemini")).unwrap();
+        fs::write(
+            base.join(".gemini/settings.json"),
+            "{\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"keep\": { \"command\": \"x\" }\n  }\n}\n",
+        )
+        .unwrap();
+        let mcps = vec![mcp_draft("new-server")];
+        let result = init_project_config(
+            base.to_str().unwrap(),
+            &[req("antigravity")],
+            &InitMode::Full,
+            false,
+            &mcps,
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let doc: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(base.join(".gemini/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(doc["theme"], "dark");
+        assert_eq!(doc["mcpServers"]["keep"]["command"], "x");
+        assert_eq!(doc["mcpServers"]["new-server"]["command"], "npx");
+        cleanup(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skills_copy_installs_into_shared_store() {
+        let base = scratch("skills-copy");
+        let lib_skill = scratch("skills-copy-src");
+        fs::write(lib_skill.join("SKILL.md"), "---\nname: demo\n---\n").unwrap();
+        fs::write(lib_skill.join("extra.txt"), "x\n").unwrap();
+        let sources = vec![("demo".to_string(), lib_skill.clone())];
+        let result = run_init(
+            &base,
+            &[req("claude-code"), req("codebuddy-cn")],
+            &InitMode::Full,
+            false,
+            &[],
+            &sources,
+            SkillInstallMode::Copy,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(base.join(".agents/skills/demo/SKILL.md").is_file());
+        assert!(base.join(".agents/skills/demo/extra.txt").is_file());
+        assert!(!fs::symlink_metadata(base.join(".agents/skills/demo"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        // source untouched
+        assert!(lib_skill.join("SKILL.md").is_file());
+        cleanup(&base);
+        cleanup(&lib_skill);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skills_link_mode_links_shared_store_and_agents() {
+        let base = scratch("skills-link");
+        let lib_skill = scratch("skills-link-src");
+        fs::write(lib_skill.join("SKILL.md"), "---\nname: demo\n---\n").unwrap();
+        let sources = vec![("demo".to_string(), lib_skill.clone())];
+        let result = run_init(
+            &base,
+            &[req("claude-code"), req("codebuddy-cn")],
+            &InitMode::Full,
+            false,
+            &[],
+            &sources,
+            SkillInstallMode::Link,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        let store_entry = base.join(".agents/skills/demo");
+        assert!(fs::symlink_metadata(&store_entry)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_link(&store_entry).unwrap(), lib_skill);
+
+        // Full mode: each agent's skills dir links to the shared store
+        for dir in [".claude", ".codebuddy"] {
+            let link = base.join(dir).join("skills");
+            assert!(
+                fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+                "{dir}"
+            );
+            assert_eq!(
+                fs::read_link(&link).unwrap(),
+                PathBuf::from("../.agents/skills")
+            );
+        }
+        // skills resolvable through the agent link
+        assert!(base.join(".claude/skills/demo/SKILL.md").is_file());
+        cleanup(&base);
+        cleanup(&lib_skill);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skills_symlink_mode_uses_existing_shared_links() {
+        let base = scratch("skills-symlink-mode");
+        let lib_skill = scratch("skills-symlink-src");
+        fs::write(lib_skill.join("SKILL.md"), "---\nname: demo\n---\n").unwrap();
+        let sources = vec![("demo".to_string(), lib_skill.clone())];
+        let result = run_init(
+            &base,
+            &[req("claude-code"), req("codex")],
+            &InitMode::Symlink,
+            false,
+            &[],
+            &sources,
+            SkillInstallMode::Copy,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(base.join(".agents/skills/demo/SKILL.md").is_file());
+        // agent skills link from the skeleton points at the same store
+        assert_eq!(
+            fs::read_link(base.join(".claude/skills")).unwrap(),
+            PathBuf::from("../.agents/skills")
+        );
+        assert!(base.join(".claude/skills/demo/SKILL.md").is_file());
+        cleanup(&base);
+        cleanup(&lib_skill);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skills_existing_entry_skipped_without_overwrite() {
+        let base = scratch("skills-skip");
+        let lib_skill = scratch("skills-skip-src");
+        fs::write(lib_skill.join("SKILL.md"), "---\nname: demo\n---\n").unwrap();
+        fs::create_dir_all(base.join(".agents/skills/demo")).unwrap();
+        fs::write(base.join(".agents/skills/demo/user.txt"), "keep\n").unwrap();
+        let sources = vec![("demo".to_string(), lib_skill.clone())];
+        let result = run_init(
+            &base,
+            &[req("claude-code")],
+            &InitMode::Full,
+            false,
+            &[],
+            &sources,
+            SkillInstallMode::Copy,
+        );
+        assert!(result
+            .skipped
+            .iter()
+            .any(|p| p.ends_with(".agents/skills/demo")));
+        assert_eq!(
+            fs::read_to_string(base.join(".agents/skills/demo/user.txt")).unwrap(),
+            "keep\n"
+        );
+
+        // Even with overwrite, a non-empty real directory is never wiped
+        let result2 = run_init(
+            &base,
+            &[req("claude-code")],
+            &InitMode::Full,
+            true,
+            &[],
+            &sources,
+            SkillInstallMode::Copy,
+        );
+        assert!(
+            result2.errors.iter().any(|e| e.contains("非空目录")),
+            "expected nonempty-dir error, got: {:?}",
+            result2.errors
+        );
+        assert_eq!(
+            fs::read_to_string(base.join(".agents/skills/demo/user.txt")).unwrap(),
+            "keep\n"
+        );
+        cleanup(&base);
+        cleanup(&lib_skill);
+    }
+
+    #[test]
+    fn check_lists_skill_entries() {
+        let base = scratch("check-skills");
+        fs::create_dir_all(base.join(".agents/skills/demo")).unwrap();
+        let result = check_project_config_exists(
+            base.to_str().unwrap(),
+            &[req("claude-code")],
+            &InitMode::Full,
+            &["demo".to_string()],
+        )
+        .unwrap();
+        let paths: Vec<_> = result.existing.iter().map(|e| e.path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with(".agents")), "{paths:?}");
+        assert!(paths.iter().any(|p| p.ends_with("demo")), "{paths:?}");
         cleanup(&base);
     }
 }

@@ -596,7 +596,7 @@ interface McpAdapter {
 | Codex Skills 双路径 | `~/.codex/skills` vs `~/.agents/skills` | 写本机已存在者；两者都无则写 `~/.codex/skills` |
 | DevEco JSONC | 严格 JSON 写坏注释 | 必须 jsonc 库 |
 | Claude Code 大文件 | `~/.claude.json` 含大量状态 | 只改 `mcpServers` 键 |
-| 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目 |
+| 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目；项目级写入仅在「项目 AI 配置」页由用户显式勾选触发（见 §13） |
 | SSE 方言差异 | 各产品支持不一 | 能映射则映射，否则提示跳过 |
 | 密钥 | 配置中常含 token | AgentBuddy 永不日志打印 env/headers 值 |
 
@@ -665,4 +665,30 @@ interface McpAdapter {
 4. **CodeBuddy / CN 共享** `~/.codebuddy`，写盘必须去重。  
 5. **OpenCode / DevEco** 用 `mcp` + `local`/`remote`，不是 `mcpServers`。  
 6. **Antigravity** 远程字段优先 `httpUrl`。  
-7. 下一步实现按 §9 优先级做适配器，删除勾选接入真实 `remove` 即可闭环 MCP 管理页。  
+7. 下一步实现按 §9 优先级做适配器，删除勾选接入真实 `remove` 即可闭环 MCP 管理页。
+
+---
+
+## 13. 项目级 MCP / Skills（项目 AI 配置页，2026-07-28 起）
+
+「项目 AI 配置」初始化时，用户可从 AgentBuddy 已配置的 MCP / Skills 中勾选，落盘到所选项目目录（与全局应用互不影响）：
+
+### 13.1 项目级 MCP 目标文件
+
+| sniff `name` | 项目级 MCP 文件（相对项目根） | 方言 |
+|--------------|-------------------------------|------|
+| `claude-code` | `.mcp.json` | `json.mcpServers` |
+| `codebuddy-cn` | `.mcp.json`（与 claude-code 同路径，去重只写一次） | `json.mcpServers` |
+| `workbuddy` | `.mcp.json`（同上） | `json.mcpServers` |
+| `codex` | `.codex/config.toml` | `toml.mcp_servers` |
+| `opencode` | `opencode.json` | `json.mcp` |
+| `deveco-code` | `.deveco/deveco.jsonc` | `json.mcp` + JSONC |
+| `antigravity` | `.gemini/settings.json` | `json.gemini_mixed` |
+
+写策略：复用全局应用的方言写器（`mcp_config::apply_draft_to_file`），**按 server title 合并**、保留文件其它键、原子写；不参与「覆盖/跳过」确认。
+
+### 13.2 项目级 Skills
+
+- 统一安装到 `<项目>/.agents/skills/<id>`（`skill-copy-or-symlink`：完整复制或软链接，源为 `~/.agentbuddy/skills` 技能库）。
+- 多 agent 共享：Symlink 模式下 `<config_dir>/skills` 本已链接至 `.agents/skills`；Full 模式下勾选 skills 时，为每个 agent 创建 `<config_dir>/skills → ../.agents/skills` 相对软链接。
+- 安全语义同骨架：非 overwrite 跳过已存在；overwrite 可替换软链接/空目录，**不删除非空真实目录**。

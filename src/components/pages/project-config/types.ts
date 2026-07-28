@@ -5,6 +5,32 @@
  */
 export type InitMode = "full" | "symlink";
 
+/** How selected library skills are installed into `<repo>/.agents/skills`. */
+export type SkillInstallMode = "link" | "copy";
+
+/** MCP server draft written into per-agent project config files (matches Rust `McpDraft`). */
+export interface McpServerDraft {
+  title: string;
+  type: string; // "stdio" | "http" | "sse"
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url: string;
+  headers: Record<string, string>;
+}
+
+/** Minimal skill option for the picker (subset of the skills-page SkillRecord). */
+export interface SkillOption {
+  id: string;
+  title: string;
+  description: string;
+  tag: string;
+  source: "local" | "github" | "gitcode";
+  repoUrl: string;
+  githubOwner: string;
+  githubRepo: string;
+}
+
 export interface AgentConfigRequest {
   name: string;
 }

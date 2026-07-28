@@ -758,6 +758,31 @@ pub(crate) fn resolve_mcp_path(agent: &str) -> Result<PathBuf, String> {
         .map_err(|e| e.message)
 }
 
+/// Write one MCP draft into an arbitrary config file using the given dialect.
+/// Used by project-level init (`project_config.rs`) where each agent's project
+/// config file lives inside the picked repo rather than the user-global root.
+/// Merge semantics identical to global apply: upsert by title, preserve other
+/// keys, atomic write.
+pub(crate) fn apply_draft_to_file(
+    path: &Path,
+    dialect: Dialect,
+    jsonc: bool,
+    draft: &McpDraft,
+) -> Result<PathBuf, String> {
+    let result = match dialect {
+        Dialect::TomlMcpServers => apply_toml_mcp_servers(path, &draft.title, draft),
+        Dialect::JsonMcpServers | Dialect::ClaudeJsonUser => {
+            apply_json_object_key(path, "mcpServers", &draft.title, draft, false, jsonc)
+        }
+        Dialect::JsonMcp => apply_json_object_key(path, "mcp", &draft.title, draft, true, jsonc),
+        Dialect::JsonGeminiMixed => apply_gemini(path, &draft.title, draft),
+    };
+    result.map_err(|e| match e.path {
+        Some(p) => format!("{p}: {}", e.message),
+        None => e.message,
+    })
+}
+
 fn resolve_claude_desktop_config(home: &Path) -> Result<PathBuf, OpError> {
     Ok(claude_desktop_config_paths(home)
         .into_iter()
