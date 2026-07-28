@@ -2138,6 +2138,13 @@ a[href]:focus-visible {
   opacity: 1;
 }
 
+/* 左侧贴边元素（如详情页返回按钮）：tooltip 左对齐按钮、向右展开，
+   避免越出内容区被半透明侧栏压住 */
+[data-tooltip-align="start"]::after {
+  left: 0;
+  right: auto;
+}
+
 /* ===== AGENT LIST ===== */
 .agent-list {
   display: flex;
@@ -2237,6 +2244,115 @@ a[href]:focus-visible {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
   font-size: var(--text-xs);
   word-break: break-all;
+}
+
+/* Clickable card → detail page */
+.agent-card.clickable {
+  cursor: pointer;
+}
+.agent-card.clickable:hover {
+  border-color: color-mix(in srgb, var(--seed-primary) 35%, var(--seed-border));
+}
+.agent-card.clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--seed-primary) 60%, transparent);
+  outline-offset: 2px;
+}
+.agent-card-chevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--seed-muted);
+  opacity: 0.6;
+  transition: transform 0.15s ease, opacity 0.15s ease, color 0.15s ease;
+}
+.agent-card.clickable:hover .agent-card-chevron {
+  opacity: 1;
+  color: var(--seed-fg);
+  transform: translateX(2px);
+}
+
+/* ===== Agent detail page ===== */
+.agent-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.agent-detail-section {
+  background: var(--seed-surface);
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius-lg);
+  padding: 14px 18px;
+}
+.agent-detail-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--seed-fg);
+}
+.agent-detail-section-title svg {
+  color: var(--seed-muted);
+}
+.agent-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-detail-rows .agent-path-row {
+  align-items: center;
+}
+.agent-detail-rows .agent-path-row .claude-env-action-btn {
+  flex-shrink: 0;
+}
+.agent-detail-empty {
+  font-size: var(--text-sm);
+  color: var(--seed-muted);
+  opacity: 0.8;
+}
+.agent-detail-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-detail-item {
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius-md);
+  padding: 10px 12px;
+  background: var(--seed-surface-alt);
+}
+.agent-detail-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-detail-item-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--seed-fg);
+  word-break: break-all;
+}
+.agent-detail-tag {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--seed-muted);
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius-sm);
+  padding: 1px 6px;
+  background: var(--seed-surface);
+}
+.agent-detail-item-sub {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--seed-muted);
+  word-break: break-all;
+  line-height: 1.5;
+}
+.agent-detail-item-path {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  opacity: 0.8;
 }
 
 /* Sniffing skeleton */

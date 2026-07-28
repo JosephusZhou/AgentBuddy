@@ -90,6 +90,92 @@ async fn get_agent_config_stats(names: Vec<String>) -> Result<Vec<AgentConfigSta
     .map_err(|e| format!("读取 Agent 配置统计任务失败: {e}"))
 }
 
+/// One MCP entry shown on the agent detail page (secrets like env/headers omitted).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentMcpInfo {
+    title: String,
+    transport: String,
+    command: String,
+    args: Vec<String>,
+    url: String,
+}
+
+/// Everything the agent detail page shows for one agent.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDetail {
+    name: String,
+    display_name: String,
+    icon: String,
+    found: bool,
+    install_paths: Vec<String>,
+    config_dirs: Vec<String>,
+    config_dir: Option<String>,
+    mcp_file: Option<String>,
+    settings_file: Option<String>,
+    mcps: Vec<AgentMcpInfo>,
+    skills: Vec<skills::AgentSkillInfo>,
+}
+
+#[tauri::command]
+async fn get_agent_detail(name: String) -> Result<AgentDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Base info comes from the cached scan (same source as the list view);
+        // strip stale shim paths like `get_cached_agents` does.
+        let cached = db::load_agents().unwrap_or_default();
+        let row = cached.into_iter().find(|a| a.name == name);
+        let (display_name, icon, found, mut install_paths, config_dirs) = match row {
+            Some(a) => (
+                a.display_name,
+                a.icon,
+                a.found,
+                a.install_paths,
+                a.config_dirs,
+            ),
+            None => (
+                name.clone(),
+                "?".to_string(),
+                false,
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
+        install_paths.retain(|p| !sniff::is_shim_path(p));
+
+        let targets = agent_open::open_targets(&name);
+
+        let mcps = mcp_config::list_agent_mcp_entries(&name)
+            .into_iter()
+            .map(|(title, draft)| AgentMcpInfo {
+                title,
+                transport: draft.transport,
+                command: draft.command,
+                args: draft.args,
+                url: draft.url,
+            })
+            .collect();
+
+        let skills = skills::list_agent_skills(&name);
+
+        AgentDetail {
+            name,
+            display_name,
+            icon,
+            found,
+            install_paths,
+            config_dirs,
+            config_dir: targets.config_dir,
+            mcp_file: targets.mcp_file,
+            settings_file: targets.settings_file,
+            mcps,
+            skills,
+        }
+    })
+    .await
+    .map_err(|e| format!("读取 Agent 详情任务失败: {e}"))
+}
+
 #[tauri::command]
 async fn get_cached_agents() -> Result<Vec<sniff::SniffResult>, String> {
     let mut agents = db::load_agents()?;
@@ -918,6 +1004,7 @@ pub fn run() {
             sniff_agents,
             get_cached_agents,
             get_agent_config_stats,
+            get_agent_detail,
             add_agent_manual,
             agent_open_targets,
             reveal_agent_config_dir,

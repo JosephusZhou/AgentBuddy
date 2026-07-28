@@ -571,6 +571,61 @@ pub(crate) fn count_agent_skills(agent: &str) -> usize {
     names.len()
 }
 
+/// One skill installed in an agent's skills roots (for the agent detail view).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkillInfo {
+    /// Directory name (stable id within the agent's skills root).
+    pub id: String,
+    /// Display title from SKILL.md frontmatter (falls back to `id`).
+    pub title: String,
+    /// Description from SKILL.md frontmatter (may be empty).
+    pub description: String,
+    /// Absolute path of the skill directory.
+    pub path: String,
+}
+
+/// List skills installed in one agent's skills roots (unique dir names across all roots;
+/// empty for unknown/unsupported agents). Mirrors `count_agent_skills`'s entry filtering.
+pub(crate) fn list_agent_skills(agent: &str) -> Vec<AgentSkillInfo> {
+    let Some(spec) = crate::agents::find(agent) else {
+        return vec![];
+    };
+    if !spec.skills_supported {
+        return vec![];
+    }
+    let mut by_id: std::collections::BTreeMap<String, AgentSkillInfo> = Default::default();
+    for root in spec.skills_roots.iter().map(|&r| expand_tilde(r)) {
+        if !root.is_dir() {
+            continue;
+        }
+        let entries = match fs::read_dir(&root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !is_skill_dir(&path) {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if id.starts_with('.') || id.starts_with("__agentbuddy") {
+                continue;
+            }
+            by_id.entry(id.clone()).or_insert_with(|| {
+                let doc = read_skill_doc(&path);
+                AgentSkillInfo {
+                    title: if doc.name.is_empty() { id.clone() } else { doc.name },
+                    description: doc.description,
+                    id,
+                    path: path.to_string_lossy().to_string(),
+                }
+            });
+        }
+    }
+    by_id.into_values().collect()
+}
+
 /* ===== List library ===== */
 
 fn sanitize_skill_id(raw: &str) -> String {

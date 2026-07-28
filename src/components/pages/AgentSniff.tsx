@@ -3,7 +3,8 @@ import { getAgentIcon } from "../agent-icons";
 import { useOverlayDismiss } from "../ui";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
-import { FileCog, FileJson, FolderOpen, Plus, Radar, X } from "lucide-react";
+import AgentDetail from "./AgentDetail";
+import { ChevronRight, FileCog, FileJson, FolderOpen, Plus, Radar, X } from "lucide-react";
 
 /* ===== Types ===== */
 interface AgentResult {
@@ -88,6 +89,7 @@ export default function AgentSniff() {
   const [openTargets, setOpenTargets] = useState<Record<string, AgentOpenTargets>>({});
   const [configStats, setConfigStats] = useState<Record<string, AgentConfigStat>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentResult | null>(null);
   const [statusMsg, setStatusMsg] = useStatusMessage();
   const nameInputRef = useRef<HTMLInputElement>(null);
   const hasLoaded = useRef(false);
@@ -299,6 +301,21 @@ export default function AgentSniff() {
     [runOpen],
   );
 
+  // 详情页：以最新的列表数据为准（重新扫描后名称/路径可能更新）
+  const selected = selectedAgent
+    ? agents.find((a) => a.name === selectedAgent.name) ?? selectedAgent
+    : null;
+  if (selected) {
+    return (
+      <AgentDetail
+        name={selected.name}
+        displayName={selected.display_name}
+        icon={selected.icon}
+        onBack={() => setSelectedAgent(null)}
+      />
+    );
+  }
+
   return (
     <>
       <div className="content-header">
@@ -344,14 +361,31 @@ export default function AgentSniff() {
               const busy = busyKey?.endsWith(`:${agent.name}`) ?? false;
 
               return (
-            <div key={agent.name} className="agent-card">
+            <div
+              key={agent.name}
+              className={`agent-card ${agent.found ? "clickable" : ""}`}
+              role={agent.found ? "button" : undefined}
+              tabIndex={agent.found ? 0 : undefined}
+              aria-label={agent.found ? `查看 ${agent.display_name} 详情` : undefined}
+              onClick={agent.found ? () => setSelectedAgent(agent) : undefined}
+              onKeyDown={
+                agent.found
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedAgent(agent);
+                      }
+                    }
+                  : undefined
+              }
+            >
               <div className="agent-card-header">
                 <div className={`agent-icon ${agent.found ? "found" : ""}`}>
                   {getAgentIcon(agent.name) ?? agent.icon}
                 </div>
                 <div className="agent-name">{agent.display_name}</div>
                 {showActions && hasAnyAction && (
-                  <div className="agent-card-actions">
+                  <div className="agent-card-actions" onClick={(e) => e.stopPropagation()}>
                     {settingsFile && (
                       <button
                         type="button"
@@ -395,6 +429,11 @@ export default function AgentSniff() {
                   <span className={`status-dot ${agent.found ? "connected" : "disconnected"}`} />
                   {agent.found ? "已安装" : "未找到"}
                 </span>
+                {agent.found && (
+                  <span className="agent-card-chevron" aria-hidden>
+                    <ChevronRight size={16} strokeWidth={2} />
+                  </span>
+                )}
               </div>
               {agent.found && (agent.install_paths.length > 0 || agent.config_dirs.length > 0 || stats) && (
                 <div className="agent-paths">

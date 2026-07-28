@@ -323,6 +323,17 @@ pub(crate) fn count_agent_mcp_entries(agent: &str) -> usize {
     read_agent_mcp_entries(agent).map(|v| v.len()).unwrap_or(0)
 }
 
+/// List MCP entries (title + draft) in one agent's config file.
+/// Empty for unknown agents or unreadable/missing files; internal smoke-test
+/// leftovers (`__agentbuddy*`) are filtered out like `sniff_mcp_servers`.
+pub(crate) fn list_agent_mcp_entries(agent: &str) -> Vec<(String, McpDraft)> {
+    read_agent_mcp_entries(agent)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(title, _)| !title.starts_with("__agentbuddy"))
+        .collect()
+}
+
 /// Read all MCP entries from one agent config as (title, draft).
 fn read_agent_mcp_entries(agent: &str) -> Result<Vec<(String, McpDraft)>, OpError> {
     if matches!(
