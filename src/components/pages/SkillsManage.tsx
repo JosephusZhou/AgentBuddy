@@ -60,6 +60,7 @@ import {
   sourceKeyOf,
   skillRepoUrl,
 } from "./skills/controls";
+import { AgentFilterChips } from "../agent-filter";
 
 /* ===== Component ===== */
 
@@ -116,12 +117,15 @@ export default function SkillsManage() {
   const [activeSource, setActiveSource] = useState<string>("all");
   // 标签筛选：单选，"all" 表示全部（与来源筛选为「与」关系）
   const [activeTag, setActiveTag] = useState<string>("all");
+  // Agent 筛选：单选，"all" 表示全部（与来源/标签筛选为「与」关系）
+  const [activeAgent, setActiveAgent] = useState<string>("all");
   // 搜索输入即时响应；查询值延迟更新，避免每次按键都重新筛选整表
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   // 筛选区折叠态：默认展开；收起时对应筛选回退到「全部」，避免隐藏筛选造成困惑
   const [sourceExpanded, setSourceExpanded] = useState(true);
   const [tagExpanded, setTagExpanded] = useState(true);
+  const [agentExpanded, setAgentExpanded] = useState(true);
 
   // ===== 批量管理 =====
   // 显式选择模式：进入后卡片改为可勾选，隐藏单卡操作，底部浮出操作条
@@ -751,6 +755,31 @@ export default function SkillsManage() {
     }
   }, [activeTag, knownTags]);
 
+  // Agent 筛选项：仅本机已存在（扫描发现 + 手动添加，agents 已按 found 过滤）的 Agent，
+  // 计数为该 Agent 已应用的技能数（可为 0，便于发现尚未应用任何技能的 Agent）
+  const agentFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of skills) {
+      for (const name of s.appliedAgents) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+    return agents.map((a) => ({
+      name: a.name,
+      display_name: a.display_name,
+      icon: a.icon,
+      count: counts.get(a.name) ?? 0,
+    }));
+  }, [agents, skills]);
+
+  // 若当前选中的 Agent 被移除（卸载/删除），回退到「全部」
+  useEffect(() => {
+    if (activeAgent === "all") return;
+    if (!agents.some((a) => a.name === activeAgent)) {
+      setActiveAgent("all");
+    }
+  }, [activeAgent, agents]);
+
   useEffect(() => {
     const query = searchInput.trim().toLocaleLowerCase();
     if (!query) {
@@ -768,12 +797,16 @@ export default function SkillsManage() {
   const toggleTagExpanded = useCallback(() => {
     setTagExpanded((prev) => !prev);
   }, []);
+  const toggleAgentExpanded = useCallback(() => {
+    setAgentExpanded((prev) => !prev);
+  }, []);
 
-  // 来源、标签与关键词为「与」筛选；关键词覆盖卡片当前展示的主要技能信息
+  // Agent、来源、标签与关键词为「与」筛选；关键词覆盖卡片当前展示的主要技能信息
   const filteredSkills = useMemo(
     () =>
       skills.filter((s) => {
         const matchesFilters =
+          (activeAgent === "all" || s.appliedAgents.includes(activeAgent)) &&
           (activeSource === "all" || sourceKeyOf(s) === activeSource) &&
           (activeTag === "all" || (s.tag?.trim() ?? "") === activeTag);
         if (!matchesFilters || !searchQuery) return matchesFilters;
@@ -786,9 +819,10 @@ export default function SkillsManage() {
           s.repoUrl,
           s.githubPath,
           s.localPath,
+          ...s.appliedAgents.map((name) => agentLabel(name)),
         ].some((value) => value.toLocaleLowerCase().includes(searchQuery));
       }),
-    [skills, activeSource, activeTag, searchQuery]
+    [skills, activeAgent, activeSource, activeTag, searchQuery, agentLabel]
   );
 
   const updateAvailableSkills = useMemo(
@@ -1195,7 +1229,7 @@ export default function SkillsManage() {
                   setSearchInput(value);
                   if (!value.trim()) setSearchQuery("");
                 }}
-                placeholder="搜索技能名称、简介、标签或来源"
+                placeholder="搜索技能名称、简介、标签、来源或 Agent"
                 aria-label="搜索技能"
               />
               {searchInput && (
@@ -1213,6 +1247,34 @@ export default function SkillsManage() {
                 </button>
               )}
             </div>
+            {agents.length > 0 && (
+              <div className="skill-filter-section">
+                <button
+                  type="button"
+                  className="skill-filter-heading"
+                  aria-expanded={agentExpanded}
+                  onClick={toggleAgentExpanded}
+                >
+                  <span className="skill-filter-heading-chevron" aria-hidden>
+                    <IconChevron open={agentExpanded} />
+                  </span>
+                  <span className="skill-filter-heading-title">Agents</span>
+                  {!agentExpanded && activeAgent !== "all" && (
+                    <span className="skill-filter-heading-active">
+                      {agentFilterOptions.find((o) => o.name === activeAgent)?.display_name ?? ""}
+                    </span>
+                  )}
+                </button>
+                {agentExpanded && (
+                  <AgentFilterChips
+                    items={agentFilterOptions}
+                    total={skills.length}
+                    active={activeAgent}
+                    onSelect={setActiveAgent}
+                  />
+                )}
+              </div>
+            )}
             {sourceOptions.length > 1 && (
               <div className="skill-filter-section">
                 <button

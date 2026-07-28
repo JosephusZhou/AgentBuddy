@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { AgentBadge, getAgentIcon } from "../agent-icons";
+import { AgentFilterChips } from "../agent-filter";
 import { CheckGlyph, useOverlayDismiss } from "../ui";
 import { Pencil, Plus, Radar, Settings, Trash2, X } from "lucide-react";
-import { IconCheckSquare, IconSearch } from "./skills/icons";
+import { IconCheckSquare, IconChevron, IconSearch } from "./skills/icons";
 
 /* ===== Types ===== */
 type McpType = "stdio" | "http" | "sse";
@@ -349,6 +350,11 @@ export default function McpManage() {
   const [searchQuery, setSearchQuery] = useState("");
   // 类型筛选：单选，"all" 表示全部（与搜索为「与」关系）
   const [activeType, setActiveType] = useState<"all" | McpType>("all");
+  // Agent 筛选：单选，"all" 表示全部（与类型/搜索为「与」关系）
+  const [activeAgent, setActiveAgent] = useState<string>("all");
+  // 筛选区折叠态：默认展开；收起仅切换显隐，保留当前选中项并在标题处提示
+  const [typeExpanded, setTypeExpanded] = useState(true);
+  const [agentExpanded, setAgentExpanded] = useState(true);
 
   // ===== 批量管理 =====
   // 显式选择模式：进入后卡片改为可勾选，隐藏单卡操作，底部浮出操作条
@@ -777,6 +783,14 @@ export default function McpManage() {
     }
   }, [deleteTarget, servers, removeFromAgentConfigs, removeMcpFromAgentConfigs]);
 
+  // 折叠/展开筛选区：仅切换显隐，保留当前选中项
+  const toggleTypeExpanded = useCallback(() => {
+    setTypeExpanded((prev) => !prev);
+  }, []);
+  const toggleAgentExpanded = useCallback(() => {
+    setAgentExpanded((prev) => !prev);
+  }, []);
+
   // ===== 搜索与筛选派生值 =====
   // 类型筛选项：全部 + 出现过的类型（带数量），只展示有数据的类型
   const typeOptions = useMemo(() => {
@@ -800,11 +814,37 @@ export default function McpManage() {
     }
   }, [activeType, typeOptions]);
 
-  // 类型与关键词为「与」筛选；关键词覆盖卡片当前展示的主要信息（含 Agent 显示名）
+  // Agent 筛选项：仅本机已存在（扫描发现 + 手动添加，agents 已按 found 过滤）的 Agent，
+  // 计数为该 Agent 已应用的 MCP 数（可为 0，便于发现尚未应用任何 MCP 的 Agent）
+  const agentFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of servers) {
+      for (const name of s.appliedAgents) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+    return agents.map((a) => ({
+      name: a.name,
+      display_name: a.display_name,
+      icon: a.icon,
+      count: counts.get(a.name) ?? 0,
+    }));
+  }, [agents, servers]);
+
+  // 若当前选中的 Agent 被移除（卸载/删除），回退到「全部」
+  useEffect(() => {
+    if (activeAgent === "all") return;
+    if (!agents.some((a) => a.name === activeAgent)) {
+      setActiveAgent("all");
+    }
+  }, [activeAgent, agents]);
+
+  // 类型、Agent 与关键词为「与」筛选；关键词覆盖卡片当前展示的主要信息（含 Agent 显示名）
   const filteredServers = useMemo(
     () =>
       servers.filter((s) => {
         if (activeType !== "all" && s.type !== activeType) return false;
+        if (activeAgent !== "all" && !s.appliedAgents.includes(activeAgent)) return false;
         if (!searchQuery) return true;
         return [
           s.title,
@@ -819,7 +859,7 @@ export default function McpManage() {
           ),
         ].some((value) => value.toLocaleLowerCase().includes(searchQuery));
       }),
-    [servers, agents, activeType, searchQuery]
+    [servers, agents, activeType, activeAgent, searchQuery]
   );
 
   // ===== 批量选择派生值与操作 =====
@@ -1117,26 +1157,69 @@ export default function McpManage() {
             </div>
             {typeOptions.length > 2 && (
               <div className="skill-filter-section">
-                <div className="skill-filter-heading static" role="presentation">
+                <button
+                  type="button"
+                  className="skill-filter-heading"
+                  aria-expanded={typeExpanded}
+                  onClick={toggleTypeExpanded}
+                >
+                  <span className="skill-filter-heading-chevron" aria-hidden>
+                    <IconChevron open={typeExpanded} />
+                  </span>
                   <span className="skill-filter-heading-title">类型</span>
-                </div>
-                <div className="skill-tag-filter" role="group" aria-label="按类型筛选">
-                  {typeOptions.map((opt) => {
-                    const active = opt.key === activeType;
-                    return (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        className={`skill-source-chip skill-source-chip-tag ${active ? "active" : ""}`}
-                        aria-pressed={active}
-                        onClick={() => setActiveType(opt.key)}
-                      >
-                        <span className="skill-source-chip-label">{opt.label}</span>
-                        <span className="skill-source-chip-count">{opt.count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                  {!typeExpanded && activeType !== "all" && (
+                    <span className="skill-filter-heading-active">
+                      {typeOptions.find((o) => o.key === activeType)?.label ?? ""}
+                    </span>
+                  )}
+                </button>
+                {typeExpanded && (
+                  <div className="skill-tag-filter" role="group" aria-label="按类型筛选">
+                    {typeOptions.map((opt) => {
+                      const active = opt.key === activeType;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          className={`skill-source-chip skill-source-chip-tag ${active ? "active" : ""}`}
+                          aria-pressed={active}
+                          onClick={() => setActiveType(opt.key)}
+                        >
+                          <span className="skill-source-chip-label">{opt.label}</span>
+                          <span className="skill-source-chip-count">{opt.count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            {agents.length > 0 && (
+              <div className="skill-filter-section">
+                <button
+                  type="button"
+                  className="skill-filter-heading"
+                  aria-expanded={agentExpanded}
+                  onClick={toggleAgentExpanded}
+                >
+                  <span className="skill-filter-heading-chevron" aria-hidden>
+                    <IconChevron open={agentExpanded} />
+                  </span>
+                  <span className="skill-filter-heading-title">Agents</span>
+                  {!agentExpanded && activeAgent !== "all" && (
+                    <span className="skill-filter-heading-active">
+                      {agentFilterOptions.find((o) => o.name === activeAgent)?.display_name ?? ""}
+                    </span>
+                  )}
+                </button>
+                {agentExpanded && (
+                  <AgentFilterChips
+                    items={agentFilterOptions}
+                    total={servers.length}
+                    active={activeAgent}
+                    onSelect={setActiveAgent}
+                  />
+                )}
               </div>
             )}
             <div className="mcp-list">

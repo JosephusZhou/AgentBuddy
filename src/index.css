@@ -3204,6 +3204,10 @@ a[href]:focus-visible {
 .skill-filter-heading:hover {
   color: var(--seed-fg);
 }
+/* 折叠态下标题下面没有内容，去掉为筛选条预留的下边距，避免相邻折叠区之间空出一截 */
+.skill-filter-heading[aria-expanded="false"] {
+  margin-bottom: 0;
+}
 /* 静态标题（非折叠按钮）：去掉可点击暗示 */
 .skill-filter-heading.static,
 .skill-filter-heading.static:hover {
@@ -3303,6 +3307,23 @@ a[href]:focus-visible {
 .skill-source-chip-tag .skill-source-chip-label {
   font-family: inherit;
   max-width: 160px;
+}
+/* Agent 筛选 chip：品牌图标/缩写回退随文字色，尺寸对齐文字 */
+.skill-source-chip-agent-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.skill-source-chip-agent-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .skill-card-desc {
   margin: 8px 0 0;
