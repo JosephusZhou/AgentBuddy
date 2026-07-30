@@ -7,6 +7,7 @@ import {
   Bot,
   Braces,
   Cloud,
+  CloudCog,
   Code,
   FolderCog,
   Globe,
@@ -84,6 +85,13 @@ export default function Sidebar({
             >
               <SquareTerminal size={18} strokeWidth={1.8} />
               <span className="menu-label">Codex环境</span>
+            </button>
+            <button
+              className={`menu-item ${mainView === "ai-providers" ? "active" : ""}`}
+              onClick={() => onNavigateMain("ai-providers")}
+            >
+              <CloudCog size={18} strokeWidth={1.8} />
+              <span className="menu-label">AI供应商</span>
             </button>
             <button
               className={`menu-item ${mainView === "opencode-config" ? "active" : ""}`}

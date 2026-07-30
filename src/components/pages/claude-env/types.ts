@@ -25,6 +25,10 @@ export interface ClaudeEnvironment {
   apiKey: string;
   hasApiKey: boolean;
   model: string;
+  // 四档模型覆盖（haiku/sonnet/opus/fable）：仅保留与主模型不同的档位值供编辑回填。
+  modelTiers: Record<string, string>;
+  // 关联的 AI 供应商 ID（空串=未关联）。供应商更新时自动反向同步。
+  providerId: string;
   createdAt: number;
   updatedAt: number;
 }

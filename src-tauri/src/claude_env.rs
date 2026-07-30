@@ -58,6 +58,11 @@ pub struct ClaudeEnvironment {
     /// settings.json → env.ANTHROPIC_MODEL（实时读取，不入库）。缺失为空串。
     /// 写入时会同步整组 DEFAULT_* 模型键；读取仍只看主键。
     pub model: String,
+    /// settings.json → env.ANTHROPIC_DEFAULT_{TIER}_MODEL 中与主模型不同的档位值
+    /// （haiku/sonnet/opus/fable），供编辑表单回填；相同或缺失的档不出现。
+    pub model_tiers: std::collections::HashMap<String, String>,
+    /// 关联的 AI 供应商 ID（空串=未关联）。反向同步时按此查找环境。
+    pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -74,6 +79,7 @@ pub struct ClaudeEnvironmentRow {
     pub source: String,
     pub notes: String,
     pub alias_installed: bool,
+    pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -95,6 +101,29 @@ pub struct ClaudeEnvUpsertPayload {
     /// settings.json → env.ANTHROPIC_MODEL 及 DEFAULT_* 模型键族。
     /// Some("") 表示删除整组，None 表示不改动。
     pub model: Option<String>,
+    /// 四档模型覆盖（仅在 model 写入时生效；留空的档回退到 model 值）。
+    pub model_haiku: Option<String>,
+    pub model_sonnet: Option<String>,
+    pub model_opus: Option<String>,
+    pub model_fable: Option<String>,
+    /// 关联的 AI 供应商 ID。空串或 None = 取消关联。
+    pub provider_id: Option<String>,
+}
+
+/// 从 payload 的四档可选字段构造档位覆盖（空值归一为空串）。
+fn tier_overrides_from(
+    haiku: Option<&String>,
+    sonnet: Option<&String>,
+    opus: Option<&String>,
+    fable: Option<&String>,
+) -> ModelTierOverrides {
+    let norm = |v: Option<&String>| v.map(|s| s.trim().to_string()).unwrap_or_default();
+    ModelTierOverrides {
+        haiku: norm(haiku),
+        sonnet: norm(sonnet),
+        opus: norm(opus),
+        fable: norm(fable),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,6 +144,11 @@ pub struct ClaudeEnvClonePayload {
     /// Optional override for settings.json → env.ANTHROPIC_MODEL 及 DEFAULT_* 键族。
     /// Empty / omitted keeps whatever the source environment had (usually none).
     pub model: Option<String>,
+    /// 四档模型覆盖（仅在 model 覆盖写入时生效；留空的档回退到 model 值）。
+    pub model_haiku: Option<String>,
+    pub model_sonnet: Option<String>,
+    pub model_opus: Option<String>,
+    pub model_fable: Option<String>,
     /// When true (default if omitted), copy top-level mcpServers from ~/.claude.json
     /// into the new environment's `$config_dir/.claude.json`.
     pub sync_mcp: Option<bool>,
@@ -127,6 +161,8 @@ pub struct ClaudeEnvClonePayload {
     /// When true, immediately write the shell alias into ~/.zshrc after creation.
     /// Defaults to false — alias管理默认保持独立一步，避免擅自改写 ~/.zshrc。
     pub install_alias: Option<bool>,
+    /// 关联的 AI 供应商 ID。空串或 None = 不关联。
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -449,12 +485,29 @@ fn row_to_public(row: ClaudeEnvironmentRow) -> ClaudeEnvironment {
     let global_count = global_names.len() as u32;
     let (status, local_count) = mcp_status_for_row(&row, dir_exists, &global_names);
     let (skills_sync_status, skill_count) = skills_status_for_row(&row, dir_exists);
-    let (base_url, api_key_plain, model) = if dir_exists {
+    let (base_url, api_key_plain, model, tiers) = if dir_exists {
         read_settings_env(&path)
     } else {
-        (String::new(), String::new(), String::new())
+        (
+            String::new(),
+            String::new(),
+            String::new(),
+            ModelTierOverrides::default(),
+        )
     };
     let has_api_key = !api_key_plain.is_empty();
+    // 编辑表单回填用：仅保留与主模型不同的档位值（相同即「跟随默认」，留空即可）
+    let mut model_tiers = std::collections::HashMap::new();
+    for (key, val) in [
+        ("haiku", &tiers.haiku),
+        ("sonnet", &tiers.sonnet),
+        ("opus", &tiers.opus),
+        ("fable", &tiers.fable),
+    ] {
+        if !val.is_empty() && *val != model {
+            model_tiers.insert(key.to_string(), val.clone());
+        }
+    }
     ClaudeEnvironment {
         id: row.id,
         name: row.name,
@@ -479,6 +532,8 @@ fn row_to_public(row: ClaudeEnvironmentRow) -> ClaudeEnvironment {
         api_key: String::new(),
         has_api_key,
         model,
+        model_tiers,
+        provider_id: row.provider_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -781,6 +836,30 @@ fn move_environment_dir(src: &Path, dst: &Path) -> Result<EnvMoveOutcome, String
     }
 }
 
+/// 四档模型覆盖：写入 ANTHROPIC_DEFAULT_{TIER}_MODEL / _NAME 时按档取值，
+/// 留空的档回退到主模型（ANTHROPIC_MODEL）。与 AI 供应商库的档位语义一致。
+#[derive(Debug, Clone, Default)]
+pub struct ModelTierOverrides {
+    pub haiku: String,
+    pub sonnet: String,
+    pub opus: String,
+    pub fable: String,
+}
+
+impl ModelTierOverrides {
+    fn get(&self, tier: &str) -> &str {
+        match tier {
+            "HAIKU" => &self.haiku,
+            "SONNET" => &self.sonnet,
+            "OPUS" => &self.opus,
+            "FABLE" => &self.fable,
+            _ => "",
+        }
+    }
+}
+
+const MODEL_TIER_NAMES: [&str; 4] = ["HAIKU", "SONNET", "OPUS", "FABLE"];
+
 /// 自定义模型写入 settings.json → env 时同步维护的一组键。
 /// 主键 `ANTHROPIC_MODEL` 仍是 UI/DTO 读写的唯一入口；其余为 Claude Code 各档默认模型
 /// 覆盖（模型 id 与展示名共用同一用户输入值）。
@@ -804,6 +883,7 @@ fn apply_settings_overrides(
     base_url: Option<&str>,
     api_key: Option<&str>,
     model: Option<&str>,
+    tiers: Option<&ModelTierOverrides>,
 ) -> Result<Vec<String>, String> {
     // 用内部 fn 而非闭包：自由函数有生命周期省略，会把输入 &str 与输出 &str 绑定同一生命周期。
     fn non_empty(o: Option<&str>) -> Option<&str> {
@@ -814,23 +894,24 @@ fn apply_settings_overrides(
         non_empty(base_url),
         non_empty(api_key),
         non_empty(model),
+        tiers,
     )
 }
 
 /// Read the managed env keys from `<config_dir>/settings.json`.
 /// Missing file / key / non-string value → empty string. Never fails hard:
 /// a malformed settings.json just yields empties so listing keeps working.
-/// `model` 只读主键 `ANTHROPIC_MODEL`（列表/编辑表单的唯一来源）。
-fn read_settings_env(config_dir: &Path) -> (String, String, String) {
+/// `model` 只读主键 `ANTHROPIC_MODEL`；档位模型读各 DEFAULT_*_MODEL 键。
+fn read_settings_env(config_dir: &Path) -> (String, String, String, ModelTierOverrides) {
     let path = config_dir.join("settings.json");
     if !path.is_file() {
-        return (String::new(), String::new(), String::new());
+        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
     }
     let Ok(raw) = fs::read_to_string(&path) else {
-        return (String::new(), String::new(), String::new());
+        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
     };
     let Ok(root) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return (String::new(), String::new(), String::new());
+        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
     };
     let get = |key: &str| -> String {
         root.get("env")
@@ -839,10 +920,17 @@ fn read_settings_env(config_dir: &Path) -> (String, String, String) {
             .unwrap_or("")
             .to_string()
     };
+    let tiers = ModelTierOverrides {
+        haiku: get("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+        sonnet: get("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+        opus: get("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+        fable: get("ANTHROPIC_DEFAULT_FABLE_MODEL"),
+    };
     (
         get("ANTHROPIC_BASE_URL"),
         get("ANTHROPIC_AUTH_TOKEN"),
         get("ANTHROPIC_MODEL"),
+        tiers,
     )
 }
 
@@ -853,8 +941,9 @@ fn read_settings_env(config_dir: &Path) -> (String, String, String) {
 /// - `Some("...")` → set the key (trimmed) to the given value.
 /// - `Some("")`    → delete the key from `env` if present.
 ///
-/// `model` 会同步写入/删除整组 [`MODEL_ENV_KEYS`]（同一用户值），避免只改主键
-/// 导致各档 DEFAULT_* 残留旧值。
+/// `model` 写入时：主键 `ANTHROPIC_MODEL` 取模型本身；各档 `DEFAULT_*_MODEL(+_NAME)`
+/// 取 `tiers` 中对应档位的值，留空的档回退到主模型（`tiers` 为 None 时全部回退，
+/// 即旧的「整组同一值」行为）。`Some("")` 仍删除整组 [`MODEL_ENV_KEYS`]。
 ///
 /// Returns the list of human-readable field labels that actually changed.
 /// No net change → no write (keeps mtime / avoids needless disk churn).
@@ -864,6 +953,7 @@ fn apply_settings_env_edit(
     base_url: Option<&str>,
     api_key: Option<&str>,
     model: Option<&str>,
+    tiers: Option<&ModelTierOverrides>,
 ) -> Result<Vec<String>, String> {
     // Normalize: None stays None; Some is trimmed.
     let base = base_url.map(|s| s.trim().to_string());
@@ -931,7 +1021,33 @@ fn apply_settings_env_edit(
         };
     apply_keys(base, &["ANTHROPIC_BASE_URL"], "Base URL")?;
     apply_keys(key, &["ANTHROPIC_AUTH_TOKEN"], "API Key")?;
-    apply_keys(model, MODEL_ENV_KEYS, "模型")?;
+    match model {
+        // 删除：整组模型键一并移除
+        Some(m) if m.is_empty() => {
+            apply_keys(Some(String::new()), MODEL_ENV_KEYS, "模型")?;
+        }
+        // 写入：主键取模型本身；各档按 tiers 取值，留空回退主模型
+        Some(m) => {
+            apply_keys(Some(m.clone()), &["ANTHROPIC_MODEL"], "模型")?;
+            for tier in MODEL_TIER_NAMES {
+                let override_val = tiers.map(|t| t.get(tier)).unwrap_or("").trim();
+                let effective = if override_val.is_empty() {
+                    m.clone()
+                } else {
+                    override_val.to_string()
+                };
+                let model_key = format!("ANTHROPIC_DEFAULT_{}_MODEL", tier);
+                let name_key = format!("ANTHROPIC_DEFAULT_{}_MODEL_NAME", tier);
+                apply_keys(Some(effective), &[&model_key, &name_key], "模型")?;
+            }
+        }
+        None => {}
+    }
+    // 同一字段多次 apply_keys 可能重复记录标签，去重保持「模型」只出现一次
+    {
+        let mut seen = std::collections::HashSet::new();
+        changed.retain(|label| seen.insert(label.clone()));
+    }
 
     if changed.is_empty() {
         return Ok(changed);
@@ -958,15 +1074,14 @@ fn apply_settings_env_edit(
     Ok(changed)
 }
 
-/// 老环境可能只有主键 `ANTHROPIC_MODEL`。若主键非空且伴生 DEFAULT_* 键缺失或
-/// 与主键不一致，则按主键值补齐整组 [`MODEL_ENV_KEYS`]。主键缺失/空串时不改动。
-/// 复用 `apply_settings_env_edit`：已齐全则 no-op，不全才写盘。
+/// 老环境可能只有主键 `ANTHROPIC_MODEL`。主键非空时，以「现有档位值优先、缺失回退
+/// 主键」补齐各档键：已按档配置的环境不会被主键值覆盖（apply 只写差异，齐全即 no-op）。
 fn ensure_model_env_companions(config_dir: &Path) -> Result<Vec<String>, String> {
-    let (_, _, model) = read_settings_env(config_dir);
+    let (_, _, model, tiers) = read_settings_env(config_dir);
     if model.is_empty() {
         return Ok(Vec::new());
     }
-    apply_settings_env_edit(config_dir, None, None, Some(model.as_str()))
+    apply_settings_env_edit(config_dir, None, None, Some(model.as_str()), Some(&tiers))
 }
 
 fn ensure_unique_fields(
@@ -1004,19 +1119,20 @@ fn ensure_default_environment() -> Result<(), String> {
     let home = home_dir()?;
     let config_dir = home.join(".claude");
     let now = now_secs();
-    let row = ClaudeEnvironmentRow {
-        id: DEFAULT_ENV_ID.into(),
-        name: "默认环境".into(),
-        slug: "default".into(),
-        config_dir: config_dir.to_string_lossy().to_string(),
-        alias_name: "claude".into(),
-        is_default: true,
-        source: "default".into(),
-        notes: "直接运行 claude 使用此环境（不写入 shell 别名块）".into(),
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
+let row = ClaudeEnvironmentRow {
+id: DEFAULT_ENV_ID.into(),
+name: "默认环境".into(),
+slug: "default".into(),
+config_dir: config_dir.to_string_lossy().to_string(),
+alias_name: "claude".into(),
+is_default: true,
+source: "default".into(),
+notes: "直接运行 claude 使用此环境（不写入 shell 别名块）".into(),
+alias_installed: false,
+provider_id: String::new(),
+created_at: now,
+updated_at: now,
+};
     db::upsert_claude_environment_row(&row)
 }
 
@@ -1506,22 +1622,23 @@ pub fn import_environment(
     ensure_unique_fields(&id, &slug, &config_dir_str, &alias)?;
 
     let now = now_secs();
-    let mut row = ClaudeEnvironmentRow {
-        id: id.clone(),
-        name: name.clone(),
-        slug,
-        config_dir: config_dir_str,
-        alias_name: alias,
-        is_default: false,
-        source: "imported".into(),
-        notes,
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
-    db::upsert_claude_environment_row(&row)?;
+let mut row = ClaudeEnvironmentRow {
+id: id.clone(),
+name: name.clone(),
+slug,
+config_dir: config_dir_str,
+alias_name: alias,
+is_default: false,
+source: "imported".into(),
+notes,
+alias_installed: false,
+provider_id: String::new(),
+created_at: now,
+updated_at: now,
+};
+db::upsert_claude_environment_row(&row)?;
 
-    let mut message = format!("已导入环境「{}」", name);
+let mut message = format!("已导入环境「{}」", name);
     let (alias_installed, alias_msg) =
         install_alias_after_create(&row, payload.install_alias.unwrap_or(false));
     row.alias_installed = alias_installed;
@@ -1574,11 +1691,18 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
         return Err(e);
     }
 
+    let clone_tiers = tier_overrides_from(
+        payload.model_haiku.as_ref(),
+        payload.model_sonnet.as_ref(),
+        payload.model_opus.as_ref(),
+        payload.model_fable.as_ref(),
+    );
     let override_fields = match apply_settings_overrides(
         &dst,
         payload.base_url.as_deref(),
         payload.api_key.as_deref(),
         payload.model.as_deref(),
+        Some(&clone_tiers),
     ) {
         Ok(fields) => fields,
         Err(e) => {
@@ -1596,22 +1720,23 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     };
 
     let now = now_secs();
-    let mut row = ClaudeEnvironmentRow {
-        id: id.clone(),
-        name: name.clone(),
-        slug,
-        config_dir: dst_str,
-        alias_name: alias,
-        is_default: false,
-        source: "managed".into(),
-        notes,
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
-    db::upsert_claude_environment_row(&row)?;
+let mut row = ClaudeEnvironmentRow {
+id: id.clone(),
+name: name.clone(),
+slug,
+config_dir: dst_str,
+alias_name: alias,
+is_default: false,
+source: "managed".into(),
+notes,
+alias_installed: false,
+provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
+created_at: now,
+updated_at: now,
+};
+db::upsert_claude_environment_row(&row)?;
 
-    let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     let mut skipped: Vec<&str> = Vec::new();
     if !sync_skills {
         skipped.push("skills");
@@ -1731,6 +1856,7 @@ pub fn upsert_environment(
         source,
         notes,
         alias_installed: existing.alias_installed,
+        provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -1775,11 +1901,18 @@ pub fn upsert_environment(
     if !is_default {
         let dir = PathBuf::from(&row.config_dir);
         if dir.is_dir() {
+            let edit_tiers = tier_overrides_from(
+                payload.model_haiku.as_ref(),
+                payload.model_sonnet.as_ref(),
+                payload.model_opus.as_ref(),
+                payload.model_fable.as_ref(),
+            );
             match apply_settings_env_edit(
                 &dir,
                 payload.base_url.as_deref(),
                 payload.api_key.as_deref(),
                 payload.model.as_deref(),
+                Some(&edit_tiers),
             ) {
                 Ok(changed) if !changed.is_empty() => {
                     message.push_str(&format!("；已更新 settings.json 的 {}", changed.join("、")));
@@ -1812,6 +1945,50 @@ pub fn upsert_environment(
         message,
         environment: Some(env),
     })
+}
+
+/// 反向同步：将供应商最新的 baseUrl / apiKey / model / 档位模型写入所有关联此供应商的非默认环境。
+/// 由 ai_provider::upsert_provider 在更新路径调用。
+/// 返回 (已同步数量, 失败列表)。
+pub fn sync_provider_to_envs(
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    tier_models: &std::collections::HashMap<String, String>,
+) -> Result<(usize, Vec<String>), String> {
+    let envs = db::load_claude_envs_by_provider(provider_id)?;
+    let mut synced = 0usize;
+    let mut errors = Vec::new();
+    for env in &envs {
+        let dir = PathBuf::from(&env.config_dir);
+        if !dir.is_dir() {
+            errors.push(format!("{}（目录不存在）", env.name));
+            continue;
+        }
+        let tiers = ModelTierOverrides {
+            haiku: tier_models.get("haiku").cloned().unwrap_or_default(),
+            sonnet: tier_models.get("sonnet").cloned().unwrap_or_default(),
+            opus: tier_models.get("opus").cloned().unwrap_or_default(),
+            fable: tier_models.get("fable").cloned().unwrap_or_default(),
+        };
+        match apply_settings_env_edit(
+            &dir,
+            Some(base_url),
+            Some(api_key),
+            Some(model),
+            Some(&tiers),
+        ) {
+            Ok(_) => {
+                let _ = ensure_model_env_companions(&dir);
+                synced += 1;
+            }
+            Err(e) => {
+                errors.push(format!("{}（{}）", env.name, e));
+            }
+        }
+    }
+    Ok((synced, errors))
 }
 
 pub fn delete_environment(id: String, delete_files: bool) -> Result<ClaudeEnvActionResult, String> {
@@ -2138,7 +2315,7 @@ pub fn get_env_secret(id: String) -> Result<String, String> {
     if !dir.is_dir() {
         return Ok(String::new());
     }
-    let (_, api_key, _) = read_settings_env(&dir);
+    let (_, api_key, _, _) = read_settings_env(&dir);
     Ok(api_key)
 }
 
@@ -2611,7 +2788,7 @@ mod tests {
         .unwrap();
 
         // Empty overrides → no change
-        let changed = apply_settings_overrides(&dir, Some("  "), Some(""), None).unwrap();
+        let changed = apply_settings_overrides(&dir, Some("  "), Some(""), None, None).unwrap();
         assert!(changed.is_empty());
         let raw = fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(raw.contains("http://old.example"));
@@ -2623,6 +2800,7 @@ mod tests {
             Some("https://new.example/v1"),
             Some("new-secret-token"),
             Some("claude-opus-4-8"),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2686,7 +2864,7 @@ mod tests {
         .unwrap();
 
         // None on every field → no-op, no change reported.
-        let changed = apply_settings_env_edit(&dir, None, None, None).unwrap();
+        let changed = apply_settings_env_edit(&dir, None, None, None, None).unwrap();
         assert!(changed.is_empty());
 
         // Set base+model, delete api key (Some("")).
@@ -2695,6 +2873,7 @@ mod tests {
             Some("https://new.example/v1"),
             Some(""),
             Some("claude-opus-4-8"),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2725,20 +2904,21 @@ mod tests {
         assert_eq!(v["effortLevel"].as_str(), Some("high"));
 
         // Setting the same model again (all companions already match) → no change.
-        let changed = apply_settings_env_edit(&dir, None, None, Some("claude-opus-4-8")).unwrap();
+        let changed =
+            apply_settings_env_edit(&dir, None, None, Some("claude-opus-4-8"), None).unwrap();
         assert!(changed.is_empty());
 
         // Setting the same value again → no change reported.
         let changed =
-            apply_settings_env_edit(&dir, Some("https://new.example/v1"), None, None).unwrap();
+            apply_settings_env_edit(&dir, Some("https://new.example/v1"), None, None, None).unwrap();
         assert!(changed.is_empty());
 
         // Deleting an absent key → no change reported.
-        let changed = apply_settings_env_edit(&dir, None, Some(""), None).unwrap();
+        let changed = apply_settings_env_edit(&dir, None, Some(""), None, None).unwrap();
         assert!(changed.is_empty());
 
         // Delete model → clears primary + all DEFAULT_* companions.
-        let changed = apply_settings_env_edit(&dir, None, None, Some("")).unwrap();
+        let changed = apply_settings_env_edit(&dir, None, None, Some(""), None).unwrap();
         assert_eq!(changed, vec!["模型".to_string()]);
         let v: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
@@ -2752,7 +2932,7 @@ mod tests {
         assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
 
         // Deleting model again when already absent → no change.
-        let changed = apply_settings_env_edit(&dir, None, None, Some("")).unwrap();
+        let changed = apply_settings_env_edit(&dir, None, None, Some(""), None).unwrap();
         assert!(changed.is_empty());
 
         // Backfill: primary already set, missing companions → write companions only.
@@ -2775,7 +2955,8 @@ mod tests {
             )
             .unwrap();
         }
-        let changed = apply_settings_env_edit(&dir, None, None, Some("only-primary")).unwrap();
+        let changed =
+            apply_settings_env_edit(&dir, None, None, Some("only-primary"), None).unwrap();
         assert_eq!(changed, vec!["模型".to_string()]);
         let v: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
@@ -2784,7 +2965,7 @@ mod tests {
         }
 
         // read_settings_env round-trips the current values (primary only).
-        let (base, key, model) = read_settings_env(&dir);
+        let (base, key, model, _) = read_settings_env(&dir);
         assert_eq!(base, "https://new.example/v1");
         assert_eq!(key, "");
         assert_eq!(model, "only-primary");

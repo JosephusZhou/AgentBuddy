@@ -40,10 +40,16 @@ export async function invokeClone(payload: {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  // 四档模型覆盖：留空=跟随主模型，非空=写入该档覆盖。仅 model 写入时生效。
+  modelHaiku?: string;
+  modelSonnet?: string;
+  modelOpus?: string;
+  modelFable?: string;
   syncMcp?: boolean;
   syncSkills?: boolean;
   syncAgents?: boolean;
   installAlias?: boolean;
+  providerId?: string;
 }): Promise<ClaudeEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("clone_claude_environment", { payload }) as Promise<ClaudeEnvActionResult>;
@@ -60,6 +66,12 @@ export async function invokeUpsert(payload: {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  // 四档模型覆盖：留空=跟随主模型，非空=写入该档覆盖。写入时按档取值，留空的档回退到主模型。
+  modelHaiku?: string;
+  modelSonnet?: string;
+  modelOpus?: string;
+  modelFable?: string;
+  providerId?: string;
 }): Promise<ClaudeEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("upsert_claude_environment", { payload }) as Promise<ClaudeEnvActionResult>;

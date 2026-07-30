@@ -1,5 +1,6 @@
 mod agent_open;
 mod agents;
+mod ai_provider;
 mod backup;
 mod claude_env;
 mod codex_env;
@@ -960,6 +961,38 @@ async fn fetch_codex_env_remote_models(
         .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
 }
 
+/* ===== AI providers (上游模型供应商库) ===== */
+
+#[tauri::command]
+async fn list_ai_providers() -> Result<Vec<ai_provider::AiProvider>, String> {
+    tauri::async_runtime::spawn_blocking(ai_provider::list_providers)
+        .await
+        .map_err(|e| format!("列出 AI 供应商任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn upsert_ai_provider(
+    payload: ai_provider::AiProviderUpsertPayload,
+) -> Result<ai_provider::AiProviderActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
+        .await
+        .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_ai_provider(id: String) -> Result<ai_provider::AiProviderActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_provider::delete_provider(id))
+        .await
+        .map_err(|e| format!("删除 AI 供应商任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn get_ai_provider_secret(id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_provider::get_provider_secret(id))
+        .await
+        .map_err(|e| format!("读取供应商密钥任务失败: {e}"))?
+}
+
 #[tauri::command]
 async fn pick_project_folder() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1115,6 +1148,10 @@ pub fn run() {
             pick_project_folder,
             check_project_config_exists,
             init_project_config,
+            list_ai_providers,
+            upsert_ai_provider,
+            delete_ai_provider,
+            get_ai_provider_secret,
         ])
         .setup(|_app| {
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { CheckGlyph, useOverlayDismiss } from "../ui";
+import { ModelComboBox } from "../ModelComboBox";
 
 import type {
   CodexEnvironment,
@@ -28,6 +29,11 @@ import {
   invokeSyncSkills,
   invokeSyncAllMcp,
 } from "./codex-env/api";
+import {
+invokeList as invokeProviderList,
+invokeGetSecret as invokeProviderGetSecret,
+} from "./ai-providers/api";
+import type { AiProvider, ProviderType } from "./ai-providers/types";
 import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
@@ -96,6 +102,120 @@ const IconChevron = ({ open }: { open?: boolean }) => (
   <ChevronDown size={16} strokeWidth={1.8} style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.15s ease" }} />
 );
 
+/* ===== AI 供应商选择下拉（Codex 环境专用：仅 OpenAI / 通用类型） ===== */
+
+const CodexProviderSelect = ({
+  id,
+  providers,
+  value,
+  onChange,
+  disabled,
+  allowClear,
+}: {
+  id?: string;
+  providers: AiProvider[];
+  value: AiProvider | null;
+  onChange: (provider: AiProvider | null) => void;
+  disabled?: boolean;
+  allowClear?: boolean;
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  const typeLabel = (t: ProviderType) =>
+    t === "anthropic" ? "Anthropic" : t === "openai" ? "OpenAI" : "通用";
+
+  return (
+    <div
+      className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}
+      ref={rootRef}
+    >
+      <button
+        type="button"
+        id={id}
+        className="app-select-trigger form-input"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+      >
+        <span className={`app-select-value ${value ? "" : "placeholder"}`}>
+          {value ? `${value.name} (${typeLabel(value.providerType)})` : "未选择（自行填写）"}
+        </span>
+        <span className="app-select-chevron" aria-hidden>
+          <IconChevron open={open} />
+        </span>
+      </button>
+      {open && (
+        <div className="app-select-menu" role="listbox" aria-label="AI 供应商列表">
+          {allowClear && value && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="app-select-option"
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+            >
+              <span className="app-select-option-title">清除选择</span>
+            </button>
+          )}
+          {providers.map((p) => {
+            const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={value?.id === p.id}
+                className={`app-select-option ${value?.id === p.id ? "selected" : ""}`}
+                onClick={() => {
+                  onChange(p);
+                  setOpen(false);
+                }}
+              >
+                <span className="app-select-option-title">{p.name}</span>
+                <span className="app-select-option-sub">
+                  {typeLabel(p.providerType)} · {baseUrl}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ===== Helpers ===== */
 
 function displayPath(abs: string): string {
@@ -155,7 +275,6 @@ export default function CodexEnv() {
   const [cloneModel, setCloneModel] = useState("");
   const [cloneRemoteModels, setCloneRemoteModels] = useState<string[]>([]);
   const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
-  const [cloneModelSelectOpen, setCloneModelSelectOpen] = useState(false);
   const [cloneModelProvider, setCloneModelProvider] = useState("");
   const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
   const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
@@ -165,6 +284,9 @@ export default function CodexEnv() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [aliasTouched, setAliasTouched] = useState(false);
   const [dirTouched, setDirTouched] = useState(false);
+  // 供应商选择（Codex：仅 OpenAI / 通用类型）
+  const [cloneProviders, setCloneProviders] = useState<AiProvider[]>([]);
+  const [cloneSelectedProvider, setCloneSelectedProvider] = useState<AiProvider | null>(null);
 
   // Edit modal
   const [showEdit, setShowEdit] = useState(false);
@@ -182,15 +304,17 @@ export default function CodexEnv() {
   const [editModel, setEditModel] = useState("");
   const [editRemoteModels, setEditRemoteModels] = useState<string[]>([]);
   const [editModelsLoading, setEditModelsLoading] = useState(false);
-  const [editModelSelectOpen, setEditModelSelectOpen] = useState(false);
   const [editModelProvider, setEditModelProvider] = useState("");
   const [editApiKeyVisible, setEditApiKeyVisible] = useState(false);
   // 目录变更时的迁移二次确认（Tauri WebView 不支持原生 window.confirm，用受控 modal）。
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
   // 记录进入编辑时的原始值，用于三态判定（仅在实际变化时下发）。
-  const editEnvOriginalRef = useRef({ baseUrl: "", apiKey: "", model: "", modelProvider: "" });
+  const editEnvOriginalRef = useRef({ baseUrl: "", apiKey: "", model: "", modelProvider: "", providerId: "" });
   // 进入编辑时的原始配置目录，用于判断是否发生"目录迁移"并弹确认。
   const editOriginalConfigDirRef = useRef("");
+  // 编辑弹层的供应商选择（Codex：仅 OpenAI / 通用类型）
+  const [editProviders, setEditProviders] = useState<AiProvider[]>([]);
+  const [editSelectedProvider, setEditSelectedProvider] = useState<AiProvider | null>(null);
 
   // Scan modal
   const [showScan, setShowScan] = useState(false);
@@ -208,8 +332,6 @@ export default function CodexEnv() {
   const hasLoaded = useRef(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const cloneSourceRef = useRef<HTMLDivElement>(null);
-  const cloneModelSelectRef = useRef<HTMLDivElement>(null);
-  const editModelSelectRef = useRef<HTMLDivElement>(null);
 
   const cloneDismiss = useOverlayDismiss(() => setShowClone(false), !busy);
   const editDismiss = useOverlayDismiss(() => setShowEdit(false), !busy);
@@ -242,10 +364,8 @@ export default function CodexEnv() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || busy) return;
-      if (cloneSourceOpen || cloneModelSelectOpen || editModelSelectOpen) {
+      if (cloneSourceOpen) {
         setCloneSourceOpen(false);
-        setCloneModelSelectOpen(false);
-        setEditModelSelectOpen(false);
         return;
       }
       setShowClone(false);
@@ -256,7 +376,7 @@ export default function CodexEnv() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [busy, cloneSourceOpen, cloneModelSelectOpen, editModelSelectOpen]);
+  }, [busy, cloneSourceOpen]);
 
   useEffect(() => {
     if (!cloneSourceOpen) return;
@@ -269,20 +389,6 @@ export default function CodexEnv() {
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [cloneSourceOpen]);
-
-  useEffect(() => {
-    if (!cloneModelSelectOpen && !editModelSelectOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (cloneModelSelectRef.current && !cloneModelSelectRef.current.contains(e.target as Node)) {
-        setCloneModelSelectOpen(false);
-      }
-      if (editModelSelectRef.current && !editModelSelectRef.current.contains(e.target as Node)) {
-        setEditModelSelectOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [cloneModelSelectOpen, editModelSelectOpen]);
 
   useEffect(() => {
     if (showClone || showEdit) {
@@ -313,7 +419,6 @@ export default function CodexEnv() {
     setCloneModel("");
     setCloneRemoteModels([]);
     setCloneModelsLoading(false);
-    setCloneModelSelectOpen(false);
     setCloneModelProvider("");
     setCloneSyncMcp(true);
     setCloneSyncSkills(true);
@@ -323,7 +428,13 @@ export default function CodexEnv() {
     setSlugTouched(false);
     setAliasTouched(false);
     setDirTouched(false);
+    setCloneSelectedProvider(null);
     setShowClone(true);
+    // 加载供应商列表（Codex 环境只展示 OpenAI / 通用供应商）
+    void invokeProviderList().then((rows) => {
+      const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
+      setCloneProviders(eligible);
+    }).catch(() => setCloneProviders([]));
   }, [envs]);
 
   const onCloneSlugChange = (slug: string) => {
@@ -357,7 +468,6 @@ export default function CodexEnv() {
     const setLoading = mode === "clone" ? setCloneModelsLoading : setEditModelsLoading;
     const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
     const setModel = mode === "clone" ? setCloneModel : setEditModel;
-    const setOpen = mode === "clone" ? setCloneModelSelectOpen : setEditModelSelectOpen;
 
     setLoading(true);
     try {
@@ -368,7 +478,6 @@ export default function CodexEnv() {
       }
       setModels(models);
       setModel(models[0]);
-      setOpen(false);
       setStatusMsg(`已拉取 ${models.length} 个远端模型`);
     } catch (err) {
       setStatusMsg(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`);
@@ -381,22 +490,23 @@ export default function CodexEnv() {
     setBusy(true);
     setCloneError("");
     try {
-      const result = await invokeClone({
-        sourceId: cloneSourceId,
-        name: cloneName.trim(),
-        slug: cloneSlug.trim(),
-        configDir: cloneConfigDir.trim(),
-        aliasName: cloneAlias.trim(),
-        notes: cloneNotes.trim() || undefined,
-        baseUrl: cloneBaseUrl.trim() || undefined,
-        apiKey: cloneApiKey.trim() || undefined,
-        model: cloneModel.trim() || undefined,
-        modelProvider: cloneModelProvider.trim() || undefined,
-        syncMcp: cloneSyncMcp,
-        syncSkills: cloneSyncSkills,
-        syncAgents: cloneSyncAgents,
-        installAlias: cloneInstallAlias,
-      });
+const result = await invokeClone({
+sourceId: cloneSourceId,
+name: cloneName.trim(),
+slug: cloneSlug.trim(),
+configDir: cloneConfigDir.trim(),
+aliasName: cloneAlias.trim(),
+notes: cloneNotes.trim() || undefined,
+baseUrl: cloneBaseUrl.trim() || undefined,
+apiKey: cloneApiKey.trim() || undefined,
+model: cloneModel.trim() || undefined,
+modelProvider: cloneModelProvider.trim() || undefined,
+syncMcp: cloneSyncMcp,
+syncSkills: cloneSyncSkills,
+syncAgents: cloneSyncAgents,
+installAlias: cloneInstallAlias,
+providerId: cloneSelectedProvider?.id || undefined,
+});
       if (!result.ok) {
         setCloneError(result.message);
         return;
@@ -444,23 +554,31 @@ export default function CodexEnv() {
     setEditModel(model);
     setEditRemoteModels([]);
     setEditModelsLoading(false);
-    setEditModelSelectOpen(false);
     setEditModelProvider(modelProvider);
     setEditApiKeyVisible(false);
     setEditError("");
+    setEditSelectedProvider(null);
     // token 列表接口不回传：先以空值打开（避免误判为删除），再按需拉取真值填入并作为三态基准。
     setEditApiKey("");
-    editEnvOriginalRef.current = { baseUrl, apiKey: "", model, modelProvider };
+    editEnvOriginalRef.current = { baseUrl, apiKey: "", model, modelProvider, providerId: env.providerId ?? "" };
     setShowEdit(true);
     if (!env.isDefault && env.hasAuth) {
       try {
         const secret = await invokeGetSecret(env.id);
         setEditApiKey(secret);
-        editEnvOriginalRef.current = { baseUrl, apiKey: secret, model, modelProvider };
+        editEnvOriginalRef.current = { baseUrl, apiKey: secret, model, modelProvider, providerId: env.providerId ?? "" };
       } catch {
         // 拉取失败则保持空，用户可重新输入
       }
     }
+    // 加载供应商列表
+    void invokeProviderList().then((rows) => {
+      const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
+      setEditProviders(eligible);
+      // 预选关联的供应商
+      const linked = eligible.find((p) => p.id === env.providerId) ?? null;
+      setEditSelectedProvider(linked);
+    }).catch(() => setEditProviders([]));
   }, []);
 
   const handleEdit = useCallback(async () => {
@@ -473,14 +591,15 @@ export default function CodexEnv() {
       const orig = editEnvOriginalRef.current;
       const diffField = (next: string, prev: string): string | undefined =>
         next === prev ? undefined : next;
-      const envPayload = editIsDefault
-        ? {}
-        : {
-            baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
-            apiKey: diffField(editApiKey.trim(), orig.apiKey),
-            model: diffField(editModel.trim(), orig.model),
-            modelProvider: diffField(editModelProvider.trim(), orig.modelProvider),
-          };
+const envPayload = editIsDefault
+? {}
+: {
+baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
+apiKey: diffField(editApiKey.trim(), orig.apiKey),
+model: diffField(editModel.trim(), orig.model),
+modelProvider: diffField(editModelProvider.trim(), orig.modelProvider),
+providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
+};
       const result = await invokeUpsert({
         id: editId,
         name: editName.trim(),
@@ -1144,6 +1263,41 @@ export default function CodexEnv() {
                 disabled={busy}
               />
             </div>
+            {/* 供应商选择：Codex 环境仅展示 OpenAI/通用 */}
+            {cloneProviders.length > 0 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="xe-clone-provider">选择供应商（可选）</label>
+                <CodexProviderSelect
+                  id="xe-clone-provider"
+                  providers={cloneProviders}
+                  value={cloneSelectedProvider}
+                  onChange={async (p) => {
+                    setCloneSelectedProvider(p);
+                    if (p) {
+                      const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+                      const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
+                      setCloneBaseUrl(baseUrl);
+                      setCloneModel(defaultModel);
+                      if (p.hasApiKey) {
+                        try {
+                          const secret = await invokeProviderGetSecret(p.id);
+                          setCloneApiKey(secret);
+                        } catch {
+                          // 拉取失败则保持原值
+                        }
+                      } else {
+                        setCloneApiKey("");
+                      }
+                    }
+                  }}
+                  disabled={busy}
+                  allowClear
+                />
+                <div className="claude-env-form-hint">
+                  选择后自动填入供应商的 Base URL、默认模型与 API Key；也可跳过自行填写。
+                </div>
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="xe-base-url">Base URL（可选）</label>
               <input
@@ -1200,55 +1354,14 @@ export default function CodexEnv() {
                   {cloneModelsLoading ? "拉取中…" : "拉取列表"}
                 </button>
               </div>
-              {cloneRemoteModels.length > 0 ? (
-                <div
-                  className={`app-select ${cloneModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
-                  ref={cloneModelSelectRef}
-                >
-                  <button
-                    type="button"
-                    id="xe-model"
-                    className="app-select-trigger form-input"
-                    aria-haspopup="listbox"
-                    aria-expanded={cloneModelSelectOpen}
-                    onClick={() => !busy && setCloneModelSelectOpen((open) => !open)}
-                    disabled={busy}
-                  >
-                    <span className="app-select-value">{cloneModel}</span>
-                    <span className="app-select-chevron" aria-hidden><IconChevron open={cloneModelSelectOpen} /></span>
-                  </button>
-                  {cloneModelSelectOpen && (
-                    <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
-                      {cloneRemoteModels.map((model) => (
-                        <button
-                          key={model}
-                          type="button"
-                          role="option"
-                          aria-selected={model === cloneModel}
-                          className={`app-select-option ${model === cloneModel ? "selected" : ""}`}
-                          onClick={() => {
-                            setCloneModel(model);
-                            setCloneModelSelectOpen(false);
-                          }}
-                        >
-                          <span className="app-select-option-title">{model}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <input
-                  id="xe-model"
-                  className="form-input"
-                  placeholder="留空则复用源环境 model"
-                  value={cloneModel}
-                  onChange={(e) => setCloneModel(e.target.value)}
-                  disabled={busy}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              )}
+              <ModelComboBox
+                id="xe-model"
+                value={cloneModel}
+                onChange={setCloneModel}
+                options={cloneRemoteModels}
+                disabled={busy}
+                placeholder="留空则复用源环境 model"
+              />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="xe-provider">Provider（可选）</label>
@@ -1402,6 +1515,38 @@ export default function CodexEnv() {
                     disabled={busy}
                   />
                 </div>
+                {/* 供应商选择 */}
+                {editProviders.length > 0 && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="xe-edit-provider">选择供应商（可选）</label>
+                    <CodexProviderSelect
+                      id="xe-edit-provider"
+                      providers={editProviders}
+                      value={editSelectedProvider}
+                      onChange={async (p) => {
+                        setEditSelectedProvider(p);
+                        if (p) {
+                          const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+                          const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
+                          setEditBaseUrl(baseUrl);
+                          setEditModel(defaultModel);
+                          if (p.hasApiKey) {
+                            try {
+                              const secret = await invokeProviderGetSecret(p.id);
+                              setEditApiKey(secret);
+                            } catch {
+                              // 拉取失败则保持原值
+                            }
+                          } else {
+                            setEditApiKey("");
+                          }
+                        }
+                      }}
+                      disabled={busy}
+                      allowClear
+                    />
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="xe-edit-base-url">Base URL</label>
                   <input
@@ -1458,55 +1603,14 @@ export default function CodexEnv() {
                       {editModelsLoading ? "拉取中…" : "拉取列表"}
                     </button>
                   </div>
-                  {editRemoteModels.length > 0 ? (
-                    <div
-                      className={`app-select ${editModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
-                      ref={editModelSelectRef}
-                    >
-                      <button
-                        type="button"
-                        id="xe-edit-model"
-                        className="app-select-trigger form-input"
-                        aria-haspopup="listbox"
-                        aria-expanded={editModelSelectOpen}
-                        onClick={() => !busy && setEditModelSelectOpen((open) => !open)}
-                        disabled={busy}
-                      >
-                        <span className="app-select-value">{editModel}</span>
-                        <span className="app-select-chevron" aria-hidden><IconChevron open={editModelSelectOpen} /></span>
-                      </button>
-                      {editModelSelectOpen && (
-                        <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
-                          {editRemoteModels.map((model) => (
-                            <button
-                              key={model}
-                              type="button"
-                              role="option"
-                              aria-selected={model === editModel}
-                              className={`app-select-option ${model === editModel ? "selected" : ""}`}
-                              onClick={() => {
-                                setEditModel(model);
-                                setEditModelSelectOpen(false);
-                              }}
-                            >
-                              <span className="app-select-option-title">{model}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <input
-                      id="xe-edit-model"
-                      className="form-input"
-                      placeholder="留空即删除 model 键"
-                      value={editModel}
-                      onChange={(e) => setEditModel(e.target.value)}
-                      disabled={busy}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  )}
+                  <ModelComboBox
+                    id="xe-edit-model"
+                    value={editModel}
+                    onChange={setEditModel}
+                    options={editRemoteModels}
+                    disabled={busy}
+                    placeholder="留空即删除 model 键"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label" htmlFor="xe-edit-provider">Provider</label>

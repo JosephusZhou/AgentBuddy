@@ -59,6 +59,8 @@ pub struct CodexEnvironment {
     pub base_url: String,
     /// 列表接口不回传明文 token；编辑时用 `get_codex_env_secret` 按需拉取。
     pub api_key: String,
+    /// 关联的 AI 供应商 ID（空串=未关联）。反向同步时按此查找环境。
+    pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -75,6 +77,7 @@ pub struct CodexEnvironmentRow {
     pub source: String,
     pub notes: String,
     pub alias_installed: bool,
+    pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -93,6 +96,8 @@ pub struct CodexEnvUpsertPayload {
     pub model_provider: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    /// 关联的 AI 供应商 ID。空串或 None = 取消关联。
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,6 +123,8 @@ pub struct CodexEnvClonePayload {
     pub sync_agents: Option<bool>,
     /// When true, write shell alias after creation. Defaults to false.
     pub install_alias: Option<bool>,
+    /// 关联的 AI 供应商 ID。空串或 None = 不关联。
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -952,6 +959,7 @@ fn row_to_public(row: CodexEnvironmentRow) -> CodexEnvironment {
         model_provider: managed.model_provider,
         base_url: managed.base_url,
         api_key: String::new(),
+        provider_id: row.provider_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -1121,19 +1129,20 @@ fn ensure_default_environment() -> Result<(), String> {
     }
     let config_dir = default_codex_home()?;
     let now = now_secs();
-    let row = CodexEnvironmentRow {
-        id: DEFAULT_ENV_ID.into(),
-        name: "默认环境".into(),
-        slug: "default".into(),
-        config_dir: config_dir.to_string_lossy().to_string(),
-        alias_name: "codex".into(),
-        is_default: true,
-        source: "default".into(),
-        notes: "直接运行 codex 使用此环境（不写入 shell 别名块）".into(),
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
+let row = CodexEnvironmentRow {
+id: DEFAULT_ENV_ID.into(),
+name: "默认环境".into(),
+slug: "default".into(),
+config_dir: config_dir.to_string_lossy().to_string(),
+alias_name: "codex".into(),
+is_default: true,
+source: "default".into(),
+notes: "直接运行 codex 使用此环境（不写入 shell 别名块）".into(),
+alias_installed: false,
+provider_id: String::new(),
+created_at: now,
+updated_at: now,
+};
     db::upsert_codex_environment_row(&row)
 }
 
@@ -1605,22 +1614,23 @@ pub fn import_environment(payload: CodexEnvImportPayload) -> Result<CodexEnvActi
     ensure_unique_fields(&id, &slug, &config_dir_str, &alias)?;
 
     let now = now_secs();
-    let mut row = CodexEnvironmentRow {
-        id: id.clone(),
-        name: name.clone(),
-        slug,
-        config_dir: config_dir_str,
-        alias_name: alias,
-        is_default: false,
-        source: "imported".into(),
-        notes,
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
-    db::upsert_codex_environment_row(&row)?;
+let mut row = CodexEnvironmentRow {
+id: id.clone(),
+name: name.clone(),
+slug,
+config_dir: config_dir_str,
+alias_name: alias,
+is_default: false,
+source: "imported".into(),
+notes,
+alias_installed: false,
+provider_id: String::new(),
+created_at: now,
+updated_at: now,
+};
+db::upsert_codex_environment_row(&row)?;
 
-    let mut message = format!("已导入环境「{}」", name);
+let mut message = format!("已导入环境「{}」", name);
     let (alias_installed, alias_msg) =
         install_alias_after_create(&row, payload.install_alias.unwrap_or(false));
     row.alias_installed = alias_installed;
@@ -1686,22 +1696,23 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
     };
 
     let now = now_secs();
-    let mut row = CodexEnvironmentRow {
-        id: id.clone(),
-        name: name.clone(),
-        slug,
-        config_dir: dst_str,
-        alias_name: alias,
-        is_default: false,
-        source: "managed".into(),
-        notes,
-        alias_installed: false,
-        created_at: now,
-        updated_at: now,
-    };
-    db::upsert_codex_environment_row(&row)?;
+let mut row = CodexEnvironmentRow {
+id: id.clone(),
+name: name.clone(),
+slug,
+config_dir: dst_str,
+alias_name: alias,
+is_default: false,
+source: "managed".into(),
+notes,
+alias_installed: false,
+provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
+created_at: now,
+updated_at: now,
+};
+db::upsert_codex_environment_row(&row)?;
 
-    let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     let mut skipped: Vec<&str> = Vec::new();
     if !sync_skills {
         skipped.push("skills");
@@ -1804,6 +1815,7 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         source,
         notes,
         alias_installed: existing.alias_installed,
+        provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -1876,6 +1888,43 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         message,
         environment: Some(row_to_public(row)),
     })
+}
+
+/// 反向同步：将供应商最新的 model / base_url / api_key 写入所有关联此供应商的非默认环境。
+/// 由 ai_provider::upsert_provider 在更新路径调用。
+/// 返回 (已同步数量, 失败列表)。
+pub fn sync_provider_to_envs(
+    provider_id: &str,
+    model: &str,
+    base_url: &str,
+    api_key: &str,
+) -> Result<(usize, Vec<String>), String> {
+    let envs = db::load_codex_envs_by_provider(provider_id)?;
+    let mut synced = 0usize;
+    let mut errors = Vec::new();
+    for env in &envs {
+        let dir = PathBuf::from(&env.config_dir);
+        if !dir.is_dir() {
+            errors.push(format!("{}（目录不存在）", env.name));
+            continue;
+        }
+        // model_provider 设为空串：让 Codex 使用顶层 model + base_url 而非自定义 provider 表。
+        match apply_managed_config_edit(
+            &dir,
+            Some(model),
+            Some(""),
+            Some(base_url),
+            Some(api_key),
+        ) {
+            Ok(_) => {
+                synced += 1;
+            }
+            Err(e) => {
+                errors.push(format!("{}（{}）", env.name, e));
+            }
+        }
+    }
+    Ok((synced, errors))
 }
 
 pub fn delete_environment(id: String, delete_files: bool) -> Result<CodexEnvActionResult, String> {

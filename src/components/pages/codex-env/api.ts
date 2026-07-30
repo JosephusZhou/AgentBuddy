@@ -45,6 +45,7 @@ export async function invokeClone(payload: {
   syncSkills?: boolean;
   syncAgents?: boolean;
   installAlias?: boolean;
+  providerId?: string;
 }): Promise<CodexEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("clone_codex_environment", { payload }) as Promise<CodexEnvActionResult>;
@@ -62,6 +63,7 @@ export async function invokeUpsert(payload: {
   modelProvider?: string;
   baseUrl?: string;
   apiKey?: string;
+  providerId?: string;
 }): Promise<CodexEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("upsert_codex_environment", { payload }) as Promise<CodexEnvActionResult>;

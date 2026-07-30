@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { CheckGlyph, useOverlayDismiss } from "../ui";
+import { ModelComboBox } from "../ModelComboBox";
 
 import type {
   ClaudeEnvironment,
@@ -28,6 +29,11 @@ import {
   invokeSyncSkills,
   invokeSyncAllMcp,
 } from "./claude-env/api";
+import {
+  invokeList as invokeProviderList,
+  invokeGetSecret as invokeProviderGetSecret,
+} from "./ai-providers/api";
+import { MODEL_TIERS, type AiProvider, type ProviderType } from "./ai-providers/types";
 import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
@@ -96,6 +102,117 @@ const IconChevron = ({ open }: { open?: boolean }) => (
   <ChevronDown size={16} strokeWidth={1.8} style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.15s ease" }} />
 );
 
+/* ===== AI 供应商选择下拉（Claude 环境专用：仅 Anthropic / 通用类型） ===== */
+
+const ProviderSelect = ({
+  id,
+  providers,
+  value,
+  onChange,
+  disabled,
+  allowClear,
+}: {
+  id?: string;
+  providers: AiProvider[];
+  value: AiProvider | null;
+  onChange: (provider: AiProvider | null) => void;
+  disabled?: boolean;
+  allowClear?: boolean;
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  const typeLabel = (t: ProviderType) =>
+    t === "anthropic" ? "Anthropic" : t === "openai" ? "OpenAI" : "通用";
+
+  return (
+    <div
+      className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}
+      ref={rootRef}
+    >
+      <button
+        type="button"
+        id={id}
+        className="app-select-trigger form-input"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+      >
+        <span className={`app-select-value ${value ? "" : "placeholder"}`}>
+          {value ? `${value.name} (${typeLabel(value.providerType)})` : "未选择（自行填写）"}
+        </span>
+        <span className="app-select-chevron" aria-hidden>
+          <IconChevron open={open} />
+        </span>
+      </button>
+      {open && (
+        <div className="app-select-menu" role="listbox" aria-label="AI 供应商列表">
+          {allowClear && value && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="app-select-option"
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+            >
+              <span className="app-select-option-title">清除选择</span>
+            </button>
+          )}
+          {providers.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="option"
+              aria-selected={value?.id === p.id}
+              className={`app-select-option ${value?.id === p.id ? "selected" : ""}`}
+              onClick={() => {
+                onChange(p);
+                setOpen(false);
+              }}
+            >
+              <span className="app-select-option-title">{p.name}</span>
+              <span className="app-select-option-sub">
+                {typeLabel(p.providerType)} · {p.baseUrl}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ===== Helpers ===== */
 
 function displayPath(abs: string): string {
@@ -155,7 +272,6 @@ export default function ClaudeEnv() {
   const [cloneModel, setCloneModel] = useState("");
   const [cloneRemoteModels, setCloneRemoteModels] = useState<string[]>([]);
   const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
-  const [cloneModelSelectOpen, setCloneModelSelectOpen] = useState(false);
   const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
   const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
   const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
@@ -164,6 +280,10 @@ export default function ClaudeEnv() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [aliasTouched, setAliasTouched] = useState(false);
   const [dirTouched, setDirTouched] = useState(false);
+  // 供应商选择 + 四档模型（可选覆盖）
+  const [cloneProviders, setCloneProviders] = useState<AiProvider[]>([]);
+  const [cloneSelectedProvider, setCloneSelectedProvider] = useState<AiProvider | null>(null);
+  const [cloneTierModels, setCloneTierModels] = useState<Record<string, string>>({});
 
   // Edit modal
   const [showEdit, setShowEdit] = useState(false);
@@ -181,14 +301,17 @@ export default function ClaudeEnv() {
   const [editModel, setEditModel] = useState("");
   const [editRemoteModels, setEditRemoteModels] = useState<string[]>([]);
   const [editModelsLoading, setEditModelsLoading] = useState(false);
-  const [editModelSelectOpen, setEditModelSelectOpen] = useState(false);
   const [editApiKeyVisible, setEditApiKeyVisible] = useState(false);
   // 目录变更时的迁移二次确认（Tauri WebView 不支持原生 window.confirm，用受控 modal）。
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
   // 记录进入编辑时的原始值，用于三态判定（仅在实际变化时下发）。
-  const editEnvOriginalRef = useRef({ baseUrl: "", apiKey: "", model: "" });
+  const editEnvOriginalRef = useRef({ baseUrl: "", apiKey: "", model: "", modelTiers: {} as Record<string, string>, providerId: "" });
   // 进入编辑时的原始配置目录，用于判断是否发生"目录迁移"并弹确认。
   const editOriginalConfigDirRef = useRef("");
+  // 编辑弹层的供应商选择 + 四档模型
+  const [editProviders, setEditProviders] = useState<AiProvider[]>([]);
+  const [editSelectedProvider, setEditSelectedProvider] = useState<AiProvider | null>(null);
+  const [editTierModels, setEditTierModels] = useState<Record<string, string>>({});
 
   // Scan modal
   const [showScan, setShowScan] = useState(false);
@@ -206,8 +329,6 @@ export default function ClaudeEnv() {
   const hasLoaded = useRef(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const cloneSourceRef = useRef<HTMLDivElement>(null);
-  const cloneModelSelectRef = useRef<HTMLDivElement>(null);
-  const editModelSelectRef = useRef<HTMLDivElement>(null);
 
   const cloneDismiss = useOverlayDismiss(() => setShowClone(false), !busy);
   const editDismiss = useOverlayDismiss(() => setShowEdit(false), !busy);
@@ -240,10 +361,9 @@ export default function ClaudeEnv() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || busy) return;
-      if (cloneSourceOpen || cloneModelSelectOpen || editModelSelectOpen) {
+      // 关闭源环境下拉
+      if (cloneSourceOpen) {
         setCloneSourceOpen(false);
-        setCloneModelSelectOpen(false);
-        setEditModelSelectOpen(false);
         return;
       }
       setShowClone(false);
@@ -254,7 +374,7 @@ export default function ClaudeEnv() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [busy, cloneSourceOpen, cloneModelSelectOpen, editModelSelectOpen]);
+  }, [busy, cloneSourceOpen]);
 
   useEffect(() => {
     if (!cloneSourceOpen) return;
@@ -267,20 +387,6 @@ export default function ClaudeEnv() {
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [cloneSourceOpen]);
-
-  useEffect(() => {
-    if (!cloneModelSelectOpen && !editModelSelectOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (cloneModelSelectRef.current && !cloneModelSelectRef.current.contains(e.target as Node)) {
-        setCloneModelSelectOpen(false);
-      }
-      if (editModelSelectRef.current && !editModelSelectRef.current.contains(e.target as Node)) {
-        setEditModelSelectOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [cloneModelSelectOpen, editModelSelectOpen]);
 
   useEffect(() => {
     if (showClone || showEdit) {
@@ -311,7 +417,6 @@ export default function ClaudeEnv() {
     setCloneModel("");
     setCloneRemoteModels([]);
     setCloneModelsLoading(false);
-    setCloneModelSelectOpen(false);
     setCloneSyncMcp(true);
     setCloneSyncSkills(true);
     setCloneSyncAgents(true);
@@ -320,7 +425,15 @@ export default function ClaudeEnv() {
     setSlugTouched(false);
     setAliasTouched(false);
     setDirTouched(false);
+    setCloneSelectedProvider(null);
+    setCloneTierModels({});
     setShowClone(true);
+    // 加载供应商列表
+    void invokeProviderList().then((rows) => {
+      // Claude 环境只展示 Anthropic / 通用供应商
+      const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
+      setCloneProviders(eligible);
+    }).catch(() => setCloneProviders([]));
   }, [envs]);
 
   const onCloneSlugChange = (slug: string) => {
@@ -354,7 +467,6 @@ export default function ClaudeEnv() {
     const setLoading = mode === "clone" ? setCloneModelsLoading : setEditModelsLoading;
     const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
     const setModel = mode === "clone" ? setCloneModel : setEditModel;
-    const setOpen = mode === "clone" ? setCloneModelSelectOpen : setEditModelSelectOpen;
 
     setLoading(true);
     try {
@@ -365,7 +477,6 @@ export default function ClaudeEnv() {
       }
       setModels(models);
       setModel(models[0]);
-      setOpen(false);
       setStatusMsg(`已拉取 ${models.length} 个远端模型`);
     } catch (err) {
       setStatusMsg(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`);
@@ -378,21 +489,32 @@ export default function ClaudeEnv() {
     setBusy(true);
     setCloneError("");
     try {
-      const result = await invokeClone({
-        sourceId: cloneSourceId,
-        name: cloneName.trim(),
-        slug: cloneSlug.trim(),
-        configDir: cloneConfigDir.trim(),
-        aliasName: cloneAlias.trim(),
-        notes: cloneNotes.trim() || undefined,
-        baseUrl: cloneBaseUrl.trim() || undefined,
-        apiKey: cloneApiKey.trim() || undefined,
-        model: cloneModel.trim() || undefined,
-        syncMcp: cloneSyncMcp,
-        syncSkills: cloneSyncSkills,
-        syncAgents: cloneSyncAgents,
-        installAlias: cloneInstallAlias,
-      });
+      // 四档模型：仅传显式覆盖的档位（留空跟随主模型）
+      const tiers: Record<string, string> = {};
+      for (const tier of MODEL_TIERS) {
+        const v = (cloneTierModels[tier.key] ?? "").trim();
+        if (v) tiers[tier.key] = v;
+      }
+const result = await invokeClone({
+sourceId: cloneSourceId,
+name: cloneName.trim(),
+slug: cloneSlug.trim(),
+configDir: cloneConfigDir.trim(),
+aliasName: cloneAlias.trim(),
+notes: cloneNotes.trim() || undefined,
+baseUrl: cloneBaseUrl.trim() || undefined,
+apiKey: cloneApiKey.trim() || undefined,
+model: cloneModel.trim() || undefined,
+modelHaiku: tiers.haiku || undefined,
+modelSonnet: tiers.sonnet || undefined,
+modelOpus: tiers.opus || undefined,
+modelFable: tiers.fable || undefined,
+syncMcp: cloneSyncMcp,
+syncSkills: cloneSyncSkills,
+syncAgents: cloneSyncAgents,
+installAlias: cloneInstallAlias,
+providerId: cloneSelectedProvider?.id || undefined,
+});
       if (!result.ok) {
         setCloneError(result.message);
         return;
@@ -415,6 +537,7 @@ export default function ClaudeEnv() {
     cloneBaseUrl,
     cloneApiKey,
     cloneModel,
+    cloneTierModels,
     cloneSyncMcp,
     cloneSyncSkills,
     cloneSyncAgents,
@@ -434,26 +557,37 @@ export default function ClaudeEnv() {
     // 预填 settings.json 当前值；默认环境不参与该编辑。
     const baseUrl = env.isDefault ? "" : env.baseUrl ?? "";
     const model = env.isDefault ? "" : env.model ?? "";
+    // 回填四档模型（仅含与主模型不同的档位）
+    const tiersRaw = env.modelTiers ?? {};
     setEditBaseUrl(baseUrl);
     setEditModel(model);
     setEditRemoteModels([]);
     setEditModelsLoading(false);
-    setEditModelSelectOpen(false);
     setEditApiKeyVisible(false);
     setEditError("");
+    setEditSelectedProvider(null);
+    setEditTierModels({ ...tiersRaw });
     // token 列表接口不回传：先以空值打开（避免误判为删除），再按需拉取真值填入并作为三态基准。
     setEditApiKey("");
-    editEnvOriginalRef.current = { baseUrl, apiKey: "", model };
+    editEnvOriginalRef.current = { baseUrl, apiKey: "", model, modelTiers: { ...tiersRaw }, providerId: env.providerId ?? "" };
     setShowEdit(true);
     if (!env.isDefault && env.hasApiKey) {
       try {
         const secret = await invokeGetSecret(env.id);
         setEditApiKey(secret);
-        editEnvOriginalRef.current = { baseUrl, apiKey: secret, model };
+        editEnvOriginalRef.current = { baseUrl, apiKey: secret, model, modelTiers: { ...tiersRaw }, providerId: env.providerId ?? "" };
       } catch {
         // 拉取失败则保持空，用户可重新输入
       }
     }
+    // 加载供应商列表用于选择
+    void invokeProviderList().then((rows) => {
+      const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
+      setEditProviders(eligible);
+      // 预选关联的供应商
+      const linked = eligible.find((p) => p.id === env.providerId) ?? null;
+      setEditSelectedProvider(linked);
+    }).catch(() => setEditProviders([]));
   }, []);
 
   const handleEdit = useCallback(async () => {
@@ -472,7 +606,14 @@ export default function ClaudeEnv() {
             baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
             apiKey: diffField(editApiKey.trim(), orig.apiKey),
             model: diffField(editModel.trim(), orig.model),
+            providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
           };
+      // 四档模型下发：只传显式变化过（相对原始值）且非空的档位
+      const tierDiff = (tierKey: string) => {
+        const next = (editTierModels[tierKey] ?? "").trim();
+        const prev = (orig.modelTiers?.[tierKey] ?? "");
+        return next === prev ? undefined : next || undefined;
+      };
       const result = await invokeUpsert({
         id: editId,
         name: editName.trim(),
@@ -481,6 +622,10 @@ export default function ClaudeEnv() {
         aliasName: editAlias.trim(),
         notes: editNotes.trim() || undefined,
         ...envPayload,
+        modelHaiku: tierDiff("haiku"),
+        modelSonnet: tierDiff("sonnet"),
+        modelOpus: tierDiff("opus"),
+        modelFable: tierDiff("fable"),
       });
       if (!result.ok) {
         setEditError(result.message);
@@ -505,6 +650,7 @@ export default function ClaudeEnv() {
     editBaseUrl,
     editApiKey,
     editModel,
+    editTierModels,
     refresh,
   ]);
 
@@ -1128,6 +1274,56 @@ export default function ClaudeEnv() {
                 disabled={busy}
               />
             </div>
+            {/* 供应商选择：选后可一键填入 Base URL + 默认模型（位于 Base URL 之上） */}
+            {cloneProviders.length > 0 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ce-provider">选择供应商（可选）</label>
+                <ProviderSelect
+                  id="ce-provider"
+                  providers={cloneProviders}
+                  value={cloneSelectedProvider}
+                      onChange={async (p) => {
+                        setCloneSelectedProvider(p);
+                        if (p) {
+                          setCloneBaseUrl(p.baseUrl);
+                          setCloneModel(p.defaultModel);
+                          // 四档模型：直接用供应商的档位值覆盖
+                          if (Object.keys(p.models).length > 0) {
+                            setCloneTierModels((prev) => {
+                              const next = { ...prev };
+                              for (const tier of MODEL_TIERS) {
+                                if (p.models[tier.key]) {
+                                  next[tier.key] = p.models[tier.key];
+                                } else {
+                                  delete next[tier.key];
+                                }
+                              }
+                              return next;
+                            });
+                          } else {
+                            setCloneTierModels({});
+                          }
+                          // 填入 API Key
+                          if (p.hasApiKey) {
+                            try {
+                              const secret = await invokeProviderGetSecret(p.id);
+                              setCloneApiKey(secret);
+                            } catch {
+                              // 拉取失败则保持原值
+                            }
+                          } else {
+                            setCloneApiKey("");
+                          }
+                        }
+                      }}
+                  disabled={busy}
+                  allowClear
+                />
+                <div className="claude-env-form-hint">
+                  选择后自动填入供应商的 Base URL、默认模型、四档模型与 API Key；也可跳过自行填写。
+                </div>
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="ce-base-url">Base URL（可选）</label>
               <input
@@ -1172,7 +1368,7 @@ export default function ClaudeEnv() {
             </div>
             <div className="form-group">
               <div className="claude-env-model-label-row">
-                <label className="form-label" htmlFor="ce-model">自定义模型（可选）</label>
+                <label className="form-label" htmlFor="ce-model">默认模型（可选）</label>
                 <button
                   type="button"
                   className="claude-env-fetch-models-btn"
@@ -1184,56 +1380,43 @@ export default function ClaudeEnv() {
                   {cloneModelsLoading ? "拉取中…" : "拉取列表"}
                 </button>
               </div>
-              {cloneRemoteModels.length > 0 ? (
-                <div
-                  className={`app-select ${cloneModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
-                  ref={cloneModelSelectRef}
-                >
-                  <button
-                    type="button"
-                    id="ce-model"
-                    className="app-select-trigger form-input"
-                    aria-haspopup="listbox"
-                    aria-expanded={cloneModelSelectOpen}
-                    onClick={() => !busy && setCloneModelSelectOpen((open) => !open)}
-                    disabled={busy}
-                  >
-                    <span className="app-select-value">{cloneModel}</span>
-                    <span className="app-select-chevron" aria-hidden><IconChevron open={cloneModelSelectOpen} /></span>
-                  </button>
-                  {cloneModelSelectOpen && (
-                    <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
-                      {cloneRemoteModels.map((model) => (
-                        <button
-                          key={model}
-                          type="button"
-                          role="option"
-                          aria-selected={model === cloneModel}
-                          className={`app-select-option ${model === cloneModel ? "selected" : ""}`}
-                          onClick={() => {
-                            setCloneModel(model);
-                            setCloneModelSelectOpen(false);
-                          }}
-                        >
-                          <span className="app-select-option-title">{model}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <input
-                  id="ce-model"
-                  className="form-input"
-                  placeholder="留空则不指定；填写后写入 ANTHROPIC_MODEL 及 DEFAULT_* 模型键"
-                  value={cloneModel}
-                  onChange={(e) => setCloneModel(e.target.value)}
-                  disabled={busy}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              )}
+              <ModelComboBox
+                id="ce-model"
+                value={cloneModel}
+                onChange={setCloneModel}
+                options={cloneRemoteModels}
+                disabled={busy}
+                placeholder="留空则不指定；填写后写入 ANTHROPIC_MODEL；留空的档位回退到此值"
+              />
+              <div className="claude-env-form-hint">
+                默认模型回用于各档位；若要按档覆盖，请在下面档位模型中填写。
+              </div>
             </div>
+{/* 四档模型覆盖 */}
+<div className="form-group">
+<label className="form-label">
+档位模型 <span className="form-label-optional">可选 · 按档覆盖默认值</span>
+</label>
+{MODEL_TIERS.map((tier) => {
+const tierKey = tier.key;
+const current = cloneTierModels[tierKey] ?? "";
+const idFor = `ce-tier-${tierKey}`;
+return (
+<div key={tierKey} style={{ marginBottom: 8 }}>
+<div className="ai-provider-tier-label">{tier.label}</div>
+<ModelComboBox
+  id={idFor}
+  value={current}
+  onChange={(v) => setCloneTierModels(prev => ({ ...prev, [tierKey]: v }))}
+  options={cloneRemoteModels}
+  disabled={busy}
+  placeholder="留空则跟随默认模型"
+  clearLabel="跟随默认模型"
+/>
+</div>
+);
+})}
+</div>
             <div className="form-group">
               <label className="ui-check" htmlFor="ce-sync-skills">
                 <input
@@ -1373,6 +1556,53 @@ export default function ClaudeEnv() {
                     disabled={busy}
                   />
                 </div>
+                {/* 供应商选择（位于 Base URL 之上） */}
+                {editProviders.length > 0 && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="ce-edit-provider">选择供应商（可选）</label>
+                    <ProviderSelect
+                      id="ce-edit-provider"
+                      providers={editProviders}
+                      value={editSelectedProvider}
+                      onChange={async (p) => {
+                        setEditSelectedProvider(p);
+                        if (p) {
+                          setEditBaseUrl(p.baseUrl);
+                          setEditModel(p.defaultModel);
+                          // 四档模型：直接用供应商的档位值覆盖
+                          if (Object.keys(p.models).length > 0) {
+                            setEditTierModels((prev) => {
+                              const next = { ...prev };
+                              for (const tier of MODEL_TIERS) {
+                                if (p.models[tier.key]) {
+                                  next[tier.key] = p.models[tier.key];
+                                } else {
+                                  delete next[tier.key];
+                                }
+                              }
+                              return next;
+                            });
+                          } else {
+                            setEditTierModels({});
+                          }
+                          // 填入 API Key
+                          if (p.hasApiKey) {
+                            try {
+                              const secret = await invokeProviderGetSecret(p.id);
+                              setEditApiKey(secret);
+                            } catch {
+                              // 拉取失败则保持原值
+                            }
+                          } else {
+                            setEditApiKey("");
+                          }
+                        }
+                      }}
+                      disabled={busy}
+                      allowClear
+                    />
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="ce-edit-base-url">Base URL</label>
                   <input
@@ -1417,7 +1647,7 @@ export default function ClaudeEnv() {
                 </div>
                 <div className="form-group">
                   <div className="claude-env-model-label-row">
-                    <label className="form-label" htmlFor="ce-edit-model">自定义模型</label>
+                    <label className="form-label" htmlFor="ce-edit-model">默认模型</label>
                     <button
                       type="button"
                       className="claude-env-fetch-models-btn"
@@ -1429,59 +1659,43 @@ export default function ClaudeEnv() {
                       {editModelsLoading ? "拉取中…" : "拉取列表"}
                     </button>
                   </div>
-                  {editRemoteModels.length > 0 ? (
-                    <div
-                      className={`app-select ${editModelSelectOpen ? "open" : ""} ${busy ? "disabled" : ""}`}
-                      ref={editModelSelectRef}
-                    >
-                      <button
-                        type="button"
-                        id="ce-edit-model"
-                        className="app-select-trigger form-input"
-                        aria-haspopup="listbox"
-                        aria-expanded={editModelSelectOpen}
-                        onClick={() => !busy && setEditModelSelectOpen((open) => !open)}
-                        disabled={busy}
-                      >
-                        <span className="app-select-value">{editModel}</span>
-                        <span className="app-select-chevron" aria-hidden><IconChevron open={editModelSelectOpen} /></span>
-                      </button>
-                      {editModelSelectOpen && (
-                        <div className="app-select-menu" role="listbox" aria-label="远端模型列表">
-                          {editRemoteModels.map((model) => (
-                            <button
-                              key={model}
-                              type="button"
-                              role="option"
-                              aria-selected={model === editModel}
-                              className={`app-select-option ${model === editModel ? "selected" : ""}`}
-                              onClick={() => {
-                                setEditModel(model);
-                                setEditModelSelectOpen(false);
-                              }}
-                            >
-                              <span className="app-select-option-title">{model}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <input
-                      id="ce-edit-model"
-                      className="form-input"
-                      placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL 及 DEFAULT_* 模型键"
-                      value={editModel}
-                      onChange={(e) => setEditModel(e.target.value)}
-                      disabled={busy}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  )}
-                  <div className="claude-env-form-hint">
-                    以上三项预填 settings.json 当前值，留空并保存即删除对应键。自定义模型会同步写入/删除 ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。
-                  </div>
+                  <ModelComboBox
+                    id="ce-edit-model"
+                    value={editModel}
+                    onChange={setEditModel}
+                    options={editRemoteModels}
+                    disabled={busy}
+                    placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL；留空的档位回退到此值"
+                  />
                 </div>
+                {/* 四档模型覆盖 */}
+<div className="form-group">
+<label className="form-label">
+档位模型 <span className="form-label-optional">可选 · 按档覆盖默认值</span>
+</label>
+{MODEL_TIERS.map((tier) => {
+const tierKey = tier.key;
+const current = editTierModels[tierKey] ?? "";
+const idFor = `ce-edit-tier-${tierKey}`;
+return (
+<div key={tierKey} style={{ marginBottom: 8 }}>
+<div className="ai-provider-tier-label">{tier.label}</div>
+<ModelComboBox
+  id={idFor}
+  value={current}
+  onChange={(v) => setEditTierModels(prev => ({ ...prev, [tierKey]: v }))}
+  options={editRemoteModels}
+  disabled={busy}
+  placeholder="留空则跟随默认模型"
+  clearLabel="跟随默认模型"
+/>
+</div>
+);
+})}
+<div className="claude-env-form-hint">
+默认模型与档位模型预填 settings.json 当前值，留空并保存即删除对应键。
+</div>
+</div>
               </>
             )}
             {editIsDefault && (

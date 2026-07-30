@@ -73,6 +73,7 @@ src-tauri/src/
   claude_env.rs          Multi Claude Code envs via CLAUDE_CONFIG_DIR + shell aliases (zsh/bash/fish/PowerShell)
   codex_env.rs           Multi Codex CLI envs via CODEX_HOME + shell aliases (zsh/bash/fish/PowerShell)
   opencode_config.rs     OpenCode ~/.config/opencode provider/model + auth.json + Models.dev
+  ai_provider.rs         AI provider registry (anthropic/openai) + encrypted API key storage
   project_config.rs      Project-dir AI skeleton init (Full / Symlink modes) + optional project-level MCP (per-agent files, merge by title) and shared skills install into `.agents/skills` (copy/symlink)
   db.rs                  SQLite persistence (agents, mcp_servers, webdav, skills, claude_environments, codex_environments)
   config.rs              App config.json (theme; secretsKey private)
@@ -105,6 +106,7 @@ Registered commands (see `lib.rs`):
 | Claude Env | `list_claude_environments`, `sniff_claude_environments`, `import_claude_environment`, `clone_claude_environment`, `upsert_claude_environment`, `delete_claude_environment`, `install_claude_env_alias`, `remove_claude_env_alias`, `remove_all_claude_env_aliases`, `get_claude_env_shell_status`, `reveal_claude_env_dir`, `open_claude_env_settings`, `get_claude_env_secret`, `sync_claude_env_mcp`, `sync_all_claude_env_mcp`, `get_claude_env_mcp_status` |
 | Codex Env | `list_codex_environments`, `sniff_codex_environments`, `import_codex_environment`, `clone_codex_environment`, `upsert_codex_environment`, `delete_codex_environment`, `install_codex_env_alias`, `remove_codex_env_alias`, `remove_all_codex_env_aliases`, `get_codex_env_shell_status`, `reveal_codex_env_dir`, `open_codex_env_config`, `get_codex_env_secret`, `sync_codex_env_mcp`, `sync_all_codex_env_mcp` |
 | OpenCode | `get_opencode_config`, `set_opencode_defaults`, `upsert_opencode_provider`, `delete_opencode_provider`, `upsert_opencode_model`, `delete_opencode_model`, `get_opencode_provider_secret`, `set_opencode_provider_secret`, `fetch_models_dev_catalog`, `probe_opencode_models_endpoint`, `reveal_opencode_config` |
+| AI Providers | `list_ai_providers`, `upsert_ai_provider`, `delete_ai_provider`, `get_ai_provider_secret` |
 | Project Config | `pick_project_folder`, `check_project_config_exists`, `init_project_config` |
 | WebDAV | `get_webdav_connections`, `upsert_webdav_connection`, `delete_webdav_connection`, `test_webdav_connection`, `test_webdav_connection_draft` |
 | Backup | `list_backup_units`, `get_backup_settings`, `update_backup_settings`, `run_backup_upload` |
@@ -190,7 +192,7 @@ Important behaviors:
 
 ### Local persistence
 
-- **SQLite** `~/.agentbuddy/agents.db`: tables `agents`, `mcp_servers`, `webdav_connections`, `skills` (skill source metadata: local/github/gitcode, repo, commit refs), `claude_environments` (multi CLAUDE_CONFIG_DIR profiles), `codex_environments` (multi CODEX_HOME profiles)
+- **SQLite** `~/.agentbuddy/agents.db`: tables `agents`, `mcp_servers`, `webdav_connections`, `skills` (skill source metadata: local/github/gitcode, repo, commit refs), `claude_environments` (multi CLAUDE_CONFIG_DIR profiles), `codex_environments` (multi CODEX_HOME profiles), `ai_providers` (AI 供应商库：类型 anthropic/openai、base_url、加密 API Key、默认模型、Anthropic 档位模型 `models_json` {haiku,sonnet,opus,fable}；列表 DTO 只回 `hasApiKey`，明文经 `get_ai_provider_secret` 按需读取；本期仅管理、不下发到 Agent/环境)
 - **Skills files** `~/.agentbuddy/skills/<id>/SKILL.md` (content on disk; provenance in SQLite `skills`)
 - **Config** `~/.agentbuddy/config.json`: public `theme`, `backup`, `network` (proxy mode: none|system|custom; custom supports http/socks5); private `secretsKey` (base64 32-byte master key). Outbound HTTP (WebDAV / Skills / MCP probe / OpenCode catalog) goes through `http_client::apply_proxy`.
 - WebDAV passwords: per-row salt/nonce/cipher via `crypto` (HKDF info `agentbuddy/webdav/v1`); never returned to UI

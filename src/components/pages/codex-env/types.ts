@@ -25,6 +25,8 @@ export interface CodexEnvironment {
   baseUrl: string;
   // 列表接口不回传明文 token；编辑时经 get_codex_env_secret 拉取。
   apiKey: string;
+  // 关联的 AI 供应商 ID（空串=未关联）。供应商更新时自动反向同步。
+  providerId: string;
   createdAt: number;
   updatedAt: number;
 }

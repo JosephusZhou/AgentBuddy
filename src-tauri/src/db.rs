@@ -1,3 +1,4 @@
+use crate::ai_provider::AiProviderRow;
 use crate::claude_env::ClaudeEnvironmentRow;
 use crate::codex_env::CodexEnvironmentRow;
 use crate::mcp_config::McpServerRecord;
@@ -95,6 +96,21 @@ fn get_connection() -> Result<Connection, String> {
             alias_installed INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS ai_providers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            provider_type TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            api_key_salt TEXT NOT NULL DEFAULT '',
+            api_key_nonce TEXT NOT NULL DEFAULT '',
+            api_key_cipher TEXT NOT NULL DEFAULT '',
+            default_model TEXT NOT NULL DEFAULT '',
+            openai_default_model TEXT NOT NULL DEFAULT '',
+            models_json TEXT NOT NULL DEFAULT '{}',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
          );",
     )
     .map_err(|e| format!("Failed to create table: {}", e))?;
@@ -102,6 +118,9 @@ fn get_connection() -> Result<Connection, String> {
     // Additive migrations for DBs created before a column existed. `ALTER TABLE
     // ADD COLUMN` errors if the column is already present, so ignore that case.
     ensure_column(&conn, "skills", "tag", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(&conn, "ai_providers", "openai_default_model", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(&conn, "claude_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(&conn, "codex_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
 
     Ok(conn)
 }
@@ -634,6 +653,7 @@ fn row_to_claude_env(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClaudeEnvironm
         alias_installed: row.get::<_, i32>(8)? != 0,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        provider_id: row.get(11)?,
     })
 }
 
@@ -643,7 +663,7 @@ pub fn load_claude_environment_rows() -> Result<Vec<ClaudeEnvironmentRow>, Strin
         .prepare(
             // 默认环境置顶；其余按创建时间升序（最早在上，最新创建在最下），排序稳定不随编辑浮动。
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
-                    alias_installed, created_at, updated_at
+                    alias_installed, created_at, updated_at, provider_id
              FROM claude_environments
              ORDER BY is_default DESC, created_at ASC",
         )
@@ -663,7 +683,7 @@ pub fn get_claude_environment_row(id: &str) -> Result<Option<ClaudeEnvironmentRo
     let mut stmt = conn
         .prepare(
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
-                    alias_installed, created_at, updated_at
+                    alias_installed, created_at, updated_at, provider_id
              FROM claude_environments
              WHERE id = ?1",
         )
@@ -679,8 +699,8 @@ pub fn upsert_claude_environment_row(row: &ClaudeEnvironmentRow) -> Result<(), S
     conn.execute(
         "INSERT INTO claude_environments
             (id, name, slug, config_dir, alias_name, is_default, source, notes,
-             alias_installed, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             alias_installed, created_at, updated_at, provider_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             slug = excluded.slug,
@@ -691,7 +711,8 @@ pub fn upsert_claude_environment_row(row: &ClaudeEnvironmentRow) -> Result<(), S
             notes = excluded.notes,
             alias_installed = excluded.alias_installed,
             created_at = claude_environments.created_at,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            provider_id = excluded.provider_id",
         params![
             row.id,
             row.name,
@@ -704,6 +725,7 @@ pub fn upsert_claude_environment_row(row: &ClaudeEnvironmentRow) -> Result<(), S
             row.alias_installed as i32,
             row.created_at,
             row.updated_at,
+            row.provider_id,
         ],
     )
     .map_err(|e| format!("Failed to upsert claude_env {}: {}", row.id, e))?;
@@ -771,6 +793,7 @@ fn row_to_codex_env(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodexEnvironmen
         alias_installed: row.get::<_, i32>(8)? != 0,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        provider_id: row.get(11)?,
     })
 }
 
@@ -780,7 +803,7 @@ pub fn load_codex_environment_rows() -> Result<Vec<CodexEnvironmentRow>, String>
         .prepare(
             // 默认环境置顶；其余按创建时间升序（最早在上，最新创建在最下），排序稳定不随编辑浮动。
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
-                    alias_installed, created_at, updated_at
+                    alias_installed, created_at, updated_at, provider_id
              FROM codex_environments
              ORDER BY is_default DESC, created_at ASC",
         )
@@ -800,7 +823,7 @@ pub fn get_codex_environment_row(id: &str) -> Result<Option<CodexEnvironmentRow>
     let mut stmt = conn
         .prepare(
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
-                    alias_installed, created_at, updated_at
+                    alias_installed, created_at, updated_at, provider_id
              FROM codex_environments
              WHERE id = ?1",
         )
@@ -816,8 +839,8 @@ pub fn upsert_codex_environment_row(row: &CodexEnvironmentRow) -> Result<(), Str
     conn.execute(
         "INSERT INTO codex_environments
             (id, name, slug, config_dir, alias_name, is_default, source, notes,
-             alias_installed, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             alias_installed, created_at, updated_at, provider_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             slug = excluded.slug,
@@ -828,7 +851,8 @@ pub fn upsert_codex_environment_row(row: &CodexEnvironmentRow) -> Result<(), Str
             notes = excluded.notes,
             alias_installed = excluded.alias_installed,
             created_at = codex_environments.created_at,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            provider_id = excluded.provider_id",
         params![
             row.id,
             row.name,
@@ -841,6 +865,7 @@ pub fn upsert_codex_environment_row(row: &CodexEnvironmentRow) -> Result<(), Str
             row.alias_installed as i32,
             row.created_at,
             row.updated_at,
+            row.provider_id,
         ],
     )
     .map_err(|e| format!("Failed to upsert codex_env {}: {}", row.id, e))?;
@@ -890,6 +915,170 @@ pub fn set_codex_env_alias_installed_all(installed: bool) -> Result<(), String> 
         params![installed as i32, now],
     )
     .map_err(|e| format!("Failed to update codex_env alias flags: {}", e))?;
+    Ok(())
+}
+
+/// Find all non-default Claude environments linked to the given provider_id.
+pub fn load_claude_envs_by_provider(provider_id: &str) -> Result<Vec<ClaudeEnvironmentRow>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
+                    alias_installed, created_at, updated_at, provider_id
+             FROM claude_environments
+             WHERE provider_id = ?1 AND is_default = 0",
+        )
+        .map_err(|e| format!("Failed to prepare claude_env by provider query: {}", e))?;
+    let rows = stmt
+        .query_map(params![provider_id], row_to_claude_env)
+        .map_err(|e| format!("Failed to query claude_env by provider: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read claude_env by provider: {}", e))?;
+    Ok(rows)
+}
+
+/// Find all non-default Codex environments linked to the given provider_id.
+pub fn load_codex_envs_by_provider(provider_id: &str) -> Result<Vec<CodexEnvironmentRow>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
+                    alias_installed, created_at, updated_at, provider_id
+             FROM codex_environments
+             WHERE provider_id = ?1 AND is_default = 0",
+        )
+        .map_err(|e| format!("Failed to prepare codex_env by provider query: {}", e))?;
+    let rows = stmt
+        .query_map(params![provider_id], row_to_codex_env)
+        .map_err(|e| format!("Failed to query codex_env by provider: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read codex_env by provider: {}", e))?;
+    Ok(rows)
+}
+
+/// Clear provider_id on all environments linked to the given provider (used on provider delete).
+pub fn clear_provider_id_on_envs(provider_id: &str) -> Result<(), String> {
+    let conn = get_connection()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    conn.execute(
+        "UPDATE claude_environments SET provider_id = '', updated_at = ?1 WHERE provider_id = ?2",
+        params![now, provider_id],
+    )
+    .map_err(|e| format!("Failed to clear claude_env provider_id: {}", e))?;
+    conn.execute(
+        "UPDATE codex_environments SET provider_id = '', updated_at = ?1 WHERE provider_id = ?2",
+        params![now, provider_id],
+    )
+    .map_err(|e| format!("Failed to clear codex_env provider_id: {}", e))?;
+    Ok(())
+}
+
+/* ===== AI providers persistence ===== */
+
+fn row_to_ai_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiProviderRow> {
+    Ok(AiProviderRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        provider_type: row.get(2)?,
+        base_url: row.get(3)?,
+        api_key_salt: row.get(4)?,
+        api_key_nonce: row.get(5)?,
+        api_key_cipher: row.get(6)?,
+        default_model: row.get(7)?,
+        openai_default_model: row.get(8)?,
+        models_json: row.get(9)?,
+        notes: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+pub fn load_ai_provider_rows() -> Result<Vec<AiProviderRow>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
+                    api_key_cipher, default_model, openai_default_model, models_json,
+                    notes, created_at, updated_at
+             FROM ai_providers
+             ORDER BY created_at ASC",
+        )
+        .map_err(|e| format!("Failed to prepare ai_providers query: {}", e))?;
+
+    let rows = stmt
+        .query_map([], row_to_ai_provider)
+        .map_err(|e| format!("Failed to query ai_providers: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read ai_providers: {}", e))?;
+
+    Ok(rows)
+}
+
+pub fn get_ai_provider_row(id: &str) -> Result<Option<AiProviderRow>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
+                    api_key_cipher, default_model, openai_default_model, models_json,
+                    notes, created_at, updated_at
+             FROM ai_providers
+             WHERE id = ?1",
+        )
+        .map_err(|e| format!("Failed to prepare ai_provider get: {}", e))?;
+
+    stmt.query_row(params![id], row_to_ai_provider)
+        .optional()
+        .map_err(|e| format!("Failed to get ai_provider {}: {}", id, e))
+}
+
+pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
+    let conn = get_connection()?;
+    conn.execute(
+        "INSERT INTO ai_providers
+            (id, name, provider_type, base_url, api_key_salt, api_key_nonce,
+             api_key_cipher, default_model, openai_default_model, models_json,
+             notes, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            provider_type = excluded.provider_type,
+            base_url = excluded.base_url,
+            api_key_salt = excluded.api_key_salt,
+            api_key_nonce = excluded.api_key_nonce,
+            api_key_cipher = excluded.api_key_cipher,
+            default_model = excluded.default_model,
+            openai_default_model = excluded.openai_default_model,
+            models_json = excluded.models_json,
+            notes = excluded.notes,
+            created_at = ai_providers.created_at,
+            updated_at = excluded.updated_at",
+        params![
+            row.id,
+            row.name,
+            row.provider_type,
+            row.base_url,
+            row.api_key_salt,
+            row.api_key_nonce,
+            row.api_key_cipher,
+            row.default_model,
+            row.openai_default_model,
+            row.models_json,
+            row.notes,
+            row.created_at,
+            row.updated_at,
+        ],
+    )
+    .map_err(|e| format!("Failed to upsert ai_provider {}: {}", row.id, e))?;
+    Ok(())
+}
+
+pub fn delete_ai_provider_row(id: &str) -> Result<(), String> {
+    let conn = get_connection()?;
+    conn.execute("DELETE FROM ai_providers WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete ai_provider {}: {}", id, e))?;
     Ok(())
 }
 

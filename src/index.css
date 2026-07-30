@@ -1552,6 +1552,85 @@ label,
   color: var(--seed-danger);
 }
 
+/* ===== AI PROVIDERS PAGE ===== */
+.ai-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-provider-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--seed-surface);
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius-lg);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+.ai-provider-item:hover {
+  border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 10%);
+}
+.ai-provider-item:hover .btn-delete { opacity: 1; }
+.ai-provider-info { flex: 1; min-width: 0; }
+.ai-provider-name {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--seed-fg);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-provider-detail {
+  font-size: var(--text-sm);
+  color: var(--seed-muted);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-provider-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  background: var(--seed-surface-alt);
+  color: var(--seed-muted);
+  border: 1px solid var(--seed-border);
+  flex-shrink: 0;
+}
+/* 档位模型字段的子标题（Haiku/Sonnet/Opus/Fable） */
+.ai-provider-tier-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--seed-muted);
+  margin-bottom: 4px;
+}
+/* 共用弹窗骨架：限制最高 90vh，body 内部滚动（与 claude-env-modal 模式一致） */
+.ai-provider-modal {
+  width: min(520px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ai-provider-modal-body {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(90vh - 150px);
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Keep dropdown menus above following form fields while scrolling */
+  position: relative;
+}
+/* 共享骨架下 footer 固定在底部，不被可滚动 body 压缩 */
+.ai-provider-modal .modal-footer {
+  flex-shrink: 0;
+}
+
 /* ===== MODAL ===== */
 .modal-overlay {
   position: fixed;
@@ -1817,6 +1896,35 @@ label,
   font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--seed-muted);
+}
+
+/* ===== Model ComboBox (editable input + dropdown) ===== */
+.model-combobox {
+  position: relative;
+  width: 100%;
+}
+.model-combobox.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.model-combobox-input {
+  padding-right: 36px;
+}
+.model-combobox-chevron {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--seed-muted);
+  pointer-events: none;
+}
+.model-combobox.open .model-combobox-input {
+  border-color: var(--seed-input-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--seed-primary) 15%, transparent);
 }
 .form-textarea {
   min-height: 96px;

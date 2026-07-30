@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import AgentSniff from "./components/pages/AgentSniff";
+import AiProviders from "./components/pages/AiProviders";
 import BackupManage from "./components/pages/BackupManage";
 import OpenCodeConfig from "./components/pages/OpenCodeConfig";
 import ProjectConfig from "./components/pages/ProjectConfig";
@@ -16,6 +17,7 @@ import { useGlobalModalA11y } from "./components/ui";
 
 export type MainView =
   | "agent-sniff"
+  | "ai-providers"
   | "backup-manage"
   | "opencode-config"
   | "project-config"
@@ -90,6 +92,7 @@ export default function App() {
       />
       <main className="main-content">
         {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
+        {activeView === "ai-providers" && <AiProviders />}
         {activeView === "backup-manage" && <BackupManage />}
         {activeView === "opencode-config" && <OpenCodeConfig />}
         {activeView === "project-config" && <ProjectConfig />}
