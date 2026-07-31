@@ -111,6 +111,13 @@ fn get_connection() -> Result<Connection, String> {
             notes TEXT NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS provider_route_toggle (
+            provider_id TEXT NOT NULL,
+            route_group TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (provider_id, route_group)
          );",
     )
     .map_err(|e| format!("Failed to create table: {}", e))?;
@@ -1098,6 +1105,88 @@ pub fn reorder_ai_provider_rows(orders: &[(String, i64)]) -> Result<(), String> 
             params![order, id],
         )
         .map_err(|e| format!("Failed to reorder ai_provider {}: {}", id, e))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("Failed to commit reorder: {}", e))?;
+    Ok(())
+}
+
+/* ===== Provider route toggles (route aggregation) ===== */
+
+/// Load all toggle rows for a given route group.
+pub fn load_provider_route_toggles(group: crate::route_aggregation::RouteGroup) -> Result<Vec<crate::route_aggregation::ProviderRouteToggle>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT provider_id, route_group, enabled, sort_order
+             FROM provider_route_toggle
+             WHERE route_group = ?1
+             ORDER BY sort_order ASC",
+        )
+        .map_err(|e| format!("Failed to prepare route_toggle query: {}", e))?;
+
+    let rows = stmt
+        .query_map(params![group.as_str()], |row| {
+            Ok(crate::route_aggregation::ProviderRouteToggle {
+                provider_id: row.get(0)?,
+                group: row.get(1)?,
+                enabled: row.get::<_, i32>(2)? != 0,
+                sort_order: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query route_toggle: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read route_toggle: {}", e))?;
+
+    Ok(rows)
+}
+
+/// Upsert a provider's toggle for a route group.
+pub fn upsert_provider_route_toggle(
+    provider_id: &str,
+    group: crate::route_aggregation::RouteGroup,
+    enabled: bool,
+    sort_order: i32,
+) -> Result<(), String> {
+    let conn = get_connection()?;
+    conn.execute(
+        "INSERT INTO provider_route_toggle (provider_id, route_group, enabled, sort_order)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(provider_id, route_group) DO UPDATE SET
+            enabled = excluded.enabled,
+            sort_order = excluded.sort_order",
+        params![provider_id, group.as_str(), enabled as i32, sort_order],
+    )
+    .map_err(|e| format!("Failed to upsert route_toggle for {}: {}", provider_id, e))?;
+    Ok(())
+}
+
+/// Delete toggle rows for a provider that no longer exists.
+pub fn delete_provider_route_toggles(provider_id: &str) -> Result<(), String> {
+    let conn = get_connection()?;
+    conn.execute(
+        "DELETE FROM provider_route_toggle WHERE provider_id = ?1",
+        params![provider_id],
+    )
+    .map_err(|e| format!("Failed to delete route_toggle for {}: {}", provider_id, e))?;
+    Ok(())
+}
+
+/// Batch-update sort_order for a route group.
+pub fn reorder_provider_route_toggles(
+    ids: &[String],
+    group: crate::route_aggregation::RouteGroup,
+) -> Result<(), String> {
+    let conn = get_connection()?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE provider_route_toggle SET sort_order = ?1 WHERE provider_id = ?2 AND route_group = ?3",
+            params![i as i32, id, group.as_str()],
+        )
+        .map_err(|e| format!("Failed to reorder route_toggle {}: {}", id, e))?;
     }
     tx.commit()
         .map_err(|e| format!("Failed to commit reorder: {}", e))?;

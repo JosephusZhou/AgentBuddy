@@ -5201,3 +5201,53 @@ a[href]:focus-visible {
   padding: 2px 0;
   word-break: break-all;
 }
+
+/* ===== Route Aggregation: toggle switch (only custom component) ===== */
+
+.ra-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.ra-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ra-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--seed-border);
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+
+.ra-toggle-slider::before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background: var(--seed-surface);
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.ra-toggle input:checked + .ra-toggle-slider {
+  background: var(--seed-primary);
+}
+
+.ra-toggle input:checked + .ra-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+.ra-toggle input:disabled + .ra-toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

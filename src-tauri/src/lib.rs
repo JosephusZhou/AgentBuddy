@@ -12,6 +12,7 @@ mod mcp_config;
 mod opencode_config;
 mod platform;
 mod project_config;
+mod route_aggregation;
 mod skills;
 mod sniff;
 mod webdav;
@@ -1000,6 +1001,174 @@ async fn reorder_ai_providers(ids: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("供应商排序任务失败: {e}"))?
 }
 
+/* ===== Route aggregation (local proxy server) ===== */
+
+#[tauri::command]
+async fn get_route_aggregation_status(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<route_aggregation::RouteAggregationStatus, String> {
+    Ok(state.get_status().await)
+}
+
+#[tauri::command]
+async fn get_route_aggregation_config(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<route_aggregation::RouteAggregationConfig, String> {
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
+async fn update_route_aggregation_config(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    config: route_aggregation::RouteAggregationConfig,
+) -> Result<route_aggregation::RouteAggregationStatus, String> {
+    let config = route_aggregation::config::normalize_config(config)?;
+    route_aggregation::config::save_config(&config)?;
+    *state.config.write().await = config.clone();
+
+    // If server is running and structural changes were made (group toggles),
+    // we need to restart. For non-structural changes, just update the config snapshot.
+    let needs_restart = {
+        let server_guard = state.server.read().await;
+        server_guard.is_some()
+    };
+
+    if needs_restart {
+        // Stop existing server
+        if let Some(mut server) = state.server.write().await.take() {
+            server.stop();
+        }
+        // Start with new config if any group is enabled
+        if config.claude_code_enabled || config.codex_enabled {
+            let server = route_aggregation::server::RouteAggregationServer::start(
+                config.clone(),
+                state.provider_router.clone(),
+            )
+            .await?;
+            *state.server.write().await = Some(std::sync::Arc::new(server));
+        }
+    }
+
+    // Refresh provider pools for enabled groups
+    if config.claude_code_enabled {
+        state.provider_router.refresh_pool(route_aggregation::RouteGroup::ClaudeCode).await?;
+    }
+    if config.codex_enabled {
+        state.provider_router.refresh_pool(route_aggregation::RouteGroup::Codex).await?;
+    }
+
+    Ok(state.get_status().await)
+}
+
+#[tauri::command]
+async fn start_route_aggregation(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<route_aggregation::RouteAggregationStatus, String> {
+    let config = state.config.read().await.clone();
+
+    // Port pre-check
+    let test_addr = format!("{}:{}", config.listen_address, config.listen_port);
+    if std::net::TcpListener::bind(&test_addr).is_err() {
+        return Err(format!(
+            "端口 {} 被占用，请在路由聚合设置中更改监听端口",
+            config.listen_port
+        ));
+    }
+
+    // Refresh provider pools
+    if config.claude_code_enabled {
+        state.provider_router.refresh_pool(route_aggregation::RouteGroup::ClaudeCode).await?;
+    }
+    if config.codex_enabled {
+        state.provider_router.refresh_pool(route_aggregation::RouteGroup::Codex).await?;
+    }
+
+    let server = route_aggregation::server::RouteAggregationServer::start(
+        config,
+        state.provider_router.clone(),
+    )
+    .await?;
+    *state.server.write().await = Some(std::sync::Arc::new(server));
+    Ok(state.get_status().await)
+}
+
+#[tauri::command]
+async fn stop_route_aggregation(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<(), String> {
+    if let Some(mut server) = state.server.write().await.take() {
+        server.stop();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_provider_route_toggles(
+    group: String,
+) -> Result<Vec<route_aggregation::ProviderRouteToggle>, String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    tauri::async_runtime::spawn_blocking(move || db::load_provider_route_toggles(group))
+        .await
+        .map_err(|e| format!("读取供应商路由开关任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn toggle_provider_route(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    provider_id: String,
+    group: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        db::upsert_provider_route_toggle(&provider_id, group, enabled, 0)
+    })
+    .await
+    .map_err(|e| format!("切换供应商路由开关任务失败: {e}"))?;
+    // Refresh in-memory provider pool so status reflects the new toggle state
+    state.provider_router.refresh_pool(group).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn reorder_provider_routes(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    ids: Vec<String>,
+    group: String,
+) -> Result<(), String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    tauri::async_runtime::spawn_blocking(move || db::reorder_provider_route_toggles(&ids, group))
+        .await
+        .map_err(|e| format!("供应商路由排序任务失败: {e}"))?;
+    state.provider_router.refresh_pool(group).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn reset_circuit_breaker(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    provider_id: String,
+    group: String,
+) -> Result<(), String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    state.provider_router.reset_breaker(&provider_id, group).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_circuit_breaker_status(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    group: String,
+) -> Result<Vec<route_aggregation::ProviderRouteStatus>, String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    Ok(state.provider_router.get_provider_statuses(group).await)
+}
+
 #[tauri::command]
 async fn pick_project_folder() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1160,8 +1329,19 @@ pub fn run() {
             delete_ai_provider,
             get_ai_provider_secret,
             reorder_ai_providers,
+            get_route_aggregation_status,
+            get_route_aggregation_config,
+            update_route_aggregation_config,
+            start_route_aggregation,
+            stop_route_aggregation,
+            get_provider_route_toggles,
+            toggle_provider_route,
+            reorder_provider_routes,
+            reset_circuit_breaker,
+            get_circuit_breaker_status,
         ])
         .setup(|_app| {
+            use tauri::Manager;
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.
             if let Err(err) = config::ensure_app_config() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
@@ -1173,10 +1353,58 @@ pub fn run() {
                 eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
             }
 
+            // Route aggregation: load config and register global state.
+            let ra_config = route_aggregation::config::load_config()
+                .unwrap_or_default();
+            let ra_state = route_aggregation::RouteAggregationState::new(ra_config.clone());
+            _app.manage(ra_state);
+
+            // Auto-start server if it was running when the app last exited.
+            if ra_config.claude_code_enabled || ra_config.codex_enabled {
+                let app_handle = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<route_aggregation::RouteAggregationState>();
+                    let config = state.config.read().await.clone();
+                    // Port pre-check
+                    let test_addr = format!("{}:{}", config.listen_address, config.listen_port);
+                    if std::net::TcpListener::bind(&test_addr).is_err() {
+                        eprintln!(
+                            "[route-aggregation] port {} in use, skipping auto-start",
+                            config.listen_port
+                        );
+                        return;
+                    }
+                    // Refresh pools
+                    if config.claude_code_enabled {
+                        let _ = state.provider_router
+                            .refresh_pool(route_aggregation::RouteGroup::ClaudeCode)
+                            .await;
+                    }
+                    if config.codex_enabled {
+                        let _ = state.provider_router
+                            .refresh_pool(route_aggregation::RouteGroup::Codex)
+                            .await;
+                    }
+                    match route_aggregation::server::RouteAggregationServer::start(
+                        config,
+                        state.provider_router.clone(),
+                    )
+                    .await
+                    {
+                        Ok(server) => {
+                            *state.server.write().await = Some(std::sync::Arc::new(server));
+                            eprintln!("[route-aggregation] auto-started successfully");
+                        }
+                        Err(e) => {
+                            eprintln!("[route-aggregation] auto-start failed: {}", e);
+                        }
+                    }
+                });
+            }
+
             // DevTools only in debug builds; Manager is only needed here.
             #[cfg(debug_assertions)]
             {
-                use tauri::Manager;
                 if let Some(window) = _app.get_webview_window("main") {
                     window.open_devtools();
                 }

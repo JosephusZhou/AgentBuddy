@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub backup: BackupSettings,
     #[serde(default)]
     pub network: NetworkSettings,
+    #[serde(default)]
+    pub route_aggregation: crate::route_aggregation::RouteAggregationConfig,
 }
 
 /// Backup-related preferences stored in config.json (no secrets).
@@ -140,6 +142,7 @@ impl Default for AppConfig {
             theme: DEFAULT_THEME.to_string(),
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
+            route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
         }
     }
 }
@@ -205,6 +208,7 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
             theme,
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
+            route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
         });
     }
 
@@ -227,6 +231,7 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
                 theme,
                 backup: BackupSettings::default(),
                 network: NetworkSettings::default(),
+                route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
             });
         }
     };
@@ -264,7 +269,15 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
         ),
         backup: parse_backup_settings(obj.get("backup")),
         network: parse_network_settings(obj.get("network")),
+        route_aggregation: parse_route_aggregation(obj.get("routeAggregation")),
     })
+}
+
+fn parse_route_aggregation(value: Option<&Value>) -> crate::route_aggregation::RouteAggregationConfig {
+    let Some(v) = value else {
+        return crate::route_aggregation::RouteAggregationConfig::default();
+    };
+    serde_json::from_value(v.clone()).unwrap_or_default()
 }
 
 fn parse_backup_settings(value: Option<&Value>) -> BackupSettings {
@@ -341,6 +354,24 @@ pub fn save_network_settings(settings: NetworkSettings) -> Result<NetworkSetting
     Ok(settings)
 }
 
+/// Save route aggregation config to config.json under the `routeAggregation` key.
+pub fn save_route_aggregation_config(
+    config: &crate::route_aggregation::RouteAggregationConfig,
+) -> Result<(), String> {
+    let path = config_path()?;
+    let _ = ensure_app_config()?;
+    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| "config.json 格式无效".to_string())?;
+    let val = serde_json::to_value(config)
+        .map_err(|e| format!("序列化路由聚合配置失败: {}", e))?;
+    obj.insert("routeAggregation".to_string(), val);
+    write_raw(&path, &root)?;
+    Ok(())
+}
+
 pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, String> {
     let mut settings = settings;
     settings.cliproxyapi_conf_path = settings.cliproxyapi_conf_path.trim().to_string();
@@ -403,6 +434,7 @@ pub fn set_theme(theme: String) -> Result<AppConfig, String> {
         theme,
         backup: parse_backup_settings(root.get("backup")),
         network: parse_network_settings(root.get("network")),
+        route_aggregation: parse_route_aggregation(root.get("routeAggregation")),
     })
 }
 

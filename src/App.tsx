@@ -12,6 +12,7 @@ import CodexEnv from "./components/pages/CodexEnv";
 import Preferences from "./components/pages/Preferences";
 import NetworkSettings from "./components/pages/NetworkSettings";
 import WebDAV from "./components/pages/WebDAV";
+import RouteAggregation from "./components/pages/RouteAggregation";
 import { applyTheme, loadAppConfig, saveTheme, DEFAULT_THEME, type Theme } from "./lib/theme";
 import { useGlobalModalA11y } from "./components/ui";
 
@@ -24,7 +25,8 @@ export type MainView =
   | "skills-manage"
   | "mcp-manage"
   | "claude-env"
-  | "codex-env";
+  | "codex-env"
+  | "route-aggregation";
 export type SettingsView = "preferences" | "network" | "webdav";
 export type AppMode = "main" | "settings";
 
@@ -100,6 +102,7 @@ export default function App() {
         {activeView === "mcp-manage" && <McpManage />}
         {activeView === "claude-env" && <ClaudeEnv />}
         {activeView === "codex-env" && <CodexEnv />}
+        {activeView === "route-aggregation" && <RouteAggregation />}
         {activeView === "preferences" && (
           <Preferences theme={theme} onThemeChange={handleThemeChange} />
         )}

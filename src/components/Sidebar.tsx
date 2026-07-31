@@ -12,6 +12,7 @@ import {
   FolderCog,
   Globe,
   Layers,
+  Network,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -73,6 +74,20 @@ export default function Sidebar({
               <span className="menu-label">skills管理</span>
             </button>
             <button
+              className={`menu-item ${mainView === "ai-providers" ? "active" : ""}`}
+              onClick={() => onNavigateMain("ai-providers")}
+            >
+              <CloudCog size={18} strokeWidth={1.8} />
+              <span className="menu-label">AI供应商</span>
+            </button>
+            <button
+              className={`menu-item ${mainView === "route-aggregation" ? "active" : ""}`}
+              onClick={() => onNavigateMain("route-aggregation")}
+            >
+              <Network size={18} strokeWidth={1.8} />
+              <span className="menu-label">路由聚合</span>
+            </button>
+            <button
               className={`menu-item ${mainView === "claude-env" ? "active" : ""}`}
               onClick={() => onNavigateMain("claude-env")}
             >
@@ -85,13 +100,6 @@ export default function Sidebar({
             >
               <SquareTerminal size={18} strokeWidth={1.8} />
               <span className="menu-label">Codex环境</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "ai-providers" ? "active" : ""}`}
-              onClick={() => onNavigateMain("ai-providers")}
-            >
-              <CloudCog size={18} strokeWidth={1.8} />
-              <span className="menu-label">AI供应商</span>
             </button>
             <button
               className={`menu-item ${mainView === "opencode-config" ? "active" : ""}`}
