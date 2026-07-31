@@ -1572,6 +1572,32 @@ label,
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 10%);
 }
 .ai-provider-item:hover .btn-delete { opacity: 1; }
+.ai-provider-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--seed-muted);
+  opacity: 0.4;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 4px;
+  touch-action: none;
+  user-select: none;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.ai-provider-item:hover .ai-provider-grip { opacity: 0.8; }
+.ai-provider-grip:active { cursor: grabbing; }
+.ai-provider-item.dragging {
+  opacity: 0.9;
+  border-color: var(--seed-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  background: var(--seed-surface);
+}
+.ai-provider-item.drag-over {
+  border-color: var(--seed-primary);
+  box-shadow: 0 0 0 1px var(--seed-primary);
+}
 .ai-provider-info { flex: 1; min-width: 0; }
 .ai-provider-name {
   font-size: var(--text-base);

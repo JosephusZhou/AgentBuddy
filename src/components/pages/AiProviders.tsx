@@ -3,13 +3,14 @@ import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { ModelComboBox } from "../ModelComboBox";
 import { useOverlayDismiss } from "../ui";
-import { Copy, Pencil, Plus, Trash2, X, Boxes, KeyRound, Download, Eye, EyeOff, Search } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2, X, Boxes, KeyRound, Download, Eye, EyeOff, Search, GripVertical } from "lucide-react";
 import {
   invokeList,
   invokeUpsert,
   invokeDelete,
   invokeGetSecret,
   invokeFetchRemoteModels,
+  invokeReorder,
 } from "./ai-providers/api";
 import {
   MODEL_TIERS,
@@ -31,6 +32,7 @@ const IconDownload = () => <Download size={14} strokeWidth={1.8} />;
 const IconSearch = () => <Search size={16} strokeWidth={1.8} />;
 const IconEye = () => <Eye size={16} strokeWidth={1.8} />;
 const IconEyeOff = () => <EyeOff size={16} strokeWidth={1.8} />;
+const IconGrip = () => <GripVertical size={16} strokeWidth={1.8} />;
 const IconChevron = ({ open }: { open?: boolean }) => (
   <svg
     width="16"
@@ -192,6 +194,22 @@ export default function AiProviders() {
   const idCounter = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const hasLoaded = useRef(false);
+
+  // 拖拽排序状态（基于 Pointer Events）
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [dragDeltaY, setDragDeltaY] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 拖拽开始时的布局快照：命中检测只依赖快照，绝不读取已被 transform 变换的实时布局，从而消除闪烁/错位
+  const dragSnap = useRef<{
+    index: number;
+    pointerId: number;
+    startY: number;
+    targetIndex: number;
+    centers: number[];
+    height: number;
+    captureEl: HTMLElement | null;
+  } | null>(null);
 
   const nextId = useCallback(() => {
     idCounter.current += 1;
@@ -470,6 +488,134 @@ export default function AiProviders() {
     }
   }, [deleteTarget]);
 
+  // 拖拽排序：放下后重排并持久化
+  const handleDrop = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      const reordered = [...providers];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      setProviders(reordered);
+      try {
+        await invokeReorder(reordered.map((p) => p.id));
+      } catch (err) {
+        setStatusMsg(`排序保存失败：${err instanceof Error ? err.message : String(err)}`);
+        void loadProviders();
+      }
+    },
+    [providers, loadProviders, setStatusMsg],
+  );
+
+  // 根据指针 Y 与“原始布局快照”计算拖拽项的最终落点索引（结果永远在 [0, n-1]，稳定不抖动）
+  const computeTargetIndex = useCallback(
+    (centers: number[], dragIndex: number, pointerY: number): number => {
+      let above = 0;
+      for (let i = 0; i < centers.length; i++) {
+        if (i === dragIndex) continue;
+        if (centers[i] < pointerY) above++;
+      }
+      return Math.max(0, Math.min(centers.length - 1, above));
+    },
+    [],
+  );
+
+  const onGripPointerDown = useCallback(
+    (index: number, e: React.PointerEvent) => {
+      if (isFiltering) return;
+      const container = listRef.current;
+      if (!container) return;
+      e.preventDefault();
+      const items = Array.from(container.querySelectorAll<HTMLElement>(".ai-provider-item"));
+      const rects = items.map((el) => el.getBoundingClientRect());
+      const centers = rects.map((r) => r.top + r.height / 2);
+      const gap = rects.length >= 2 ? rects[1].top - rects[0].bottom : 12;
+      const captureEl = e.currentTarget as HTMLElement;
+      captureEl.setPointerCapture(e.pointerId);
+
+      dragSnap.current = {
+        index,
+        pointerId: e.pointerId,
+        startY: e.clientY,
+        targetIndex: index,
+        centers,
+        height: rects[index].height + gap,
+        captureEl,
+      };
+      setDragIndex(index);
+      setDragOverIndex(index);
+      setDragDeltaY(0);
+    },
+    [isFiltering],
+  );
+
+  const onGripPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const snap = dragSnap.current;
+      if (!snap || snap.pointerId !== e.pointerId) return;
+      const delta = e.clientY - snap.startY;
+      snap.targetIndex = computeTargetIndex(snap.centers, snap.index, e.clientY);
+      setDragDeltaY(delta);
+      setDragOverIndex(snap.targetIndex);
+    },
+    [computeTargetIndex],
+  );
+
+  const onGripPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const snap = dragSnap.current;
+      if (!snap || snap.pointerId !== e.pointerId) return;
+      try {
+        snap.captureEl?.releasePointerCapture(e.pointerId);
+      } catch {
+        // 忽略释放失败
+      }
+      const from = snap.index;
+      const to = snap.targetIndex;
+      dragSnap.current = null;
+      setDragIndex(null);
+      setDragOverIndex(null);
+      setDragDeltaY(0);
+      if (to !== from) {
+        void handleDrop(from, to);
+      }
+    },
+    [handleDrop],
+  );
+
+  const onGripPointerCancel = useCallback((e: React.PointerEvent) => {
+    const snap = dragSnap.current;
+    if (!snap) return;
+    try {
+      snap.captureEl?.releasePointerCapture(e.pointerId);
+    } catch {
+      // 忽略释放失败
+    }
+    dragSnap.current = null;
+    setDragIndex(null);
+    setDragOverIndex(null);
+    setDragDeltaY(0);
+  }, []);
+
+  // 计算每个 item 在拖拽过程中的 translateY 偏移（基于快照，落点稳定）
+  const getItemTransform = useCallback(
+    (index: number): string => {
+      const snap = dragSnap.current;
+      if (dragIndex === null || snap === null) return "";
+      const target = snap.targetIndex;
+      if (index === dragIndex) return `translateY(${dragDeltaY}px)`;
+      // 向下拖：被拖项下方、目标位置之间的 item 上移一个“项高+间距”，让出空位
+      if (target > dragIndex && index > dragIndex && index <= target) {
+        return `translateY(${-snap.height}px)`;
+      }
+      // 向上拖：目标位置到被拖项之间的 item 下移一个“项高+间距”
+      if (target < dragIndex && index >= target && index < dragIndex) {
+        return `translateY(${snap.height}px)`;
+      }
+      return "";
+    },
+    [dragIndex, dragDeltaY],
+  );
+
   const deleteName = providers.find((p) => p.id === deleteTarget)?.name;
 
   return (
@@ -563,11 +709,33 @@ export default function AiProviders() {
             <div className="empty-state-text">没有匹配的供应商</div>
           </div>
         ) : (
-          <div className="ai-provider-list">
-            {filteredProviders.map((p) => {
+          <div className="ai-provider-list" ref={listRef}>
+            {filteredProviders.map((p, index) => {
               const tierCount = Object.keys(p.models).length;
+              const canDrag = !isFiltering;
               return (
-                <div key={p.id} className="ai-provider-item">
+                <div
+                  key={p.id}
+                  className={`ai-provider-item ${dragIndex === index ? "dragging" : ""} ${dragOverIndex === index && dragIndex !== index ? "drag-over" : ""}`}
+                  style={{
+                    transform: getItemTransform(index) || undefined,
+                    transition: dragIndex === index ? "none" : "transform 0.15s ease",
+                    zIndex: dragIndex === index ? 10 : undefined,
+                    position: "relative",
+                  }}
+                >
+                  {canDrag && (
+                    <span
+                      className="ai-provider-grip"
+                      aria-hidden
+                      onPointerDown={(e) => onGripPointerDown(index, e)}
+                      onPointerMove={onGripPointerMove}
+                      onPointerUp={onGripPointerUp}
+                      onPointerCancel={onGripPointerCancel}
+                    >
+                      <IconGrip />
+                    </span>
+                  )}
                   <div className="ai-provider-info">
                     <div className="ai-provider-name">
                       <TypeBadge type={p.providerType} />

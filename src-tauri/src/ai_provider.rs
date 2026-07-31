@@ -40,6 +40,7 @@ pub struct AiProvider {
     pub notes: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub sort_order: i64,
 }
 
 /// Internal DB row including encrypted API key fields.
@@ -58,6 +59,7 @@ pub struct AiProviderRow {
     pub notes: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub sort_order: i64,
 }
 
 /// 通用类型下由 Anthropic Base URL 派生 OpenAI 形式 Base URL（追加 /v1）。
@@ -86,6 +88,7 @@ impl From<AiProviderRow> for AiProvider {
             notes: row.notes,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            sort_order: row.sort_order,
         }
     }
 }
@@ -240,6 +243,7 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         notes,
         created_at,
         updated_at: now,
+        sort_order: existing.as_ref().map(|r| r.sort_order).unwrap_or(0),
     };
 
     db::upsert_ai_provider_row(&row)?;
@@ -384,6 +388,16 @@ pub fn get_provider_secret(id: String) -> Result<String, String> {
         &row.api_key_nonce,
         &row.api_key_cipher,
     )
+}
+
+/// 批量更新供应商排序。`ids` 按目标顺序排列，索引即为新 sort_order。
+pub fn reorder_providers(ids: Vec<String>) -> Result<(), String> {
+    let orders: Vec<(String, i64)> = ids
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| (id, i as i64))
+        .collect();
+    db::reorder_ai_provider_rows(&orders)
 }
 
 #[cfg(test)]

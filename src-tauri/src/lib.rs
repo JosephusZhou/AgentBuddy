@@ -994,6 +994,13 @@ async fn get_ai_provider_secret(id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn reorder_ai_providers(ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || ai_provider::reorder_providers(ids))
+        .await
+        .map_err(|e| format!("供应商排序任务失败: {e}"))?
+}
+
+#[tauri::command]
 async fn pick_project_folder() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         platform::pick_folder("选择项目目录")
@@ -1152,6 +1159,7 @@ pub fn run() {
             upsert_ai_provider,
             delete_ai_provider,
             get_ai_provider_secret,
+            reorder_ai_providers,
         ])
         .setup(|_app| {
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.

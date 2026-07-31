@@ -19,6 +19,7 @@ export interface AiProvider {
   notes: string;
   createdAt: number;
   updatedAt: number;
+  sortOrder: number;
 }
 
 export interface AiProviderUpsertPayload {

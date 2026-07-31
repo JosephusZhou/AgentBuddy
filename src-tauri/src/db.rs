@@ -119,6 +119,7 @@ fn get_connection() -> Result<Connection, String> {
     // ADD COLUMN` errors if the column is already present, so ignore that case.
     ensure_column(&conn, "skills", "tag", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "ai_providers", "openai_default_model", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(&conn, "ai_providers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(&conn, "claude_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "codex_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
 
@@ -993,6 +994,7 @@ fn row_to_ai_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiProviderRow
         notes: row.get(10)?,
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
+        sort_order: row.get(13)?,
     })
 }
 
@@ -1002,9 +1004,9 @@ pub fn load_ai_provider_rows() -> Result<Vec<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at
+                    notes, created_at, updated_at, sort_order
              FROM ai_providers
-             ORDER BY created_at ASC",
+             ORDER BY sort_order ASC, created_at ASC",
         )
         .map_err(|e| format!("Failed to prepare ai_providers query: {}", e))?;
 
@@ -1023,7 +1025,7 @@ pub fn get_ai_provider_row(id: &str) -> Result<Option<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at
+                    notes, created_at, updated_at, sort_order
              FROM ai_providers
              WHERE id = ?1",
         )
@@ -1040,8 +1042,8 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
         "INSERT INTO ai_providers
             (id, name, provider_type, base_url, api_key_salt, api_key_nonce,
              api_key_cipher, default_model, openai_default_model, models_json,
-             notes, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             notes, created_at, updated_at, sort_order)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             provider_type = excluded.provider_type,
@@ -1054,7 +1056,8 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             models_json = excluded.models_json,
             notes = excluded.notes,
             created_at = ai_providers.created_at,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            sort_order = excluded.sort_order",
         params![
             row.id,
             row.name,
@@ -1069,6 +1072,7 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             row.notes,
             row.created_at,
             row.updated_at,
+            row.sort_order,
         ],
     )
     .map_err(|e| format!("Failed to upsert ai_provider {}: {}", row.id, e))?;
@@ -1079,6 +1083,24 @@ pub fn delete_ai_provider_row(id: &str) -> Result<(), String> {
     let conn = get_connection()?;
     conn.execute("DELETE FROM ai_providers WHERE id = ?1", params![id])
         .map_err(|e| format!("Failed to delete ai_provider {}: {}", id, e))?;
+    Ok(())
+}
+
+/// Batch-update sort_order for ai_providers. `orders` is a list of (id, sort_order).
+pub fn reorder_ai_provider_rows(orders: &[(String, i64)]) -> Result<(), String> {
+    let conn = get_connection()?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+    for (id, order) in orders {
+        tx.execute(
+            "UPDATE ai_providers SET sort_order = ?1 WHERE id = ?2",
+            params![order, id],
+        )
+        .map_err(|e| format!("Failed to reorder ai_provider {}: {}", id, e))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("Failed to commit reorder: {}", e))?;
     Ok(())
 }
 

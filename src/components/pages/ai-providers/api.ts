@@ -41,3 +41,9 @@ export async function invokeFetchRemoteModels(
   })) as { modelIds: string[] };
   return result.modelIds;
 }
+
+/** 批量更新供应商排序（ids 按目标顺序排列）。 */
+export async function invokeReorder(ids: string[]): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("reorder_ai_providers", { ids }) as Promise<void>;
+}
