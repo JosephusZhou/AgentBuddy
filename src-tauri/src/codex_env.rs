@@ -1881,6 +1881,32 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         {
             message.push_str("；环境目录不存在，未写入 model / provider / base_url / Token");
         }
+    } else {
+        // 默认环境：也写入 ~/.codex/config.toml 与 auth.json
+        let dir = PathBuf::from(&row.config_dir);
+        if dir.is_dir() {
+            match apply_managed_config_edit(
+                &dir,
+                payload.model.as_deref(),
+                payload.model_provider.as_deref(),
+                payload.base_url.as_deref(),
+                payload.api_key.as_deref(),
+            ) {
+                Ok(changed) if !changed.is_empty() => {
+                    message.push_str(&format!("；已更新默认 config.toml / auth.json 的 {}", changed.join("、")));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    message.push_str(&format!("；但默认 config.toml 更新失败：{}", e));
+                }
+            }
+        } else if payload.model.is_some()
+            || payload.model_provider.is_some()
+            || payload.base_url.is_some()
+            || payload.api_key.is_some()
+        {
+            message.push_str("；默认环境目录不存在，未写入 model / provider / base_url / Token");
+        }
     }
 
     Ok(CodexEnvActionResult {
@@ -1890,7 +1916,7 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
     })
 }
 
-/// 反向同步：将供应商最新的 model / base_url / api_key 写入所有关联此供应商的非默认环境。
+/// 反向同步：将供应商最新的 model / base_url / api_key 写入所有关联此供应商的环境（含默认）。
 /// 由 ai_provider::upsert_provider 在更新路径调用。
 /// 返回 (已同步数量, 失败列表)。
 pub fn sync_provider_to_envs(

@@ -546,10 +546,10 @@ providerId: cloneSelectedProvider?.id || undefined,
     setEditAlias(env.aliasName);
     setEditNotes(env.notes);
     setEditIsDefault(env.isDefault);
-    // 预填 config.toml 当前值；默认环境不参与该编辑。
-    const baseUrl = env.isDefault ? "" : env.baseUrl ?? "";
-    const model = env.isDefault ? "" : env.model ?? "";
-    const modelProvider = env.isDefault ? "" : env.modelProvider ?? "";
+    // 预填 config.toml / auth.json 当前值。
+    const baseUrl = env.baseUrl ?? "";
+    const model = env.model ?? "";
+    const modelProvider = env.modelProvider ?? "";
     setEditBaseUrl(baseUrl);
     setEditModel(model);
     setEditRemoteModels([]);
@@ -562,7 +562,7 @@ providerId: cloneSelectedProvider?.id || undefined,
     setEditApiKey("");
     editEnvOriginalRef.current = { baseUrl, apiKey: "", model, modelProvider, providerId: env.providerId ?? "" };
     setShowEdit(true);
-    if (!env.isDefault && env.hasAuth) {
+    if (env.hasAuth && env.id) {
       try {
         const secret = await invokeGetSecret(env.id);
         setEditApiKey(secret);
@@ -591,9 +591,7 @@ providerId: cloneSelectedProvider?.id || undefined,
       const orig = editEnvOriginalRef.current;
       const diffField = (next: string, prev: string): string | undefined =>
         next === prev ? undefined : next;
-const envPayload = editIsDefault
-? {}
-: {
+const envPayload = {
 baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
 apiKey: diffField(editApiKey.trim(), orig.apiKey),
 model: diffField(editModel.trim(), orig.model),
@@ -1515,126 +1513,126 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                     disabled={busy}
                   />
                 </div>
-                {/* 供应商选择 */}
-                {editProviders.length > 0 && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="xe-edit-provider">选择供应商（可选）</label>
-                    <CodexProviderSelect
-                      id="xe-edit-provider"
-                      providers={editProviders}
-                      value={editSelectedProvider}
-                      onChange={async (p) => {
-                        setEditSelectedProvider(p);
-                        if (p) {
-                          const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
-                          const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
-                          setEditBaseUrl(baseUrl);
-                          setEditModel(defaultModel);
-                          if (p.hasApiKey) {
-                            try {
-                              const secret = await invokeProviderGetSecret(p.id);
-                              setEditApiKey(secret);
-                            } catch {
-                              // 拉取失败则保持原值
-                            }
-                          } else {
-                            setEditApiKey("");
-                          }
-                        }
-                      }}
-                      disabled={busy}
-                      allowClear
-                    />
-                  </div>
-                )}
-                <div className="form-group">
-                  <label className="form-label" htmlFor="xe-edit-base-url">Base URL</label>
-                  <input
-                    id="xe-edit-base-url"
-                    className="form-input"
-                    type="url"
-                    placeholder="留空即删除 base_url / openai_base_url"
-                    value={editBaseUrl}
-                    onChange={(e) => setEditBaseUrl(e.target.value)}
-                    disabled={busy}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="xe-edit-api-key">Token</label>
-                  <div className="form-input-with-action">
-                    <input
-                      id="xe-edit-api-key"
-                      className="form-input"
-                      type={editApiKeyVisible ? "text" : "password"}
-                      placeholder="留空即删除 auth.json 中的 OPENAI_API_KEY"
-                      value={editApiKey}
-                      onChange={(e) => setEditApiKey(e.target.value)}
-                      disabled={busy}
-                      autoComplete="new-password"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      className="form-input-action"
-                      data-tooltip={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
-                      aria-label={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
-                      aria-pressed={editApiKeyVisible}
-                      onClick={() => setEditApiKeyVisible((v) => !v)}
-                      disabled={busy}
-                      tabIndex={0}
-                    >
-                      {editApiKeyVisible ? <IconEyeOff /> : <IconEye />}
-                    </button>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <div className="claude-env-model-label-row">
-                    <label className="form-label" htmlFor="xe-edit-model">模型</label>
-                    <button
-                      type="button"
-                      className="claude-env-fetch-models-btn"
-                      data-tooltip="从当前 Base URL 拉取模型列表"
-                      onClick={() => void fetchModels("edit")}
-                      disabled={busy || editModelsLoading}
-                    >
-                      <IconDownload />
-                      {editModelsLoading ? "拉取中…" : "拉取列表"}
-                    </button>
-                  </div>
-                  <ModelComboBox
-                    id="xe-edit-model"
-                    value={editModel}
-                    onChange={setEditModel}
-                    options={editRemoteModels}
-                    disabled={busy}
-                    placeholder="留空即删除 model 键"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="xe-edit-provider">Provider</label>
-                  <input
-                    id="xe-edit-provider"
-                    className="form-input"
-                    placeholder="留空即删除 model_provider 键"
-                    value={editModelProvider}
-                    onChange={(e) => setEditModelProvider(e.target.value)}
-                    disabled={busy}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <div className="claude-env-form-hint">
-                    模型 / Provider / Base URL 预填 config.toml 当前值，留空并保存即删除对应键。
-                    Token 读写 <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>
-                    （与 provider 类型无关）；留空并保存即删除该键。
-                  </div>
-                </div>
               </>
             )}
+            {/* 供应商选择 */}
+            {editProviders.length > 0 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="xe-edit-provider">选择供应商（可选）</label>
+                <CodexProviderSelect
+                  id="xe-edit-provider"
+                  providers={editProviders}
+                  value={editSelectedProvider}
+                  onChange={async (p) => {
+                    setEditSelectedProvider(p);
+                    if (p) {
+                      const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+                      const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
+                      setEditBaseUrl(baseUrl);
+                      setEditModel(defaultModel);
+                      if (p.hasApiKey) {
+                        try {
+                          const secret = await invokeProviderGetSecret(p.id);
+                          setEditApiKey(secret);
+                        } catch {
+                          // 拉取失败则保持原值
+                        }
+                      } else {
+                        setEditApiKey("");
+                      }
+                    }
+                  }}
+                  disabled={busy}
+                  allowClear
+                />
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label" htmlFor="xe-edit-base-url">Base URL</label>
+              <input
+                id="xe-edit-base-url"
+                className="form-input"
+                type="url"
+                placeholder="留空即删除 base_url / openai_base_url"
+                value={editBaseUrl}
+                onChange={(e) => setEditBaseUrl(e.target.value)}
+                disabled={busy}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="xe-edit-api-key">Token</label>
+              <div className="form-input-with-action">
+                <input
+                  id="xe-edit-api-key"
+                  className="form-input"
+                  type={editApiKeyVisible ? "text" : "password"}
+                  placeholder="留空即删除 auth.json 中的 OPENAI_API_KEY"
+                  value={editApiKey}
+                  onChange={(e) => setEditApiKey(e.target.value)}
+                  disabled={busy}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="form-input-action"
+                  data-tooltip={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
+                  aria-label={editApiKeyVisible ? "隐藏 Token" : "显示 Token"}
+                  aria-pressed={editApiKeyVisible}
+                  onClick={() => setEditApiKeyVisible((v) => !v)}
+                  disabled={busy}
+                  tabIndex={0}
+                >
+                  {editApiKeyVisible ? <IconEyeOff /> : <IconEye />}
+                </button>
+              </div>
+            </div>
+            <div className="form-group">
+              <div className="claude-env-model-label-row">
+                <label className="form-label" htmlFor="xe-edit-model">模型</label>
+                <button
+                  type="button"
+                  className="claude-env-fetch-models-btn"
+                  data-tooltip="从当前 Base URL 拉取模型列表"
+                  onClick={() => void fetchModels("edit")}
+                  disabled={busy || editModelsLoading}
+                >
+                  <IconDownload />
+                  {editModelsLoading ? "拉取中…" : "拉取列表"}
+                </button>
+              </div>
+              <ModelComboBox
+                id="xe-edit-model"
+                value={editModel}
+                onChange={setEditModel}
+                options={editRemoteModels}
+                disabled={busy}
+                placeholder="留空即删除 model 键"
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="xe-edit-provider">Provider</label>
+              <input
+                id="xe-edit-provider"
+                className="form-input"
+                placeholder="留空即删除 model_provider 键"
+                value={editModelProvider}
+                onChange={(e) => setEditModelProvider(e.target.value)}
+                disabled={busy}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <div className="claude-env-form-hint">
+                模型 / Provider / Base URL 预填 config.toml 当前值，留空并保存即删除对应键。
+                Token 读写 <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>
+                （与 provider 类型无关）；留空并保存即删除该键。
+              </div>
+            </div>
             {editIsDefault && (
               <div className="claude-env-form-hint">
-                默认环境路径固定为 <code>~/.codex</code>，直接运行 <code>codex</code> 使用。主要服务 Codex CLI；Desktop App 可能仍固定默认根。
+                默认环境路径固定为 <code>~/.codex</code>，直接运行 <code>codex</code> 使用；该配置将写入默认 config.toml / auth.json。
               </div>
             )}
             <div className="form-group">

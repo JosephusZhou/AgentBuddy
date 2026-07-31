@@ -1923,7 +1923,6 @@ pub fn upsert_environment(
                 }
             }
             // 即使 model 字段未改（payload 为 None），也检查主键与伴生键是否齐全并补齐。
-            // 用户显式改过/清空模型时 apply 已处理整组，此处多为 no-op。
             match ensure_model_env_companions(&dir) {
                 Ok(changed) if !changed.is_empty() => {
                     message.push_str("；已补齐 DEFAULT_* 模型键");
@@ -1937,6 +1936,44 @@ pub fn upsert_environment(
         {
             message.push_str("；环境目录不存在，未写入 Base URL / API Key / 模型");
         }
+    } else {
+        // 默认环境：也写入 ~/.claude/settings.json 的 env 节点（ANTHROPIC_*）
+        let dir = PathBuf::from(&row.config_dir);
+        if dir.is_dir() {
+            let edit_tiers = tier_overrides_from(
+                payload.model_haiku.as_ref(),
+                payload.model_sonnet.as_ref(),
+                payload.model_opus.as_ref(),
+                payload.model_fable.as_ref(),
+            );
+            match apply_settings_env_edit(
+                &dir,
+                payload.base_url.as_deref(),
+                payload.api_key.as_deref(),
+                payload.model.as_deref(),
+                Some(&edit_tiers),
+            ) {
+                Ok(changed) if !changed.is_empty() => {
+                    message.push_str(&format!("；已更新默认 settings.json 的 {}", changed.join("、")));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    message.push_str(&format!("；但默认 settings.json 更新失败：{}", e));
+                }
+            }
+            match ensure_model_env_companions(&dir) {
+                Ok(changed) if !changed.is_empty() => {
+                    message.push_str("；已补齐 DEFAULT_* 模型键");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    message.push_str(&format!("；但补齐 DEFAULT_* 模型键失败：{}", e));
+                }
+            }
+        } else if payload.base_url.is_some() || payload.api_key.is_some() || payload.model.is_some()
+        {
+            message.push_str("；默认环境目录不存在，未写入 Base URL / API Key / 模型");
+        }
     }
 
     let env = row_to_public(row);
@@ -1947,7 +1984,7 @@ pub fn upsert_environment(
     })
 }
 
-/// 反向同步：将供应商最新的 baseUrl / apiKey / model / 档位模型写入所有关联此供应商的非默认环境。
+/// 反向同步：将供应商最新的 baseUrl / apiKey / model / 档位模型写入所有关联此供应商的环境（含默认）。
 /// 由 ai_provider::upsert_provider 在更新路径调用。
 /// 返回 (已同步数量, 失败列表)。
 pub fn sync_provider_to_envs(

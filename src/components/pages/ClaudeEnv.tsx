@@ -554,9 +554,9 @@ providerId: cloneSelectedProvider?.id || undefined,
     setEditAlias(env.aliasName);
     setEditNotes(env.notes);
     setEditIsDefault(env.isDefault);
-    // 预填 settings.json 当前值；默认环境不参与该编辑。
-    const baseUrl = env.isDefault ? "" : env.baseUrl ?? "";
-    const model = env.isDefault ? "" : env.model ?? "";
+    // 预填 settings.json 当前值；默认环境也参与供应商 / BaseURL / API Key / 模型编辑。
+    const baseUrl = env.baseUrl ?? "";
+    const model = env.model ?? "";
     // 回填四档模型（仅含与主模型不同的档位）
     const tiersRaw = env.modelTiers ?? {};
     setEditBaseUrl(baseUrl);
@@ -571,7 +571,8 @@ providerId: cloneSelectedProvider?.id || undefined,
     setEditApiKey("");
     editEnvOriginalRef.current = { baseUrl, apiKey: "", model, modelTiers: { ...tiersRaw }, providerId: env.providerId ?? "" };
     setShowEdit(true);
-    if (!env.isDefault && env.hasApiKey) {
+    // 默认环境也需读取当前密钥（通过专用命令从 ~/.claude/settings.json 读取）
+    if (env.hasApiKey) {
       try {
         const secret = await invokeGetSecret(env.id);
         setEditApiKey(secret);
@@ -600,14 +601,13 @@ providerId: cloneSelectedProvider?.id || undefined,
       const orig = editEnvOriginalRef.current;
       const diffField = (next: string, prev: string): string | undefined =>
         next === prev ? undefined : next;
-      const envPayload = editIsDefault
-        ? {}
-        : {
-            baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
-            apiKey: diffField(editApiKey.trim(), orig.apiKey),
-            model: diffField(editModel.trim(), orig.model),
-            providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
-          };
+      // 默认环境也支持供应商 / BaseURL / API Key / 模型编辑（settings.json env 节点）
+      const envPayload = {
+        baseUrl: diffField(editBaseUrl.trim(), orig.baseUrl),
+        apiKey: diffField(editApiKey.trim(), orig.apiKey),
+        model: diffField(editModel.trim(), orig.model),
+        providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
+      };
       // 四档模型下发：只传显式变化过（相对原始值）且非空的档位
       const tierDiff = (tierKey: string) => {
         const next = (editTierModels[tierKey] ?? "").trim();
@@ -1556,151 +1556,151 @@ return (
                     disabled={busy}
                   />
                 </div>
-                {/* 供应商选择（位于 Base URL 之上） */}
-                {editProviders.length > 0 && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="ce-edit-provider">选择供应商（可选）</label>
-                    <ProviderSelect
-                      id="ce-edit-provider"
-                      providers={editProviders}
-                      value={editSelectedProvider}
-                      onChange={async (p) => {
-                        setEditSelectedProvider(p);
-                        if (p) {
-                          setEditBaseUrl(p.baseUrl);
-                          setEditModel(p.defaultModel);
-                          // 四档模型：直接用供应商的档位值覆盖
-                          if (Object.keys(p.models).length > 0) {
-                            setEditTierModels((prev) => {
-                              const next = { ...prev };
-                              for (const tier of MODEL_TIERS) {
-                                if (p.models[tier.key]) {
-                                  next[tier.key] = p.models[tier.key];
-                                } else {
-                                  delete next[tier.key];
-                                }
-                              }
-                              return next;
-                            });
-                          } else {
-                            setEditTierModels({});
-                          }
-                          // 填入 API Key
-                          if (p.hasApiKey) {
-                            try {
-                              const secret = await invokeProviderGetSecret(p.id);
-                              setEditApiKey(secret);
-                            } catch {
-                              // 拉取失败则保持原值
-                            }
-                          } else {
-                            setEditApiKey("");
-                          }
-                        }
-                      }}
-                      disabled={busy}
-                      allowClear
-                    />
-                  </div>
-                )}
-                <div className="form-group">
-                  <label className="form-label" htmlFor="ce-edit-base-url">Base URL</label>
-                  <input
-                    id="ce-edit-base-url"
-                    className="form-input"
-                    type="url"
-                    placeholder="留空即从 settings.json 删除 ANTHROPIC_BASE_URL"
-                    value={editBaseUrl}
-                    onChange={(e) => setEditBaseUrl(e.target.value)}
-                    disabled={busy}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="ce-edit-api-key">API Key</label>
-                  <div className="form-input-with-action">
-                    <input
-                      id="ce-edit-api-key"
-                      className="form-input"
-                      type={editApiKeyVisible ? "text" : "password"}
-                      placeholder="留空即从 settings.json 删除 ANTHROPIC_AUTH_TOKEN"
-                      value={editApiKey}
-                      onChange={(e) => setEditApiKey(e.target.value)}
-                      disabled={busy}
-                      autoComplete="new-password"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      className="form-input-action"
-                      data-tooltip={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
-                      aria-label={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
-                      aria-pressed={editApiKeyVisible}
-                      onClick={() => setEditApiKeyVisible((v) => !v)}
-                      disabled={busy}
-                      tabIndex={0}
-                    >
-                      {editApiKeyVisible ? <IconEyeOff /> : <IconEye />}
-                    </button>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <div className="claude-env-model-label-row">
-                    <label className="form-label" htmlFor="ce-edit-model">默认模型</label>
-                    <button
-                      type="button"
-                      className="claude-env-fetch-models-btn"
-                      data-tooltip="从当前 Base URL 拉取模型列表"
-                      onClick={() => void fetchModels("edit")}
-                      disabled={busy || editModelsLoading}
-                    >
-                      <IconDownload />
-                      {editModelsLoading ? "拉取中…" : "拉取列表"}
-                    </button>
-                  </div>
-                  <ModelComboBox
-                    id="ce-edit-model"
-                    value={editModel}
-                    onChange={setEditModel}
-                    options={editRemoteModels}
-                    disabled={busy}
-                    placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL；留空的档位回退到此值"
-                  />
-                </div>
-                {/* 四档模型覆盖 */}
-<div className="form-group">
-<label className="form-label">
-档位模型 <span className="form-label-optional">可选 · 按档覆盖默认值</span>
-</label>
-{MODEL_TIERS.map((tier) => {
-const tierKey = tier.key;
-const current = editTierModels[tierKey] ?? "";
-const idFor = `ce-edit-tier-${tierKey}`;
-return (
-<div key={tierKey} style={{ marginBottom: 8 }}>
-<div className="ai-provider-tier-label">{tier.label}</div>
-<ModelComboBox
-  id={idFor}
-  value={current}
-  onChange={(v) => setEditTierModels(prev => ({ ...prev, [tierKey]: v }))}
-  options={editRemoteModels}
-  disabled={busy}
-  placeholder="留空则跟随默认模型"
-  clearLabel="跟随默认模型"
-/>
-</div>
-);
-})}
-<div className="claude-env-form-hint">
-默认模型与档位模型预填 settings.json 当前值，留空并保存即删除对应键。
-</div>
-</div>
               </>
             )}
+            {/* 供应商选择（位于 Base URL 之上） */}
+            {editProviders.length > 0 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ce-edit-provider">选择供应商（可选）</label>
+                <ProviderSelect
+                  id="ce-edit-provider"
+                  providers={editProviders}
+                  value={editSelectedProvider}
+                  onChange={async (p) => {
+                    setEditSelectedProvider(p);
+                    if (p) {
+                      setEditBaseUrl(p.baseUrl);
+                      setEditModel(p.defaultModel);
+                      // 四档模型：直接用供应商的档位值覆盖
+                      if (Object.keys(p.models).length > 0) {
+                        setEditTierModels((prev) => {
+                          const next = { ...prev };
+                          for (const tier of MODEL_TIERS) {
+                            if (p.models[tier.key]) {
+                              next[tier.key] = p.models[tier.key];
+                            } else {
+                              delete next[tier.key];
+                            }
+                          }
+                          return next;
+                        });
+                      } else {
+                        setEditTierModels({});
+                      }
+                      // 填入 API Key
+                      if (p.hasApiKey) {
+                        try {
+                          const secret = await invokeProviderGetSecret(p.id);
+                          setEditApiKey(secret);
+                        } catch {
+                          // 拉取失败则保持原值
+                        }
+                      } else {
+                        setEditApiKey("");
+                      }
+                    }
+                  }}
+                  disabled={busy}
+                  allowClear
+                />
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label" htmlFor="ce-edit-base-url">Base URL</label>
+              <input
+                id="ce-edit-base-url"
+                className="form-input"
+                type="url"
+                placeholder="留空即从 settings.json 删除 ANTHROPIC_BASE_URL"
+                value={editBaseUrl}
+                onChange={(e) => setEditBaseUrl(e.target.value)}
+                disabled={busy}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="ce-edit-api-key">API Key</label>
+              <div className="form-input-with-action">
+                <input
+                  id="ce-edit-api-key"
+                  className="form-input"
+                  type={editApiKeyVisible ? "text" : "password"}
+                  placeholder="留空即从 settings.json 删除 ANTHROPIC_AUTH_TOKEN"
+                  value={editApiKey}
+                  onChange={(e) => setEditApiKey(e.target.value)}
+                  disabled={busy}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="form-input-action"
+                  data-tooltip={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
+                  aria-label={editApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
+                  aria-pressed={editApiKeyVisible}
+                  onClick={() => setEditApiKeyVisible((v) => !v)}
+                  disabled={busy}
+                  tabIndex={0}
+                >
+                  {editApiKeyVisible ? <IconEyeOff /> : <IconEye />}
+                </button>
+              </div>
+            </div>
+            <div className="form-group">
+              <div className="claude-env-model-label-row">
+                <label className="form-label" htmlFor="ce-edit-model">默认模型</label>
+                <button
+                  type="button"
+                  className="claude-env-fetch-models-btn"
+                  data-tooltip="从当前 Base URL 拉取模型列表"
+                  onClick={() => void fetchModels("edit")}
+                  disabled={busy || editModelsLoading}
+                >
+                  <IconDownload />
+                  {editModelsLoading ? "拉取中…" : "拉取列表"}
+                </button>
+              </div>
+              <ModelComboBox
+                id="ce-edit-model"
+                value={editModel}
+                onChange={setEditModel}
+                options={editRemoteModels}
+                disabled={busy}
+                placeholder="留空即从 settings.json 删除 ANTHROPIC_MODEL；留空的档位回退到此值"
+              />
+            </div>
+            {/* 四档模型覆盖 */}
+            <div className="form-group">
+              <label className="form-label">
+                档位模型 <span className="form-label-optional">可选 · 按档覆盖默认值</span>
+              </label>
+              {MODEL_TIERS.map((tier) => {
+                const tierKey = tier.key;
+                const current = editTierModels[tierKey] ?? "";
+                const idFor = `ce-edit-tier-${tierKey}`;
+                return (
+                  <div key={tierKey} style={{ marginBottom: 8 }}>
+                    <div className="ai-provider-tier-label">{tier.label}</div>
+                    <ModelComboBox
+                      id={idFor}
+                      value={current}
+                      onChange={(v) => setEditTierModels(prev => ({ ...prev, [tierKey]: v }))}
+                      options={editRemoteModels}
+                      disabled={busy}
+                      placeholder="留空则跟随默认模型"
+                      clearLabel="跟随默认模型"
+                    />
+                  </div>
+                );
+              })}
+              <div className="claude-env-form-hint">
+                默认模型与档位模型预填 settings.json 当前值，留空并保存即删除对应键。
+              </div>
+            </div>
             {editIsDefault && (
               <div className="claude-env-form-hint">
-                默认环境路径固定为 <code>~/.claude</code>，直接运行 <code>claude</code> 使用。
+                默认环境路径固定为 <code>~/.claude</code>，直接运行 <code>claude</code> 使用；该配置将写入默认 settings.json 的 env 节点。
               </div>
             )}
             <div className="form-group">
