@@ -2829,7 +2829,7 @@ a[href]:focus-visible {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 200; /* 高于拖拽条(50) 与页面内容 */
+  z-index: 2000; /* 高于拖拽条(50)/下拉(50)/弹窗(1000)，保证弹窗中的提示也可见 */
   display: flex;
   justify-content: center;
   padding-top: 44px; /* 让出顶部 32px 拖拽条 / 红绿灯 */
