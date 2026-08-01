@@ -27,6 +27,23 @@ async fn set_theme(theme: String) -> Result<config::AppConfig, String> {
     config::set_theme(theme)
 }
 
+/// Set the NSWindow appearance to light or dark so that inactive traffic lights
+/// render in the correct shade (gray for dark, light-gray for light).
+/// Called by the frontend after loading or switching themes.
+#[tauri::command]
+async fn set_window_appearance(
+    category: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let dark = category == "dark";
+        set_ns_window_appearance(&app, dark);
+    }
+    let _ = category;
+    Ok(())
+}
+
 #[tauri::command]
 async fn get_network_settings() -> Result<config::NetworkSettings, String> {
     config::load_network_settings()
@@ -1219,6 +1236,60 @@ async fn init_project_config(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// ── macOS traffic-light helpers ──────────────────────────────────────────
+
+/// Heuristic: classify a theme id as dark or light without duplicating the
+/// frontend theme registry. The frontend calls `set_window_appearance` on
+/// load/change, so any misclassification here is corrected within milliseconds.
+#[cfg(target_os = "macos")]
+fn theme_is_dark(theme_id: &str) -> bool {
+    const DARK_HINTS: &[&str] = &[
+        "dark", "night", "dracula", "monokai", "nord",
+        "palenight", "cobalt", "synthwave", "mocha",
+    ];
+    DARK_HINTS.iter().any(|h| theme_id.contains(h))
+}
+
+/// Set the NSWindow's appearance to Aqua (light) or DarkAqua (dark).
+/// This controls how macOS renders inactive traffic lights:
+/// – DarkAqua → medium gray circles when window loses focus
+/// – Aqua     → light gray circles when window loses focus
+///
+/// All objc calls are dispatched to the main thread via run_on_main_thread,
+/// because macOS UI APIs are not safe to call from a tokio worker thread.
+#[cfg(target_os = "macos")]
+fn set_ns_window_appearance(app: &tauri::AppHandle, dark: bool) {
+    use tauri::Manager;
+    let app = app.clone();
+    // run_on_main_thread borrows `app` (&self), so the closure must capture
+    // a separate clone to avoid "cannot move out of borrowed" error.
+    let handler = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        use objc::{class, msg_send, sel, sel_impl};
+        if let Some(window) = handler.get_webview_window("main") {
+            if let Ok(ns_window_ptr) = window.ns_window() {
+                unsafe {
+                    let ns_window = ns_window_ptr as *mut objc::runtime::Object;
+                    let name: &[u8] = if dark {
+                        b"NSAppearanceNameDarkAqua\0"
+                    } else {
+                        b"NSAppearanceNameAqua\0"
+                    };
+                    let ns_name: *mut objc::runtime::Object = msg_send![
+                        class!(NSString),
+                        stringWithUTF8String: name.as_ptr() as *const i8
+                    ];
+                    let appearance: *mut objc::runtime::Object = msg_send![
+                        class!(NSAppearance),
+                        appearanceNamed: ns_name
+                    ];
+                    let _: () = msg_send![ns_window, setAppearance: appearance];
+                }
+            }
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -1239,6 +1310,7 @@ pub fn run() {
             test_mcp_connection,
             get_app_config,
             set_theme,
+            set_window_appearance,
             get_network_settings,
             update_network_settings,
             get_webdav_connections,
@@ -1400,6 +1472,51 @@ pub fn run() {
                         }
                     }
                 });
+            }
+
+            // macOS: fix inactive traffic lights rendering as black instead of gray
+            // when using Overlay titleBarStyle. Three things are needed:
+            // 1. setOpaque:NO — lets the system composite the title bar correctly
+            //    when titlebarAppearsTransparent is true
+            // 2. setBackgroundColor: — gives the system a baseline color
+            // 3. setAppearance: — set initial appearance from saved theme so
+            //    inactive traffic lights use the correct shade (gray for dark
+            //    themes, light-gray for light themes). Frontend will call
+            //    set_window_appearance to keep it in sync on theme change.
+            #[cfg(target_os = "macos")]
+            {
+                use objc::{class, msg_send, sel, sel_impl};
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    if let Ok(ns_window_ptr) = window.ns_window() {
+                        unsafe {
+                            let ns_window = ns_window_ptr as *mut objc::runtime::Object;
+
+                            // 1. setOpaque:NO
+                            let _: () = msg_send![ns_window, setOpaque: false];
+
+                            // 2. setBackgroundColor: dark gray (#2C2C2C)
+                            let bg_color: *mut objc::runtime::Object = msg_send![
+                                class!(NSColor),
+                                colorWithCalibratedRed: 0.17f64
+                                green: 0.17f64
+                                blue: 0.17f64
+                                alpha: 1.0f64
+                            ];
+                            let _: () = msg_send![
+                                ns_window,
+                                setBackgroundColor: bg_color
+                            ];
+                        }
+                    }
+
+                    // 3. setAppearance based on saved theme (dispatched to main thread)
+                    let theme = config::load_app_config()
+                        .map(|c| c.theme)
+                        .unwrap_or_else(|_| "qoder-light".to_string());
+                    let app_handle = _app.handle().clone();
+                    set_ns_window_appearance(&app_handle, theme_is_dark(&theme));
+                }
             }
 
             // DevTools only in debug builds; Manager is only needed here.

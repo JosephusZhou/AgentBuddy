@@ -187,16 +187,34 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
+/** Look up the category (light/dark) for a theme id. */
+export function getThemeCategory(theme: Theme): ThemeCategory {
+  return THEMES.find((t) => t.id === theme)?.category ?? "light";
+}
+
+/** Tell the Rust backend to set NSWindow appearance (light → Aqua, dark → DarkAqua)
+ *  so inactive traffic lights render in the correct shade. */
+async function syncWindowAppearance(theme: Theme): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_window_appearance", { category: getThemeCategory(theme) });
+  } catch {
+    // Non-tauri environment — no-op.
+  }
+}
+
 export async function loadAppConfig(): Promise<AppConfig> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     const config = await (invoke("get_app_config") as Promise<{ theme?: string }>);
     if (isKnownTheme(config?.theme)) {
+      await syncWindowAppearance(config.theme as Theme);
       return { theme: config.theme };
     }
     // 配置文件里是未知/遗留主题（如旧的 light/dark 或人工乱改）：
     // 还原成默认主题并持久化回写，避免每次启动都残留非法值。
-    return { theme: await saveTheme(DEFAULT_THEME) };
+    const fallback = await saveTheme(DEFAULT_THEME);
+    return { theme: fallback };
   } catch {
     // Browser / non-tauri preview: fall back to default.
     return { theme: DEFAULT_THEME };
@@ -208,7 +226,9 @@ export async function saveTheme(theme: Theme): Promise<Theme> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     const config = await (invoke("set_theme", { theme: next }) as Promise<{ theme?: string }>);
-    return normalizeTheme(config?.theme);
+    const saved = normalizeTheme(config?.theme);
+    await syncWindowAppearance(saved);
+    return saved;
   } catch {
     return next;
   }
