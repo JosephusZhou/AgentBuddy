@@ -4,6 +4,16 @@ export type RouteGroup = "claude_code" | "codex";
 
 export type CloakingMode = "auto" | "always" | "never";
 
+export interface ModelEntry {
+  id: string;
+  alias: string;
+}
+
+export interface ModelSource {
+  id: string;
+  providers: string[];
+}
+
 export interface RouteAggregationConfig {
   claudeCodeEnabled: boolean;
   codexEnabled: boolean;
@@ -17,6 +27,10 @@ export interface RouteAggregationConfig {
   cloakingMode: CloakingMode;
   claudeCodeVersion: string;
   codexVersion: string;
+  claudeCodeApiKey: string;
+  codexApiKey: string;
+  claudeCodeModels: ModelEntry[];
+  codexModels: ModelEntry[];
 }
 
 export interface ProviderRouteStatus {
@@ -66,4 +80,8 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
   cloakingMode: "auto",
   claudeCodeVersion: "2.1.63",
   codexVersion: "0.146.0",
+  claudeCodeApiKey: "",
+  codexApiKey: "",
+  claudeCodeModels: [],
+  codexModels: [],
 };

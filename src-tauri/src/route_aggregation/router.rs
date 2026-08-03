@@ -1,52 +1,51 @@
-//! Route registration — builds the Axum Router based on enabled groups.
+//! Route registration — builds the Axum Router.
+//!
+//! All routes are always registered regardless of which groups are enabled.
+//! Enabling/disabling a route group is handled at runtime by the handler
+//! (checking the shared config), so toggling a group does NOT require a
+//! server restart.
 
 use std::sync::Arc;
 
 use axum::{routing::get, routing::post, Router};
+use tokio::sync::RwLock;
 
 use super::config::RouteAggregationConfig;
 use super::handler;
 use super::provider_router::ProviderRouter;
 
 /// Shared state passed to all Axum handlers.
+///
+/// `config` is the same `Arc<RwLock<Config>>` used by `RouteAggregationState`,
+/// so runtime config updates are immediately visible to handlers without
+/// needing to restart the server.
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<tokio::sync::RwLock<RouteAggregationConfig>>,
+    pub config: Arc<RwLock<RouteAggregationConfig>>,
     pub provider_router: Arc<ProviderRouter>,
 }
 
-/// Build the Axum router with routes for enabled groups.
+/// Build the Axum router.
+///
+/// All routes are always registered. Whether a group accepts requests is
+/// decided at runtime by the handler reading the shared config — this allows
+/// toggling groups without restarting the server.
 pub fn build_router(
-    config: &RouteAggregationConfig,
+    config: Arc<RwLock<RouteAggregationConfig>>,
     provider_router: Arc<ProviderRouter>,
 ) -> Router {
     let state = AppState {
-        config: Arc::new(tokio::sync::RwLock::new(config.clone())),
+        config,
         provider_router,
     };
 
-    let mut router = Router::new();
-
-    if config.claude_code_enabled {
-        router = router
-            .route(
-                "/v1/messages",
-                post(handler::handle_claude_messages),
-            )
-            .route(
-                "/claude/v1/messages",
-                post(handler::handle_claude_messages),
-            );
-    }
-
-    if config.codex_enabled {
-        router = router
-            .route(
-                "/v1/responses",
-                post(handler::handle_codex_responses),
-            )
-            .route("/v1/models", get(handler::handle_list_models));
-    }
-
-    router.with_state(state)
+    Router::new()
+        // Claude Code: POST /v1/messages (and /claude/v1/messages alias)
+        .route("/v1/messages", post(handler::handle_claude_messages))
+        .route("/claude/v1/messages", post(handler::handle_claude_messages))
+        // Codex: POST /v1/responses (Responses API, not Chat Completions)
+        .route("/v1/responses", post(handler::handle_codex_responses))
+        // /v1/models is always available when the server is running
+        .route("/v1/models", get(handler::handle_list_models))
+        .with_state(state)
 }

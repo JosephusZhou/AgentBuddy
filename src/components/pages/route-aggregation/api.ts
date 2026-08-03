@@ -6,6 +6,8 @@ import type {
   ProviderRouteToggle,
   ProviderRouteStatus,
   RouteGroup,
+  ModelEntry,
+  ModelSource,
 } from "./types";
 
 export async function getStatus(): Promise<RouteAggregationStatus> {
@@ -72,4 +74,27 @@ export async function getCircuitBreakerStatus(
 ): Promise<ProviderRouteStatus[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("get_circuit_breaker_status", { group });
+}
+
+export async function regenerateApiKey(group: RouteGroup): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("regenerate_route_aggregation_api_key", { group });
+}
+
+export async function updateModels(
+  group: RouteGroup,
+  models: ModelEntry[],
+): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("update_route_aggregation_models", { group, models });
+}
+
+export async function getRouteModels(group: RouteGroup): Promise<ModelSource[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_route_aggregation_models", { group });
+}
+
+export async function resetModels(group: RouteGroup): Promise<ModelEntry[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("reset_route_aggregation_models", { group });
 }

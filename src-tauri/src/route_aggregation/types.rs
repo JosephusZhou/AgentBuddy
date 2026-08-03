@@ -36,6 +36,25 @@ pub enum CloakingMode {
     Never,
 }
 
+/// A model entry in a route group's model list.
+/// `id` is the actual model ID; `alias` is the display name (empty = use id).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntry {
+    pub id: String,
+    pub alias: String,
+}
+
+/// A model ID together with the names of all providers that serve it.
+/// Returned by get_route_aggregation_models so the UI can show which
+/// provider(s) each model comes from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSource {
+    pub id: String,
+    pub providers: Vec<String>,
+}
+
 impl Default for CloakingMode {
     fn default() -> Self {
         CloakingMode::Auto

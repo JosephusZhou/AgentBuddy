@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   Clock,
   Copy,
+  Layers,
   Loader2,
+  Plus,
   Power,
   RefreshCw,
   Server,
   Settings2,
+  Trash2,
   Zap,
 } from "lucide-react";
 import * as api from "./route-aggregation/api";
 import type {
+  ModelEntry,
+  ModelSource,
   RouteAggregationConfig,
   RouteAggregationStatus,
   RouteGroup,
@@ -29,7 +35,10 @@ export default function RouteAggregation() {
 
   const loadData = useCallback(async () => {
     try {
-      const [cfg, sts] = await Promise.all([api.getConfig(), api.getStatus()]);
+      const [cfg, sts] = await Promise.all([
+        api.getConfig(),
+        api.getStatus(),
+      ]);
       setConfig(cfg);
       setStatus(sts);
     } catch (e) {
@@ -129,6 +138,48 @@ export default function RouteAggregation() {
       setStatus(sts);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRegenerateApiKey = async (group: RouteGroup): Promise<string> => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const newKey = await api.regenerateApiKey(group);
+      const keyField = group === "claude_code" ? "claudeCodeApiKey" : "codexApiKey";
+      setConfig({ ...config, [keyField]: newKey });
+      return newKey;
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateModels = async (
+    group: RouteGroup,
+    models: ModelEntry[],
+  ) => {
+    const field = group === "claude_code" ? "claudeCodeModels" : "codexModels";
+    setConfig({ ...config, [field]: models });
+  };
+
+  const handleResetModels = async (
+    group: RouteGroup,
+  ): Promise<ModelEntry[]> => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const entries = await api.resetModels(group);
+      const field = group === "claude_code" ? "claudeCodeModels" : "codexModels";
+      setConfig({ ...config, [field]: entries });
+      return entries;
+    } catch (e) {
+      setError(String(e));
+      throw e;
     } finally {
       setActionLoading(false);
     }
@@ -249,17 +300,34 @@ export default function RouteAggregation() {
             <Settings2 size={15} />
             基本配置
           </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label">监听地址</label>
-              <input
-                className="form-input"
-                type="text"
-                value={config.listenAddress}
-                onChange={(e) => setConfig({ ...config, listenAddress: e.target.value })}
-                onBlur={() => handleConfigUpdate(config)}
-                disabled={actionLoading}
-              />
+              <div style={{ display: "flex", gap: 8 }}>
+                {([
+                  { value: "127.0.0.1", label: "本机" },
+                  { value: "0.0.0.0", label: "局域网" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`net-protocol-chip ${config.listenAddress === opt.value ? "selected" : ""}`}
+                    onClick={() =>
+                      handleConfigUpdate({
+                        ...config,
+                        listenAddress: opt.value,
+                      })
+                    }
+                    disabled={actionLoading}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", marginTop: 4 }}>
+                {config.listenAddress}
+              </div>
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label">端口</label>
@@ -348,9 +416,14 @@ export default function RouteAggregation() {
           status={status?.claudeCode}
           proxyUrl={`${proxyUrl}/v1/messages`}
           version={config.claudeCodeVersion}
+          apiKey={config.claudeCodeApiKey}
+          models={config.claudeCodeModels}
           onToggle={(enabled) => handleToggleGroup("claude_code", enabled)}
           onToggleProvider={handleToggleProvider}
           onResetCircuitBreaker={handleResetCircuitBreaker}
+          onRegenerateApiKey={() => handleRegenerateApiKey("claude_code")}
+          onUpdateModels={(models) => handleUpdateModels("claude_code", models)}
+          onResetModels={() => handleResetModels("claude_code")}
           actionLoading={actionLoading}
         />
 
@@ -362,9 +435,14 @@ export default function RouteAggregation() {
           status={status?.codex}
           proxyUrl={`${proxyUrl}/v1/responses`}
           version={config.codexVersion}
+          apiKey={config.codexApiKey}
+          models={config.codexModels}
           onToggle={(enabled) => handleToggleGroup("codex", enabled)}
           onToggleProvider={handleToggleProvider}
           onResetCircuitBreaker={handleResetCircuitBreaker}
+          onRegenerateApiKey={() => handleRegenerateApiKey("codex")}
+          onUpdateModels={(models) => handleUpdateModels("codex", models)}
+          onResetModels={() => handleResetModels("codex")}
           actionLoading={actionLoading}
         />
 
@@ -399,6 +477,11 @@ export default function RouteAggregation() {
 
 /* ===== Route Group Panel ===== */
 
+/** Return a new array of model entries sorted alphabetically by model id. */
+function sortModelEntries(entries: ModelEntry[]): ModelEntry[] {
+  return [...entries].sort((a, b) => a.id.localeCompare(b.id));
+}
+
 interface RouteGroupPanelProps {
   title: string;
   group: RouteGroup;
@@ -406,9 +489,14 @@ interface RouteGroupPanelProps {
   status?: { enabled: boolean; activeProviders: ProviderRouteStatus[]; totalProviders: number };
   proxyUrl: string;
   version: string;
+  apiKey: string;
+  models: ModelEntry[];
   onToggle: (enabled: boolean) => void;
   onToggleProvider: (providerId: string, group: RouteGroup, enabled: boolean) => void;
   onResetCircuitBreaker: (providerId: string, group: RouteGroup) => void;
+  onRegenerateApiKey: () => Promise<string>;
+  onUpdateModels: (models: ModelEntry[]) => Promise<void>;
+  onResetModels: () => Promise<ModelEntry[]>;
   actionLoading: boolean;
 }
 
@@ -419,12 +507,160 @@ function RouteGroupPanel({
   status,
   proxyUrl,
   version,
+  apiKey,
+  models,
   onToggle,
   onToggleProvider,
   onResetCircuitBreaker,
+  onRegenerateApiKey,
+  onUpdateModels,
+  onResetModels,
   actionLoading,
 }: RouteGroupPanelProps) {
   const providers = status?.activeProviders ?? [];
+  const [localModels, setLocalModels] = useState<ModelEntry[]>(() =>
+    sortModelEntries(models),
+  );
+  const [availableModels, setAvailableModels] = useState<ModelSource[]>([]);
+  const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const [copiedModelId, setCopiedModelId] = useState<string | null>(null);
+  const [providersExpanded, setProvidersExpanded] = useState(true);
+  const [modelsExpanded, setModelsExpanded] = useState(true);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
+  const [addFilterText, setAddFilterText] = useState("");
+  const addDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close add dropdown on click-outside or Escape
+  useEffect(() => {
+    if (!showAddDropdown) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (addDropdownRef.current && !addDropdownRef.current.contains(e.target as Node)) {
+        setShowAddDropdown(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowAddDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [showAddDropdown]);
+
+  // Sync localModels when models prop changes
+  useEffect(() => {
+    setLocalModels(sortModelEntries(models));
+  }, [models]);
+
+  // Fetch available models for the add dropdown
+  const refreshAvailableModels = useCallback(async () => {
+    try {
+      const all = await api.getRouteModels(group);
+      setAvailableModels(all);
+    } catch {
+      /* ignore */
+    }
+  }, [group]);
+
+  // Signature of the currently enabled providers — changes when a provider
+  // is checked/unchecked, so the dropdown refetches its model list.
+  const enabledProviderKey = useMemo(
+    () =>
+      providers
+        .filter((p) => p.enabled)
+        .map((p) => p.id)
+        .join(","),
+    [providers],
+  );
+
+  useEffect(() => {
+    if (enabled) {
+      refreshAvailableModels();
+    }
+  }, [enabled, enabledProviderKey, refreshAvailableModels]);
+
+  const handleCopyApiKey = async () => {
+    if (apiKey) {
+      await navigator.clipboard.writeText(apiKey);
+      setApiKeyCopied(true);
+      setTimeout(() => setApiKeyCopied(false), 2000);
+    }
+  };
+
+  const saveModels = async (newModels: ModelEntry[]) => {
+    const sorted = sortModelEntries(newModels);
+    setLocalModels(sorted);
+    try {
+      await api.updateModels(group, sorted);
+      await onUpdateModels(sorted);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleAliasChange = (index: number, alias: string) => {
+    const updated = [...localModels];
+    updated[index] = { ...updated[index], alias };
+    setLocalModels(updated);
+  };
+
+  const handleAliasBlur = (index: number) => {
+    const updated = [...localModels];
+    updated[index] = {
+      ...updated[index],
+      alias: updated[index].alias.trim(),
+    };
+    saveModels(updated);
+  };
+
+  const handleDeleteModel = (index: number) => {
+    const updated = localModels.filter((_, i) => i !== index);
+    saveModels(updated);
+  };
+
+  const handleAddModel = (modelId: string) => {
+    if (!modelId) return;
+    if (localModels.some((m) => m.id === modelId)) return;
+    saveModels([...localModels, { id: modelId, alias: "" }]);
+    // Keep the dropdown open so the user can add multiple models; the newly
+    // added one now renders as 已添加/disabled.
+  };
+
+  const handleResetConfirm = async () => {
+    setShowResetConfirm(false);
+    try {
+      const entries = await onResetModels();
+      setLocalModels(sortModelEntries(entries));
+      await refreshAvailableModels();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Map model id -> provider names, used to show source providers on saved items
+  const providersByModel = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const src of availableModels) {
+      map[src.id] = src.providers;
+    }
+    return map;
+  }, [availableModels]);
+
+  // All available models (including already-added ones), filtered by the
+  // search input. Already-added items are rendered as disabled with a marker
+  // so the user can see what's already in the list and avoid duplicates.
+  const filteredModels = useMemo(() => {
+    const q = addFilterText.trim().toLowerCase();
+    if (!q) return availableModels;
+    return availableModels.filter((src) => src.id.toLowerCase().includes(q));
+  }, [availableModels, addFilterText]);
 
   return (
     <div
@@ -491,26 +727,352 @@ function RouteGroupPanel({
             </button>
           </div>
 
-          {/* Provider list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-            {providers.length === 0 ? (
-              <div className="empty-state" style={{ minHeight: 120, padding: "24px 12px" }}>
-                <Server size={32} />
-                <div className="empty-state-text">暂无匹配的供应商</div>
-                <div className="empty-state-subtext">
-                  请先在「AI 供应商」中添加对应类型的供应商
-                </div>
+          {/* API Key */}
+          <div className="form-group" style={{ marginBottom: 0, marginTop: 12 }}>
+            <label className="form-label">API Key</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                className="form-input"
+                type="text"
+                value={
+                  apiKey
+                    ? apiKey.length > 10
+                      ? apiKey.slice(0, 6) + "*".repeat(apiKey.length - 10) + apiKey.slice(-4)
+                      : apiKey
+                    : ""
+                }
+                readOnly
+                disabled={actionLoading}
+                style={{ flex: 1, fontFamily: "monospace", fontSize: "var(--text-sm)" }}
+              />
+              <button
+                className="btn-icon-action"
+                onClick={handleCopyApiKey}
+                data-tooltip={apiKeyCopied ? "已复制" : "复制 API Key"}
+                disabled={actionLoading || !apiKey}
+              >
+                {apiKeyCopied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+              <button
+                className="btn-icon-action"
+                onClick={async () => {
+                  try { await onRegenerateApiKey(); } catch { /* ignore */ }
+                }}
+                data-tooltip="重新生成 API Key"
+                disabled={actionLoading}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Providers (collapsible) */}
+          <div style={{ marginTop: 16 }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 8,
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+              onClick={() => setProvidersExpanded((v) => !v)}
+            >
+              <ChevronDown
+                size={16}
+                style={{
+                  color: "var(--seed-muted)",
+                  transition: "transform 0.15s",
+                  transform: providersExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                }}
+              />
+              <Server size={15} style={{ color: "var(--seed-muted)" }} />
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>提供商</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
+                {providers.length > 0 ? `${providers.length} 个` : ""}
+              </span>
+            </div>
+            {providersExpanded && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {providers.length === 0 ? (
+                  <div className="empty-state" style={{ minHeight: 120, padding: "24px 12px" }}>
+                    <Server size={32} />
+                    <div className="empty-state-text">暂无匹配的供应商</div>
+                    <div className="empty-state-subtext">
+                      请先在「AI 供应商」中添加对应类型的供应商
+                    </div>
+                  </div>
+                ) : (
+                  providers.map((p) => (
+                    <ProviderRow
+                      key={p.id}
+                      provider={p}
+                      onToggle={(en) => onToggleProvider(p.id, group, en)}
+                      onResetCircuitBreaker={() => onResetCircuitBreaker(p.id, group)}
+                      actionLoading={actionLoading}
+                    />
+                  ))
+                )}
               </div>
-            ) : (
-              providers.map((p) => (
-                <ProviderRow
-                  key={p.id}
-                  provider={p}
-                  onToggle={(enabled) => onToggleProvider(p.id, group, enabled)}
-                  onResetCircuitBreaker={() => onResetCircuitBreaker(p.id, group)}
-                  actionLoading={actionLoading}
+            )}
+          </div>
+
+          {/* Model configuration (collapsible) */}
+          <div style={{ marginTop: 16 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 8,
+              }}
+            >
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+                onClick={() => setModelsExpanded((v) => !v)}
+              >
+                <ChevronDown
+                  size={16}
+                  style={{
+                    color: "var(--seed-muted)",
+                    transition: "transform 0.15s",
+                    transform: modelsExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                  }}
                 />
-              ))
+                <Layers size={15} style={{ color: "var(--seed-muted)" }} />
+                <span style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>模型配置</span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
+                  {localModels.length > 0 ? `${localModels.length} 个` : ""}
+                </span>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                className="btn-icon-action"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddFilterText("");
+                  setShowAddDropdown(!showAddDropdown);
+                }}
+                data-tooltip="添加模型"
+                disabled={actionLoading || availableModels.length === 0}
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                className="btn-icon-action"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowResetConfirm(true);
+                }}
+                data-tooltip="重置为供应商模型列表"
+                disabled={actionLoading}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
+            {modelsExpanded && (
+              <>
+                {/* Add model dropdown */}
+                {showAddDropdown && (
+                  <div
+                    ref={addDropdownRef}
+                    style={{ position: "relative", marginBottom: 8 }}
+                  >
+                    <input
+                      className="form-input"
+                      type="text"
+                      autoFocus
+                      placeholder="输入模型名以筛选…"
+                      value={addFilterText}
+                      onChange={(e) => setAddFilterText(e.target.value)}
+                      style={{ width: "100%", fontSize: "var(--text-sm)", boxSizing: "border-box", marginBottom: 6 }}
+                    />
+                    <div
+                      className="app-select-menu"
+                      role="listbox"
+                      style={{ position: "relative", top: 0, left: 0, right: 0 }}
+                    >
+                      {filteredModels.length === 0 ? (
+                        <div className="app-select-empty">无匹配模型</div>
+                      ) : (
+                        filteredModels.map((src) => {
+                          const isAdded = localModels.some((m) => m.id === src.id);
+                          return (
+                            <button
+                              key={src.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isAdded}
+                              className={`app-select-option ${isAdded ? "disabled" : ""}`}
+                              disabled={isAdded}
+                              onClick={() => handleAddModel(src.id)}
+                            >
+                              <span
+                                className="app-select-option-title"
+                                style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}
+                              >
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {src.id}
+                                </span>
+                                {isAdded && (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 2,
+                                      flexShrink: 0,
+                                      fontSize: "var(--text-xs)",
+                                      color: "var(--seed-muted)",
+                                      fontWeight: 400,
+                                    }}
+                                  >
+                                    <Check size={12} /> 已添加
+                                  </span>
+                                )}
+                              </span>
+                              {src.providers.length > 0 && (
+                                <span className="app-select-option-sub">
+                                  来自 {src.providers.join("、")}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+                {/* Reset confirmation */}
+                {showResetConfirm && (
+                  <div
+                    style={{
+                      marginBottom: 8,
+                      padding: "10px 12px",
+                      background: "var(--seed-danger-bg)",
+                      border: "1px solid var(--seed-danger)",
+                      borderRadius: "var(--seed-radius)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: "var(--text-sm)",
+                    }}
+                  >
+                    <AlertCircle size={14} style={{ color: "var(--seed-danger)" }} />
+                    <span style={{ flex: 1, color: "var(--seed-danger)" }}>
+                      确定要重置吗？当前列表将被替换为供应商模型集合。
+                    </span>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleResetConfirm}
+                      disabled={actionLoading}
+                      style={{ fontSize: "var(--text-xs)", padding: "3px 10px" }}
+                    >
+                      确定
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setShowResetConfirm(false)}
+                      disabled={actionLoading}
+                      style={{ fontSize: "var(--text-xs)", padding: "3px 10px" }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
+                {localModels.length === 0 ? (
+                  <div className="empty-state" style={{ minHeight: 80, padding: "16px 12px" }}>
+                    <Layers size={24} />
+                    <div className="empty-state-text">暂无模型</div>
+                    <div className="empty-state-subtext">
+                      点击 + 添加模型，或点击刷新从供应商导入
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {localModels.map((entry, index) => (
+                      <div
+                        key={`${entry.id}-${index}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "8px 12px",
+                          background: "var(--seed-surface)",
+                          border: "1px solid var(--seed-border)",
+                          borderRadius: "var(--seed-radius)",
+                        }}
+                      >
+                        <div
+                          style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, cursor: "pointer" }}
+                          onClick={() => {
+                            navigator.clipboard.writeText(entry.id);
+                            setCopiedModelId(entry.id);
+                            setTimeout(() => setCopiedModelId(null), 2000);
+                          }}
+                        >
+                          <code style={{ fontSize: "var(--text-sm)", color: "var(--seed-primary)" }}>
+                            {entry.id}
+                          </code>
+                          <button
+                            className="btn-icon-action"
+                            data-tooltip={copiedModelId === entry.id ? "已复制" : "复制模型 ID"}
+                            style={{ padding: 2 }}
+                          >
+                            {copiedModelId === entry.id ? <Check size={13} /> : <Copy size={13} />}
+                          </button>
+                          {(providersByModel[entry.id] ?? []).length > 0 && (
+                            <span
+                              style={{
+                                fontSize: "var(--text-xs)",
+                                color: "var(--seed-muted)",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              来自 {providersByModel[entry.id].join("、")}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ color: "var(--seed-muted)", fontSize: "var(--text-sm)" }}>→</span>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value={entry.alias}
+                          onChange={(e) => handleAliasChange(index, e.target.value)}
+                          onBlur={() => handleAliasBlur(index)}
+                          placeholder="别名（可选）"
+                          disabled={actionLoading}
+                          style={{ width: 200, fontSize: "var(--text-sm)" }}
+                        />
+                        <button
+                          className="btn-icon-action"
+                          onClick={() => handleDeleteModel(index)}
+                          data-tooltip="删除"
+                          disabled={actionLoading}
+                          style={{ color: "var(--seed-danger)" }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>

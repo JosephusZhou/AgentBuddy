@@ -35,8 +35,9 @@ pub use circuit_breaker::CircuitBreakerSnapshot;
 pub struct RouteAggregationState {
     /// Server instance (present when running, None when stopped).
     pub server: RwLock<Option<Arc<server::RouteAggregationServer>>>,
-    /// Config snapshot (hot-reloadable for non-structural changes).
-    pub config: RwLock<RouteAggregationConfig>,
+    /// Config snapshot — shared with Axum handlers via AppState so that runtime
+    /// config updates (e.g. toggling a route group) are visible without restart.
+    pub config: Arc<RwLock<RouteAggregationConfig>>,
     /// Provider router (holds circuit breaker state, survives server stop).
     pub provider_router: Arc<provider_router::ProviderRouter>,
 }
@@ -45,7 +46,7 @@ impl RouteAggregationState {
     pub fn new(config: RouteAggregationConfig) -> Self {
         Self {
             server: RwLock::new(None),
-            config: RwLock::new(config),
+            config: Arc::new(RwLock::new(config)),
             provider_router: Arc::new(provider_router::ProviderRouter::new()),
         }
     }

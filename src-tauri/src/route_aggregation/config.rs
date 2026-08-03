@@ -30,6 +30,21 @@ pub struct RouteAggregationConfig {
     pub claude_code_version: String,
     #[serde(default = "default_codex_version")]
     pub codex_version: String,
+    /// API key for the Claude Code route group endpoint authentication.
+    /// Empty string = no authentication required for Claude Code routes.
+    #[serde(default)]
+    pub claude_code_api_key: String,
+    /// API key for the Codex route group endpoint authentication.
+    /// Empty string = no authentication required for Codex routes.
+    #[serde(default)]
+    pub codex_api_key: String,
+    /// Editable model list for Claude Code route group.
+    /// Controls which models appear in /v1/models and their display aliases.
+    #[serde(default)]
+    pub claude_code_models: Vec<super::ModelEntry>,
+    /// Editable model list for Codex route group.
+    #[serde(default)]
+    pub codex_models: Vec<super::ModelEntry>,
 }
 
 fn default_listen_address() -> String {
@@ -83,6 +98,10 @@ impl Default for RouteAggregationConfig {
             cloaking_mode: super::CloakingMode::Auto,
             claude_code_version: default_claude_code_version(),
             codex_version: default_codex_version(),
+            claude_code_api_key: String::new(),
+            codex_api_key: String::new(),
+            claude_code_models: Vec::new(),
+            codex_models: Vec::new(),
         }
     }
 }

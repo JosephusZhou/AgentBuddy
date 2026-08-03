@@ -192,6 +192,30 @@ impl ProviderRouter {
         }
     }
 
+    /// Get (id, name, base_url, api_key) for all enabled providers in a group.
+    /// Used by remote model fetching to call each provider's /v1/models API.
+    pub async fn get_enabled_provider_infos(
+        &self,
+        group: RouteGroup,
+    ) -> Vec<(String, String, String, String)> {
+        let pools = self.pools.read().await;
+        let pool = match pools.get(&group) {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+        pool.iter()
+            .filter(|p| p.enabled)
+            .map(|p| {
+                (
+                    p.id.clone(),
+                    p.name.clone(),
+                    p.base_url.clone(),
+                    p.api_key.clone(),
+                )
+            })
+            .collect()
+    }
+
     /// Get status snapshots for all providers in a group.
     pub async fn get_provider_statuses(&self, group: RouteGroup) -> Vec<ProviderRouteStatus> {
         let pools = self.pools.read().await;

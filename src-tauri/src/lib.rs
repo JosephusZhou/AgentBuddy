@@ -1041,29 +1041,33 @@ async fn update_route_aggregation_config(
 ) -> Result<route_aggregation::RouteAggregationStatus, String> {
     let config = route_aggregation::config::normalize_config(config)?;
     route_aggregation::config::save_config(&config)?;
-    *state.config.write().await = config.clone();
 
-    // If server is running and structural changes were made (group toggles),
-    // we need to restart. For non-structural changes, just update the config snapshot.
+    // Check if listen address/port changed — only that requires a server restart.
+    // Group toggles and other non-structural changes are handled at runtime:
+    // handlers read the shared config on each request.
     let needs_restart = {
-        let server_guard = state.server.read().await;
-        server_guard.is_some()
+        let old = state.config.read().await;
+        let addr_changed = old.listen_address != config.listen_address
+            || old.listen_port != config.listen_port;
+        drop(old);
+        addr_changed && state.server.read().await.is_some()
     };
 
+    // Update the shared config — handlers will see the new values immediately.
+    *state.config.write().await = config.clone();
+
     if needs_restart {
-        // Stop existing server
-        if let Some(mut server) = state.server.write().await.take() {
-            server.stop();
+        // Stop existing server (await full shutdown so port is released)
+        if let Some(server) = state.server.write().await.take() {
+            server.stop().await;
         }
-        // Start with new config if any group is enabled
-        if config.claude_code_enabled || config.codex_enabled {
-            let server = route_aggregation::server::RouteAggregationServer::start(
-                config.clone(),
-                state.provider_router.clone(),
-            )
-            .await?;
-            *state.server.write().await = Some(std::sync::Arc::new(server));
-        }
+        // Restart on the new address/port
+        let server = route_aggregation::server::RouteAggregationServer::start(
+            state.config.clone(),
+            state.provider_router.clone(),
+        )
+        .await?;
+        *state.server.write().await = Some(std::sync::Arc::new(server));
     }
 
     // Refresh provider pools for enabled groups
@@ -1101,7 +1105,7 @@ async fn start_route_aggregation(
     }
 
     let server = route_aggregation::server::RouteAggregationServer::start(
-        config,
+        state.config.clone(),
         state.provider_router.clone(),
     )
     .await?;
@@ -1113,8 +1117,8 @@ async fn start_route_aggregation(
 async fn stop_route_aggregation(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
 ) -> Result<(), String> {
-    if let Some(mut server) = state.server.write().await.take() {
-        server.stop();
+    if let Some(server) = state.server.write().await.take() {
+        server.stop().await;
     }
     Ok(())
 }
@@ -1184,6 +1188,137 @@ async fn get_circuit_breaker_status(
     let group = route_aggregation::RouteGroup::from_str(&group)
         .ok_or_else(|| format!("无效的路由组: {}", group))?;
     Ok(state.provider_router.get_provider_statuses(group).await)
+}
+
+/// Regenerate the API key for a specific route group.
+/// Generates a random 48-char hex string with `sk-` prefix, saves it
+/// to config, and returns the new key.
+#[tauri::command]
+async fn regenerate_route_aggregation_api_key(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    group: String,
+) -> Result<String, String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    use rand::RngCore;
+    let mut bytes = [0u8; 24]; // 24 bytes → 48 hex chars
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let api_key = format!("sk-{}", hex);
+
+    let mut config = state.config.write().await;
+    match group {
+        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_api_key = api_key.clone(),
+        route_aggregation::RouteGroup::Codex => config.codex_api_key = api_key.clone(),
+    }
+    route_aggregation::config::save_config(&config)?;
+    Ok(api_key)
+}
+
+/// Update the model list for a specific route group.
+/// Each entry has an id (model ID) and an optional alias.
+#[tauri::command]
+async fn update_route_aggregation_models(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    group: String,
+    models: Vec<route_aggregation::ModelEntry>,
+) -> Result<(), String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    let mut config = state.config.write().await;
+    match group {
+        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_models = models,
+        route_aggregation::RouteGroup::Codex => config.codex_models = models,
+    }
+    route_aggregation::config::save_config(&config)?;
+    Ok(())
+}
+
+/// Fetch model IDs from all enabled providers' remote /v1/models APIs.
+/// Used by the frontend for the "add model" dropdown.
+#[tauri::command]
+async fn get_route_aggregation_models(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    group: String,
+) -> Result<Vec<route_aggregation::ModelSource>, String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    let provider_infos = state.provider_router.get_enabled_provider_infos(group).await;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // model_id -> names of providers that serve it (a model can come from several providers)
+        let mut model_providers: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for (id, name, base_url, api_key) in &provider_infos {
+            let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
+            match claude_env::fetch_remote_models(base_url.clone(), key) {
+                Ok(result) => {
+                    eprintln!("[route-aggregation] fetched {} models from {}", result.model_ids.len(), name);
+                    for model_id in result.model_ids {
+                        model_providers
+                            .entry(model_id)
+                            .or_default()
+                            .push(name.clone());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[route-aggregation] failed to fetch models from {} ({}): {}", name, id, e);
+                }
+            }
+        }
+        let sources = model_providers
+            .into_iter()
+            .map(|(id, providers)| route_aggregation::ModelSource { id, providers })
+            .collect();
+        Ok(sources)
+    })
+    .await
+    .map_err(|e| format!("获取模型列表任务失败: {e}"))?
+}
+
+/// Reset the model list for a specific route group by fetching from
+/// all enabled providers' remote /v1/models APIs. Returns the new model list.
+#[tauri::command]
+async fn reset_route_aggregation_models(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    group: String,
+) -> Result<Vec<route_aggregation::ModelEntry>, String> {
+    let group = route_aggregation::RouteGroup::from_str(&group)
+        .ok_or_else(|| format!("无效的路由组: {}", group))?;
+    let provider_infos = state.provider_router.get_enabled_provider_infos(group).await;
+
+    let model_ids = tauri::async_runtime::spawn_blocking(move || {
+        let mut model_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (id, name, base_url, api_key) in &provider_infos {
+            let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
+            match claude_env::fetch_remote_models(base_url.clone(), key) {
+                Ok(result) => {
+                    eprintln!("[route-aggregation] fetched {} models from {}", result.model_ids.len(), name);
+                    for model_id in result.model_ids {
+                        model_set.insert(model_id);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[route-aggregation] failed to fetch models from {} ({}): {}", name, id, e);
+                }
+            }
+        }
+        Ok::<_, String>(model_set.into_iter().collect::<Vec<String>>())
+    })
+    .await
+    .map_err(|e| format!("重置模型列表任务失败: {e}"))??;
+
+    let entries: Vec<route_aggregation::ModelEntry> = model_ids
+        .into_iter()
+        .map(|id| route_aggregation::ModelEntry { id, alias: String::new() })
+        .collect();
+    let mut config = state.config.write().await;
+    match group {
+        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_models = entries.clone(),
+        route_aggregation::RouteGroup::Codex => config.codex_models = entries.clone(),
+    }
+    route_aggregation::config::save_config(&config)?;
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -1411,6 +1546,10 @@ pub fn run() {
             reorder_provider_routes,
             reset_circuit_breaker,
             get_circuit_breaker_status,
+            regenerate_route_aggregation_api_key,
+            update_route_aggregation_models,
+            get_route_aggregation_models,
+            reset_route_aggregation_models,
         ])
         .setup(|_app| {
             use tauri::Manager;
@@ -1426,8 +1565,30 @@ pub fn run() {
             }
 
             // Route aggregation: load config and register global state.
-            let ra_config = route_aggregation::config::load_config()
+            let mut ra_config = route_aggregation::config::load_config()
                 .unwrap_or_default();
+            // Auto-generate per-group API keys if empty (first time opening route aggregation).
+            {
+                use rand::RngCore;
+                let generate_key = || {
+                    let mut bytes = [0u8; 24];
+                    rand::thread_rng().fill_bytes(&mut bytes);
+                    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+                    format!("sk-{}", hex)
+                };
+                let mut changed = false;
+                if ra_config.claude_code_api_key.is_empty() {
+                    ra_config.claude_code_api_key = generate_key();
+                    changed = true;
+                }
+                if ra_config.codex_api_key.is_empty() {
+                    ra_config.codex_api_key = generate_key();
+                    changed = true;
+                }
+                if changed {
+                    let _ = route_aggregation::config::save_config(&ra_config);
+                }
+            }
             let ra_state = route_aggregation::RouteAggregationState::new(ra_config.clone());
             _app.manage(ra_state);
 
@@ -1458,7 +1619,7 @@ pub fn run() {
                             .await;
                     }
                     match route_aggregation::server::RouteAggregationServer::start(
-                        config,
+                        state.config.clone(),
                         state.provider_router.clone(),
                     )
                     .await
