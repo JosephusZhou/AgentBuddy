@@ -1,7 +1,7 @@
 //! Codex client simulation — main cloaking logic.
 //! Reference: CLIProxyAPI codex_executor_request.go
 
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::http::HeaderMap;
 
 use super::codex_headers;
 use crate::route_aggregation::config::RouteAggregationConfig;

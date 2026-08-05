@@ -1162,6 +1162,7 @@ pub fn upsert_provider_route_toggle(
 }
 
 /// Delete toggle rows for a provider that no longer exists.
+#[allow(dead_code)]
 pub fn delete_provider_route_toggles(provider_id: &str) -> Result<(), String> {
     let conn = get_connection()?;
     conn.execute(

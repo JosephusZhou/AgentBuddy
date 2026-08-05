@@ -1,3 +1,7 @@
+// Suppress `unexpected cfg` warnings from the `objc` 0.2 crate macros
+// (msg_send!, class! use `cfg!(feature = "cargo-clippy")` which is outdated).
+#![allow(unexpected_cfgs)]
+
 mod agent_open;
 mod agents;
 mod ai_provider;
@@ -1147,7 +1151,7 @@ async fn toggle_provider_route(
         db::upsert_provider_route_toggle(&provider_id, group, enabled, 0)
     })
     .await
-    .map_err(|e| format!("切换供应商路由开关任务失败: {e}"))?;
+    .map_err(|e| format!("切换供应商路由开关任务失败: {e}"))??;
     // Refresh in-memory provider pool so status reflects the new toggle state
     state.provider_router.refresh_pool(group).await?;
     Ok(())
@@ -1163,7 +1167,7 @@ async fn reorder_provider_routes(
         .ok_or_else(|| format!("无效的路由组: {}", group))?;
     tauri::async_runtime::spawn_blocking(move || db::reorder_provider_route_toggles(&ids, group))
         .await
-        .map_err(|e| format!("供应商路由排序任务失败: {e}"))?;
+        .map_err(|e| format!("供应商路由排序任务失败: {e}"))??;
     state.provider_router.refresh_pool(group).await?;
     Ok(())
 }

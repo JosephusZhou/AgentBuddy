@@ -121,6 +121,7 @@ pub struct RouteProvider {
 
 /// Result of a forwarding attempt for one provider.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ForwardAttempt {
     pub provider_id: String,
     pub provider_name: String,

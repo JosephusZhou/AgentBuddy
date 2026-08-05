@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 /// Stable device profile for Claude Code client simulation.
 /// Cached for a TTL period to ensure consistency across requests.
+#[allow(dead_code)]
 pub struct DeviceProfile {
     pub user_agent: String,
     pub package_version: String,
@@ -27,12 +28,15 @@ impl Default for DeviceProfile {
 }
 
 /// Global cached device profile.
+#[allow(dead_code)]
 static CACHED_PROFILE: Mutex<Option<(DeviceProfile, Instant)>> = Mutex::new(None);
 
 /// TTL for the cached profile: 7 days.
+#[allow(dead_code)]
 const PROFILE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Get the stable device profile, creating or refreshing if needed.
+#[allow(dead_code)]
 pub fn get_stable_profile(version: &str) -> DeviceProfile {
     let mut cached = CACHED_PROFILE.lock().unwrap();
     if let Some((profile, created)) = cached.as_ref() {
@@ -54,6 +58,7 @@ pub fn get_stable_profile(version: &str) -> DeviceProfile {
 }
 
 impl DeviceProfile {
+    #[allow(dead_code)]
     fn clone_profile(&self) -> Self {
         Self {
             user_agent: self.user_agent.clone(),

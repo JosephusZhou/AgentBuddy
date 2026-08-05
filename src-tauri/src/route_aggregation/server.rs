@@ -95,6 +95,7 @@ impl RouteAggregationServer {
         );
     }
 
+    #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
         self.shutdown_tx.lock().unwrap().is_some()
     }

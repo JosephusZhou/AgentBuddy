@@ -65,6 +65,7 @@ impl CircuitBreaker {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn state(&self) -> CircuitState {
         *self.state.lock().await
     }
@@ -196,10 +197,12 @@ pub struct CircuitBreakerSnapshot {
 }
 
 /// Manager holding all circuit breakers keyed by (provider_id, group).
+#[allow(dead_code)]
 pub struct CircuitBreakerManager {
     breakers: Mutex<HashMap<(String, RouteGroup), CircuitBreaker>>,
 }
 
+#[allow(dead_code)]
 impl CircuitBreakerManager {
     pub fn new() -> Self {
         Self {
@@ -226,7 +229,7 @@ impl CircuitBreakerManager {
         let mut result = Vec::new();
         for pid in provider_ids {
             let key = (pid.clone(), group);
-            if let Some(b) = map.get(&key) {
+            if map.get(&key).is_some() {
                 // We need to get the snapshot synchronously — but CircuitBreaker.snapshot is async.
                 // For now, return a placeholder; the real snapshot is obtained via ProviderRouter.
                 // This synchronous path is only used for quick checks.
@@ -244,6 +247,7 @@ impl CircuitBreakerManager {
     }
 }
 
+#[allow(dead_code)]
 pub struct CircuitBreakerRef;
 
 impl Default for CircuitBreakerManager {

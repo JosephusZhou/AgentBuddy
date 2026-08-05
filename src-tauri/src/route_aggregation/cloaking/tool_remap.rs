@@ -64,6 +64,7 @@ pub fn remap_tool_names_in_request(body: &mut serde_json::Value) {
 }
 
 /// Reverse-remap tool names in the response body back to original names.
+#[allow(dead_code)]
 pub fn reverse_remap_tool_names_in_response(body: &mut serde_json::Value) {
     // Build reverse map
     let reverse: std::collections::HashMap<&str, &str> = OAUTH_TOOL_RENAME_MAP

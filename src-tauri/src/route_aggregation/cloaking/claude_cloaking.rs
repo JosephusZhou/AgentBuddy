@@ -138,7 +138,7 @@ fn inject_system_reminder_into_first_message(body: &mut serde_json::Value, syste
             *content = serde_json::Value::String(new_content);
         } else if let Some(content_arr) = content.as_array_mut() {
             // If content is an array, prepend a text block
-            let mut new_block = serde_json::json!({
+            let new_block = serde_json::json!({
                 "type": "text",
                 "text": reminder
             });
