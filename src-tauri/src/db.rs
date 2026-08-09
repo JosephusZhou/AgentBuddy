@@ -1274,6 +1274,7 @@ mod tests {
 
     #[test]
     fn skill_meta_upsert_and_load() {
+        let _home_guard = crate::config::lock_home_for_test();
         let id = format!(
             "__agentbuddy_test_skill_{}",
             SystemTime::now()

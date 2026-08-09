@@ -13,7 +13,9 @@ mod crypto;
 mod db;
 mod http_client;
 mod mcp_config;
+mod agent_model_config;
 mod opencode_config;
+mod pi_model_config;
 mod platform;
 mod project_config;
 mod route_aggregation;
@@ -756,61 +758,101 @@ async fn fetch_claude_env_remote_models(
         .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
 }
 
-/* ===== OpenCode provider / model config ===== */
+/* ===== Agent 通用模型配置（OpenCode / Pi / Oh-My-Pi）===== */
 
 #[tauri::command]
-async fn get_opencode_config() -> Result<opencode_config::OpencodeConfigView, String> {
-    opencode_config::get_config()
+async fn get_agent_model_config(
+    agent: String,
+) -> Result<opencode_config::AgentModelConfigView, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::get_config(),
+        a => pi_model_config::get_config(a),
+    }
 }
 
 #[tauri::command]
-async fn set_opencode_defaults(
+async fn set_agent_model_defaults(
+    agent: String,
     payload: opencode_config::SetDefaultsPayload,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::set_defaults(payload)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::set_defaults(payload),
+        a => pi_model_config::set_defaults(a, payload),
+    }
 }
 
 #[tauri::command]
-async fn upsert_opencode_provider(
+async fn upsert_agent_provider(
+    agent: String,
     payload: opencode_config::UpsertProviderPayload,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::upsert_provider(payload)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::upsert_provider(payload),
+        a => pi_model_config::upsert_provider(a, payload),
+    }
 }
 
 #[tauri::command]
-async fn delete_opencode_provider(
+async fn delete_agent_provider(
+    agent: String,
     provider_id: String,
     delete_auth: bool,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::delete_provider(provider_id, delete_auth)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::delete_provider(provider_id, delete_auth),
+        a => pi_model_config::delete_provider(a, provider_id, delete_auth),
+    }
 }
 
 #[tauri::command]
-async fn upsert_opencode_model(
+async fn upsert_agent_model(
+    agent: String,
     payload: opencode_config::UpsertModelPayload,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::upsert_model(payload)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::upsert_model(payload),
+        a => pi_model_config::upsert_model(a, payload),
+    }
 }
 
 #[tauri::command]
-async fn delete_opencode_model(
+async fn delete_agent_model(
+    agent: String,
     provider_id: String,
     model_id: String,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::delete_model(provider_id, model_id)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::delete_model(provider_id, model_id),
+        a => pi_model_config::delete_model(a, provider_id, model_id),
+    }
 }
 
 #[tauri::command]
-async fn get_opencode_provider_secret(provider_id: String) -> Result<String, String> {
-    opencode_config::get_provider_secret(provider_id)
+async fn get_agent_provider_secret(agent: String, provider_id: String) -> Result<String, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::get_provider_secret(provider_id),
+        a => pi_model_config::get_provider_secret(a, provider_id),
+    }
 }
 
 #[tauri::command]
-async fn set_opencode_provider_secret(
+async fn set_agent_provider_secret(
+    agent: String,
     provider_id: String,
     api_key: String,
-) -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::set_provider_secret(provider_id, api_key)
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::set_provider_secret(provider_id, api_key),
+        a => pi_model_config::set_provider_secret(a, provider_id, api_key),
+    }
 }
 
 #[tauri::command]
@@ -823,7 +865,7 @@ async fn fetch_models_dev_catalog(
 }
 
 #[tauri::command]
-async fn probe_opencode_models_endpoint(
+async fn probe_models_endpoint(
     base_url: String,
 ) -> Result<opencode_config::ProbeModelsResult, String> {
     tauri::async_runtime::spawn_blocking(move || opencode_config::probe_models_endpoint(base_url))
@@ -832,8 +874,14 @@ async fn probe_opencode_models_endpoint(
 }
 
 #[tauri::command]
-async fn reveal_opencode_config() -> Result<opencode_config::OpencodeActionResult, String> {
-    opencode_config::reveal_config()
+async fn reveal_agent_model_config(
+    agent: String,
+) -> Result<opencode_config::AgentActionResult, String> {
+    use agent_model_config::ModelConfigAgent;
+    match ModelConfigAgent::parse(&agent)? {
+        ModelConfigAgent::Opencode => opencode_config::reveal_config(),
+        a => pi_model_config::reveal_config(a),
+    }
 }
 
 /* ===== Codex multi-env (CODEX_HOME) ===== */
@@ -1507,17 +1555,17 @@ pub fn run() {
             sync_codex_env_skills,
             sync_all_codex_env_mcp,
             fetch_codex_env_remote_models,
-            get_opencode_config,
-            set_opencode_defaults,
-            upsert_opencode_provider,
-            delete_opencode_provider,
-            upsert_opencode_model,
-            delete_opencode_model,
-            get_opencode_provider_secret,
-            set_opencode_provider_secret,
+            get_agent_model_config,
+            set_agent_model_defaults,
+            upsert_agent_provider,
+            delete_agent_provider,
+            upsert_agent_model,
+            delete_agent_model,
+            get_agent_provider_secret,
+            set_agent_provider_secret,
             fetch_models_dev_catalog,
-            probe_opencode_models_endpoint,
-            reveal_opencode_config,
+            probe_models_endpoint,
+            reveal_agent_model_config,
             pick_project_folder,
             check_project_config_exists,
             init_project_config,

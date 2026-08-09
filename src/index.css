@@ -4336,6 +4336,42 @@ a[href]:focus-visible {
   border-top: 1px solid var(--seed-border-subtle);
 }
 
+.oc-agent-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  margin-left: 12px;
+  background: var(--seed-surface-alt);
+  border: 1px solid var(--seed-border-subtle);
+  border-radius: var(--seed-radius-md);
+}
+.oc-agent-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--seed-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 12px;
+  border-radius: calc(var(--seed-radius-md) - 2px);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.oc-agent-tab:hover:not(:disabled) {
+  background: var(--seed-hover);
+  color: var(--seed-fg);
+}
+.oc-agent-tab.active {
+  background: var(--seed-active-bg);
+  color: var(--seed-active-fg);
+}
+.oc-agent-tab:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .oc-defaults-bar {
   display: flex;
   align-items: flex-start;

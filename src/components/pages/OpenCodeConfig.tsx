@@ -4,14 +4,15 @@ import { Toast } from "@/components/Toast";
 import { CheckGlyph, useOverlayDismiss } from "../ui";
 
 import type {
+  AgentModelConfigView,
+  AgentModelView,
+  AgentProviderView,
+  AgentVariantView,
   CatalogModelSummary,
   CatalogProvider,
   CatalogReasoningOption,
+  ModelConfigAgentId,
   ModelsDevCatalog,
-  OpencodeConfigView,
-  OpencodeModelView,
-  OpencodeProviderView,
-  OpencodeVariantView,
 } from "./opencode-config/types";
 import { EFFORT_PRESETS, MODALITY_OPTIONS } from "./opencode-config/types";
 import {
@@ -318,7 +319,7 @@ type ModelForm = {
   thinkingBudgetTokens: string;
   reasoningEffort: string;
   textVerbosity: string;
-  variants: OpencodeVariantView[];
+  variants: AgentVariantView[];
   extraOptionsRaw: string;
   isNew: boolean;
   showAdvanced: boolean;
@@ -382,6 +383,45 @@ function toggleModality(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
 }
 
+/* ===== Agent 切换 ===== */
+
+const AGENT_TABS: { id: ModelConfigAgentId; label: string; notInstalledHint: string }[] = [
+  {
+    id: "opencode",
+    label: "OpenCode",
+    notInstalledHint:
+      "请先安装 OpenCode CLI 或 App（例如 opencode 命令），安装后重新打开本页即可管理提供商与模型配置。",
+  },
+  {
+    id: "pi",
+    label: "Pi",
+    notInstalledHint:
+      "请先安装 Pi CLI（例如 npm install -g @earendil-works/pi-coding-agent，或 pi.dev/install.sh），安装后重新打开本页即可管理提供商与模型配置。",
+  },
+  {
+    id: "oh-my-pi",
+    label: "Oh-My-Pi",
+    notInstalledHint:
+      "请先安装 Oh-My-Pi（例如 brew install can1357/tap/omp，或 omp.sh/install），安装后重新打开本页即可管理提供商与模型配置。",
+  },
+];
+
+function agentLabel(id: ModelConfigAgentId): string {
+  return AGENT_TABS.find((t) => t.id === id)?.label ?? id;
+}
+
+/** API Key 写入的 auth.json 路径提示（按 agent）。 */
+function authFileHint(id: ModelConfigAgentId): string {
+  switch (id) {
+    case "pi":
+      return "~/.pi/agent/auth.json";
+    case "oh-my-pi":
+      return "~/.omp/agent/auth.json";
+    default:
+      return "~/.local/share/opencode/auth.json";
+  }
+}
+
 /* ===== Subcomponents ===== */
 
 function ModalityBadges({
@@ -418,7 +458,7 @@ function ModelChip({
   onDelete,
 }: {
   providerId: string;
-  model: OpencodeModelView;
+  model: AgentModelView;
   isDefault: boolean;
   isSmall: boolean;
   onEdit: () => void;
@@ -465,8 +505,10 @@ function ModelChip({
 
 /* ===== Page ===== */
 
-export default function OpenCodeConfig() {
-  const [view, setView] = useState<OpencodeConfigView | null>(null);
+export default function ModelConfig() {
+  const [agent, setAgent] = useState<ModelConfigAgentId>("opencode");
+  const isOpenCode = agent === "opencode";
+  const [view, setView] = useState<AgentModelConfigView | null>(null);
   const [catalog, setCatalog] = useState<ModelsDevCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -479,11 +521,11 @@ export default function OpenCodeConfig() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const [deleteProvider, setDeleteProvider] = useState<OpencodeProviderView | null>(null);
+  const [deleteProvider, setDeleteProvider] = useState<AgentProviderView | null>(null);
   const [deleteAuthToo, setDeleteAuthToo] = useState(true);
   const [deleteModelTarget, setDeleteModelTarget] = useState<{
     providerId: string;
-    model: OpencodeModelView;
+    model: AgentModelView;
   } | null>(null);
 
   const [defaultsOpen, setDefaultsOpen] = useState(false);
@@ -521,17 +563,17 @@ export default function OpenCodeConfig() {
   );
   const defaultsDismiss = useOverlayDismiss(() => !busy && setDefaultsOpen(false), !busy);
 
-  const applyView = useCallback((next: OpencodeConfigView) => {
+  const applyView = useCallback((next: AgentModelConfigView) => {
     setView(next);
   }, []);
 
   const loadConfig = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const next = await invokeGetConfig();
+      const next = await invokeGetConfig(agent);
       applyView(next);
       if (!quiet) {
-        if (next.opencodeInstalled && next.warnings.length > 0) {
+        if (next.installed && next.warnings.length > 0) {
           setStatusMsg(next.warnings[0]);
         }
       }
@@ -542,7 +584,7 @@ export default function OpenCodeConfig() {
     } finally {
       setLoading(false);
     }
-  }, [applyView, setStatusMsg]);
+  }, [agent, applyView, setStatusMsg]);
 
   const loadCatalog = useCallback(
     async (force = false) => {
@@ -564,12 +606,26 @@ export default function OpenCodeConfig() {
   useEffect(() => {
     (async () => {
       const next = await loadConfig();
-      // Models.dev catalog only matters after OpenCode is installed.
-      if (next?.opencodeInstalled) {
+      // Models.dev catalog only matters after the agent is installed.
+      if (next?.installed) {
         void loadCatalog(false);
       }
     })();
   }, [loadConfig, loadCatalog]);
+
+  /** 切换 agent：收起所有弹窗并重新加载。 */
+  const switchAgent = (next: ModelConfigAgentId) => {
+    if (next === agent || busy) return;
+    setProviderForm(null);
+    setModelForm(null);
+    setDeleteProvider(null);
+    setDeleteModelTarget(null);
+    setDefaultsOpen(false);
+    setCatalogPickOpen(false);
+    setFormError("");
+    setView(null);
+    setAgent(next);
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -629,7 +685,7 @@ export default function OpenCodeConfig() {
     setTimeout(() => providerIdRef.current?.focus(), 80);
   };
 
-  const openEditProvider = async (p: OpencodeProviderView) => {
+  const openEditProvider = async (p: AgentProviderView) => {
     setFormError("");
     setShowApiKey(false);
     const form: ProviderForm = {
@@ -637,7 +693,7 @@ export default function OpenCodeConfig() {
       previousId: p.id,
       name: p.name ?? "",
       npm: p.npm ?? "",
-      baseUrl: p.baseUrl ?? p.api ?? "",
+      baseUrl: p.baseUrl ?? "",
       timeout: p.timeout != null ? String(p.timeout) : "",
       chunkTimeout: p.chunkTimeout != null ? String(p.chunkTimeout) : "",
       whitelist: tagsToCsv(p.whitelist),
@@ -649,7 +705,7 @@ export default function OpenCodeConfig() {
     setProviderForm(form);
     if (p.hasApiKey) {
       try {
-        const secret = await invokeGetSecret(p.id);
+        const secret = await invokeGetSecret(agent, p.id);
         setProviderForm((prev) =>
           prev
             ? { ...prev, apiKey: secret, apiKeyTouched: false }
@@ -670,7 +726,7 @@ export default function OpenCodeConfig() {
     setTimeout(() => modelIdRef.current?.focus(), 80);
   };
 
-  const openEditModel = (providerId: string, model: OpencodeModelView) => {
+  const openEditModel = (providerId: string, model: AgentModelView) => {
     setFormError("");
     setCatalogPickOpen(false);
     setModelForm({
@@ -731,27 +787,29 @@ export default function OpenCodeConfig() {
     setBusy(true);
     setFormError("");
     try {
-      const payload: Parameters<typeof invokeUpsertProvider>[0] = {
+      const payload: Parameters<typeof invokeUpsertProvider>[1] = {
         id,
         previousId: providerForm.isNew ? null : providerForm.previousId,
         name: providerForm.name.trim() || null,
-        npm: providerForm.npm.trim() || null,
         baseUrl: providerForm.baseUrl.trim() || null,
-        timeout: (() => {
+      };
+      if (isOpenCode) {
+        payload.npm = providerForm.npm.trim() || null;
+        payload.timeout = (() => {
           const n = parseOptionalNumber(providerForm.timeout);
           return n == null ? null : Math.round(n);
-        })(),
-        chunkTimeout: (() => {
+        })();
+        payload.chunkTimeout = (() => {
           const n = parseOptionalNumber(providerForm.chunkTimeout);
           return n == null ? null : Math.round(n);
-        })(),
-        whitelist: parseCsvTags(providerForm.whitelist),
-        blacklist: parseCsvTags(providerForm.blacklist),
-      };
+        })();
+        payload.whitelist = parseCsvTags(providerForm.whitelist);
+        payload.blacklist = parseCsvTags(providerForm.blacklist);
+      }
       if (providerForm.apiKeyTouched) {
         payload.apiKey = providerForm.apiKey;
       }
-      const res = await invokeUpsertProvider(payload);
+      const res = await invokeUpsertProvider(agent, payload);
       if (res.view) applyView(res.view);
       else await loadConfig(true);
       setProviderForm(null);
@@ -793,7 +851,7 @@ export default function OpenCodeConfig() {
     setBusy(true);
     setFormError("");
     try {
-      const res = await invokeUpsertModel({
+      const res = await invokeUpsertModel(agent, {
         providerId: modelForm.providerId,
         id,
         previousId: modelForm.isNew ? null : modelForm.previousId,
@@ -804,16 +862,19 @@ export default function OpenCodeConfig() {
         modalitiesInput: modelForm.modalitiesInput,
         modalitiesOutput: modelForm.modalitiesOutput,
         reasoning: modelForm.reasoning,
-        toolCall: modelForm.toolCall,
-        attachment: modelForm.attachment,
-        thinkingType: modelForm.thinkingType.trim() || null,
-        thinkingBudgetTokens: (() => {
-          const n = parseOptionalNumber(modelForm.thinkingBudgetTokens);
-          return n == null ? null : Math.max(0, Math.round(n));
-        })(),
-        reasoningEffort: modelForm.reasoningEffort.trim() || null,
-        textVerbosity: modelForm.textVerbosity.trim() || null,
-        variants: modelForm.variants,
+        // 以下为 OpenCode 专属字段；Pi 家族后端会忽略
+        toolCall: isOpenCode ? modelForm.toolCall : null,
+        attachment: isOpenCode ? modelForm.attachment : null,
+        thinkingType: isOpenCode ? modelForm.thinkingType.trim() || null : null,
+        thinkingBudgetTokens: isOpenCode
+          ? (() => {
+              const n = parseOptionalNumber(modelForm.thinkingBudgetTokens);
+              return n == null ? null : Math.max(0, Math.round(n));
+            })()
+          : null,
+        reasoningEffort: isOpenCode ? modelForm.reasoningEffort.trim() || null : null,
+        textVerbosity: isOpenCode ? modelForm.textVerbosity.trim() || null : null,
+        variants: isOpenCode ? modelForm.variants : null,
         extraOptions,
         replaceExtraOptions: extraOptions != null,
       });
@@ -832,7 +893,7 @@ export default function OpenCodeConfig() {
     if (!deleteProvider) return;
     setBusy(true);
     try {
-      const res = await invokeDeleteProvider(deleteProvider.id, deleteAuthToo);
+      const res = await invokeDeleteProvider(agent, deleteProvider.id, deleteAuthToo);
       if (res.view) applyView(res.view);
       else await loadConfig(true);
       setDeleteProvider(null);
@@ -849,6 +910,7 @@ export default function OpenCodeConfig() {
     setBusy(true);
     try {
       const res = await invokeDeleteModel(
+        agent,
         deleteModelTarget.providerId,
         deleteModelTarget.model.id,
       );
@@ -873,9 +935,10 @@ export default function OpenCodeConfig() {
   const saveDefaults = async () => {
     setBusy(true);
     try {
-      const res = await invokeSetDefaults({
+      const res = await invokeSetDefaults(agent, {
         model: draftModel.trim(),
-        smallModel: draftSmallModel.trim(),
+        // Pi 家族不支持 small model：不传即不改动
+        smallModel: view?.smallModelSupported ? draftSmallModel.trim() : undefined,
       });
       if (res.view) applyView(res.view);
       else await loadConfig(true);
@@ -890,7 +953,7 @@ export default function OpenCodeConfig() {
 
   const reveal = async () => {
     try {
-      const res = await invokeRevealConfig();
+      const res = await invokeRevealConfig(agent);
       setStatusMsg(res.message || "已在 Finder 中显示");
     } catch (e) {
       setStatusMsg(`打开失败: ${e}`);
@@ -910,7 +973,22 @@ export default function OpenCodeConfig() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">OpenCode 配置</h1>
+          <h1 className="content-title">模型配置</h1>
+          <div className="oc-agent-tabs" role="tablist" aria-label="选择 Agent">
+            {AGENT_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={agent === t.id}
+                className={`oc-agent-tab ${agent === t.id ? "active" : ""}`}
+                onClick={() => switchAgent(t.id)}
+                disabled={busy}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="header-actions">
             <button
               type="button"
@@ -918,7 +996,7 @@ export default function OpenCodeConfig() {
               data-tooltip="刷新"
               onClick={() => {
                 void loadConfig();
-                if (view?.opencodeInstalled) void loadCatalog(false);
+                if (view?.installed) void loadCatalog(false);
               }}
               disabled={loading || busy}
             >
@@ -928,10 +1006,10 @@ export default function OpenCodeConfig() {
               type="button"
               className="action-btn"
               data-tooltip={
-                view && !view.opencodeInstalled ? "请先安装 OpenCode" : "在 Finder 中显示"
+                view && !view.installed ? `请先安装 ${agentLabel(agent)}` : "在 Finder 中显示"
               }
               onClick={() => void reveal()}
-              disabled={busy || !!(view && !view.opencodeInstalled)}
+              disabled={busy || !!(view && !view.installed)}
             >
               <IconFolderOpen />
             </button>
@@ -939,10 +1017,10 @@ export default function OpenCodeConfig() {
               type="button"
               className="action-btn"
               data-tooltip={
-                view && !view.opencodeInstalled ? "请先安装 OpenCode" : "添加提供商"
+                view && !view.installed ? `请先安装 ${agentLabel(agent)}` : "添加提供商"
               }
               onClick={openAddProvider}
-              disabled={busy || !!(view && !view.opencodeInstalled)}
+              disabled={busy || !!(view && !view.installed)}
             >
               <IconPlus />
             </button>
@@ -953,30 +1031,46 @@ export default function OpenCodeConfig() {
       <div className="content-body">
         <Toast message={statusMsg} />
 
-        {view && view.opencodeInstalled && (
+        {view && view.installed && (
           <div className="oc-defaults-bar">
             <div className="oc-defaults-main">
               <div className="oc-defaults-row">
                 <span className="oc-defaults-label">默认模型</span>
-                <code className="oc-defaults-value">{view.model || "未设置"}</code>
+                {view.defaultsSupported ? (
+                  <code className="oc-defaults-value">{view.model || "未设置"}</code>
+                ) : (
+                  <span className="oc-defaults-value">
+                    请在 omp 内使用 /model 或 omp config 命令管理
+                  </span>
+                )}
               </div>
-              <div className="oc-defaults-row">
-                <span className="oc-defaults-label">small_model</span>
-                <code className="oc-defaults-value">{view.smallModel || "未设置"}</code>
-              </div>
+              {view.smallModelSupported && (
+                <div className="oc-defaults-row">
+                  <span className="oc-defaults-label">small_model</span>
+                  <code className="oc-defaults-value">{view.smallModel || "未设置"}</code>
+                </div>
+              )}
               <div className="oc-defaults-path" title={view.configPath}>
                 {view.configPath}
                 {view.isJsonc ? " · jsonc" : ""}
                 {!view.configExists ? " · 尚未创建" : ""}
               </div>
             </div>
-            <button type="button" className="btn btn-secondary" onClick={openDefaults} disabled={busy}>
-              设置默认模型
-            </button>
+            {view.defaultsSupported && (
+              <button type="button" className="btn btn-secondary" onClick={openDefaults} disabled={busy}>
+                设置默认模型
+              </button>
+            )}
           </div>
         )}
 
-        {view?.opencodeInstalled && (
+        {agent === "pi" && view?.installed && (
+          <div className="oc-warning">
+            Pi 不内置 MCP：写入 ~/.pi/agent/mcp.json 后，需安装 pi-mcp-adapter 扩展才能生效。
+          </div>
+        )}
+
+        {view?.installed && (
           <div className={`oc-catalog-bar ${catalogError ? "is-error" : catalog ? "is-ok" : ""}`}>
             <span>
               {catalogLoading
@@ -1000,7 +1094,7 @@ export default function OpenCodeConfig() {
           </div>
         )}
 
-        {view?.opencodeInstalled && view.warnings?.length ? (
+        {view?.installed && view.warnings?.length ? (
           <div className="oc-warning">
             {view.warnings.map((w) => (
               <div key={w}>{w}</div>
@@ -1012,12 +1106,12 @@ export default function OpenCodeConfig() {
           <div className="empty-state">
             <div className="empty-state-text">加载中…</div>
           </div>
-        ) : view && !view.opencodeInstalled ? (
+        ) : view && !view.installed ? (
           <div className="empty-state">
             <IconEmpty />
-            <div className="empty-state-text">未检测到 OpenCode</div>
+            <div className="empty-state-text">未检测到 {agentLabel(agent)}</div>
             <div className="empty-state-subtext">
-              请先安装 OpenCode CLI 或 App（例如 <code>opencode</code> 命令），安装后重新打开本页即可管理提供商与模型配置。
+              {AGENT_TABS.find((t) => t.id === agent)?.notInstalledHint}
             </div>
           </div>
         ) : !view || view.providers.length === 0 ? (
@@ -1172,39 +1266,41 @@ export default function OpenCodeConfig() {
                     disabled={busy}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label" id="oc-npm-label" htmlFor="oc-npm">
-                    npm 包
-                  </label>
-                  <AppSelect
-                    id="oc-npm"
-                    labelId="oc-npm-label"
-                    value={
-                      NPM_PRESETS.some((x) => x.value === providerForm.npm)
-                        ? providerForm.npm
-                        : "__custom__"
-                    }
-                    options={NPM_SELECT_OPTIONS}
-                    onChange={(v) => {
-                      // 「自定义…」只切换展示态，不改写当前 npm 值，由下方输入框编辑
-                      if (v === "__custom__") return;
-                      setProviderForm({ ...providerForm, npm: v });
-                    }}
-                    disabled={busy}
-                    placeholder="选择 npm 包"
-                  />
-                  <input
-                    className="form-input"
-                    style={{ marginTop: 8 }}
-                    placeholder="@ai-sdk/…"
-                    value={providerForm.npm}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, npm: e.target.value })
-                    }
-                    disabled={busy}
-                    spellCheck={false}
-                  />
-                </div>
+                {isOpenCode && (
+                  <div className="form-group">
+                    <label className="form-label" id="oc-npm-label" htmlFor="oc-npm">
+                      npm 包
+                    </label>
+                    <AppSelect
+                      id="oc-npm"
+                      labelId="oc-npm-label"
+                      value={
+                        NPM_PRESETS.some((x) => x.value === providerForm.npm)
+                          ? providerForm.npm
+                          : "__custom__"
+                      }
+                      options={NPM_SELECT_OPTIONS}
+                      onChange={(v) => {
+                        // 「自定义…」只切换展示态，不改写当前 npm 值，由下方输入框编辑
+                        if (v === "__custom__") return;
+                        setProviderForm({ ...providerForm, npm: v });
+                      }}
+                      disabled={busy}
+                      placeholder="选择 npm 包"
+                    />
+                    <input
+                      className="form-input"
+                      style={{ marginTop: 8 }}
+                      placeholder="@ai-sdk/…"
+                      value={providerForm.npm}
+                      onChange={(e) =>
+                        setProviderForm({ ...providerForm, npm: e.target.value })
+                      }
+                      disabled={busy}
+                      spellCheck={false}
+                    />
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="oc-base">
                     Base URL
@@ -1221,68 +1317,74 @@ export default function OpenCodeConfig() {
                     spellCheck={false}
                   />
                 </div>
-                <div className="oc-form-grid">
+                {isOpenCode && (
+                  <div className="oc-form-grid">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="oc-timeout">
+                        timeout (ms)
+                      </label>
+                      <input
+                        id="oc-timeout"
+                        className="form-input"
+                        inputMode="numeric"
+                        placeholder="默认"
+                        value={providerForm.timeout}
+                        onChange={(e) =>
+                          setProviderForm({ ...providerForm, timeout: e.target.value })
+                        }
+                        disabled={busy}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="oc-chunk">
+                        chunkTimeout (ms)
+                      </label>
+                      <input
+                        id="oc-chunk"
+                        className="form-input"
+                        inputMode="numeric"
+                        placeholder="默认"
+                        value={providerForm.chunkTimeout}
+                        onChange={(e) =>
+                          setProviderForm({ ...providerForm, chunkTimeout: e.target.value })
+                        }
+                        disabled={busy}
+                      />
+                    </div>
+                  </div>
+                )}
+                {isOpenCode && (
                   <div className="form-group">
-                    <label className="form-label" htmlFor="oc-timeout">
-                      timeout (ms)
+                    <label className="form-label" htmlFor="oc-wl">
+                      whitelist（逗号分隔）
                     </label>
                     <input
-                      id="oc-timeout"
+                      id="oc-wl"
                       className="form-input"
-                      inputMode="numeric"
-                      placeholder="默认"
-                      value={providerForm.timeout}
+                      value={providerForm.whitelist}
                       onChange={(e) =>
-                        setProviderForm({ ...providerForm, timeout: e.target.value })
+                        setProviderForm({ ...providerForm, whitelist: e.target.value })
                       }
                       disabled={busy}
                     />
                   </div>
+                )}
+                {isOpenCode && (
                   <div className="form-group">
-                    <label className="form-label" htmlFor="oc-chunk">
-                      chunkTimeout (ms)
+                    <label className="form-label" htmlFor="oc-bl">
+                      blacklist（逗号分隔）
                     </label>
                     <input
-                      id="oc-chunk"
+                      id="oc-bl"
                       className="form-input"
-                      inputMode="numeric"
-                      placeholder="默认"
-                      value={providerForm.chunkTimeout}
+                      value={providerForm.blacklist}
                       onChange={(e) =>
-                        setProviderForm({ ...providerForm, chunkTimeout: e.target.value })
+                        setProviderForm({ ...providerForm, blacklist: e.target.value })
                       }
                       disabled={busy}
                     />
                   </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="oc-wl">
-                    whitelist（逗号分隔）
-                  </label>
-                  <input
-                    id="oc-wl"
-                    className="form-input"
-                    value={providerForm.whitelist}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, whitelist: e.target.value })
-                    }
-                    disabled={busy}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="oc-bl">
-                    blacklist（逗号分隔）
-                  </label>
-                  <input
-                    id="oc-bl"
-                    className="form-input"
-                    value={providerForm.blacklist}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, blacklist: e.target.value })
-                    }
-                    disabled={busy}
-                  />
-                </div>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="oc-key">
                     API Key
@@ -1294,7 +1396,7 @@ export default function OpenCodeConfig() {
                       type={showApiKey ? "text" : "password"}
                       placeholder={
                         providerForm.isNew
-                          ? "可选，写入 ~/.local/share/opencode/auth.json"
+                          ? `可选，写入 ${authFileHint(agent)}`
                           : "留空且不改动；清空并保存可删除密钥"
                       }
                       value={providerForm.apiKey}
@@ -1549,11 +1651,14 @@ export default function OpenCodeConfig() {
                   <label className="form-label">能力标记</label>
                   <div className="oc-modality-checks">
                     {(
-                      [
-                        ["reasoning", "reasoning"],
-                        ["toolCall", "tool_call"],
-                        ["attachment", "attachment"],
-                      ] as const
+                      // toolCall/attachment 为 OpenCode 专属字段；Pi 家族仅建模 reasoning
+                      (isOpenCode
+                        ? ([
+                            ["reasoning", "reasoning"],
+                            ["toolCall", "tool_call"],
+                            ["attachment", "attachment"],
+                          ] as const)
+                        : ([["reasoning", "reasoning"]] as const))
                     ).map(([key, label]) => {
                       const val = modelForm[key];
                       return (
@@ -1578,9 +1683,10 @@ export default function OpenCodeConfig() {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">思考 / Reasoning</label>
-                  {(hasEffort || !catalogReasoning.length) && (
+                {isOpenCode && (
+                  <div className="form-group">
+                    <label className="form-label">思考 / Reasoning</label>
+                    {(hasEffort || !catalogReasoning.length) && (
                     <div className="form-group">
                       <label
                         className="form-label form-label-optional"
@@ -1676,7 +1782,8 @@ export default function OpenCodeConfig() {
                       </div>
                     </div>
                   )}
-                </div>
+                  </div>
+                )}
 
                 <div className="form-group">
                   <button

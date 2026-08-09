@@ -435,6 +435,7 @@ mod tests {
 
     #[test]
     fn provider_crud_and_secret_roundtrip() {
+        let _home_guard = crate::config::lock_home_for_test();
         let id = unique_id("crud");
 
         // Create
@@ -475,6 +476,7 @@ mod tests {
 
     #[test]
     fn openai_type_clears_tier_models() {
+        let _home_guard = crate::config::lock_home_for_test();
         let id = unique_id("openai");
         let mut pl = payload(&id, Some("sk-openai"));
         pl.provider_type = "openai".to_string();
@@ -487,6 +489,7 @@ mod tests {
 
     #[test]
     fn universal_type_derives_openai_url_and_keeps_both_models() {
+        let _home_guard = crate::config::lock_home_for_test();
         let id = unique_id("universal");
         let mut pl = payload(&id, Some("sk-universal"));
         pl.provider_type = "universal".to_string();
@@ -516,6 +519,7 @@ mod tests {
 
     #[test]
     fn create_requires_api_key_and_valid_url() {
+        let _home_guard = crate::config::lock_home_for_test();
         let id = unique_id("validate");
         assert!(upsert_provider(payload(&id, None)).is_err());
 

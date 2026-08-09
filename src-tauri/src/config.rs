@@ -48,6 +48,18 @@ fn default_remote_dir() -> String {
     "AgentBuddy".to_string()
 }
 
+/// 跨模块共享的测试锁：凡交换 HOME 环境变量、或依赖 HOME 派生路径
+///（含 `~/.agentbuddy` 应用数据目录与各 agent 配置）的测试都须持锁，
+/// 避免并行测试相互踩踏（dirs::home_dir 受 HOME 环境变量影响）。
+#[cfg(test)]
+pub static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 获取 HOME 测试锁（供各模块单测使用）。
+#[cfg(test)]
+pub fn lock_home_for_test() -> std::sync::MutexGuard<'static, ()> {
+    TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl Default for BackupSettings {
     fn default() -> Self {
         Self {

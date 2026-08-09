@@ -631,13 +631,19 @@ fn build_generic_agent_unit(
                 }
             }
         }
-        // OpenCode auth
-        if matches!(spec.name, "opencode") {
-            if let Some(auth) = opencode_auth_path(spec.name) {
+        // OpenCode auth（配置目录外）与 Pi 家族 auth/模型文件
+        if matches!(spec.name, "opencode" | "pi" | "oh-my-pi") {
+            if let Some(auth) = agent_auth_path(spec.name) {
                 if auth.is_file() {
                     bytes = bytes.saturating_add(file_size(&auth));
                     paths.push(display_path(&auth));
                     secrets = true;
+                }
+            }
+            for f in agent_model_files(spec.name) {
+                if f.is_file() {
+                    bytes = bytes.saturating_add(file_size(&f));
+                    paths.push(display_path(&f));
                 }
             }
         }
@@ -666,7 +672,7 @@ fn build_generic_agent_unit(
         kind: "agent".into(),
         available,
         selected_by_default: is_found && available,
-        contains_secrets: secrets || matches!(spec.name, "opencode" | "codex"),
+        contains_secrets: secrets || matches!(spec.name, "opencode" | "codex" | "pi" | "oh-my-pi"),
         estimated_bytes: bytes,
         path_summary: paths.into_iter().take(3).collect::<Vec<_>>().join(" · "),
         warnings: if is_found {
@@ -789,13 +795,46 @@ fn resolve_sub2api_root(settings: &BackupSettings) -> Option<PathBuf> {
     None
 }
 
-fn opencode_auth_path(agent_name: &str) -> Option<PathBuf> {
+/// 配置目录之外的 auth.json：OpenCode 存于 `~/.local/share/opencode`；
+/// Pi / Oh-My-Pi 的 auth 在各自 agent 目录内，但仍统一登记以便清单与打包。
+fn agent_auth_path(agent_name: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let share = match agent_name {
-        "opencode" => "opencode",
+    Some(match agent_name {
+        "opencode" => home.join(".local/share/opencode/auth.json"),
+        "pi" => home.join(".pi/agent/auth.json"),
+        "oh-my-pi" => home.join(".omp/agent/auth.json"),
         _ => return None,
+    })
+}
+
+/// Pi 家族的供应商/默认模型文件（不随 MCP 文件打包，需单独纳入备份）。
+fn agent_model_files(agent_name: &str) -> Vec<PathBuf> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
     };
-    Some(home.join(".local/share").join(share).join("auth.json"))
+    match agent_name {
+        "pi" => vec![
+            home.join(".pi/agent/models.json"),
+            home.join(".pi/agent/settings.json"),
+        ],
+        "oh-my-pi" => {
+            let base = home.join(".omp/agent");
+            let yml = base.join("models.yml");
+            let yaml = base.join("models.yaml");
+            let legacy = base.join("models.json");
+            let models = if yml.exists() {
+                yml
+            } else if yaml.exists() {
+                yaml
+            } else if legacy.exists() {
+                legacy
+            } else {
+                yml
+            };
+            vec![models]
+        }
+        _ => Vec::new(),
+    }
 }
 
 // ===== Size helpers =====
@@ -2117,9 +2156,9 @@ fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Ve
         }
     }
 
-    // OpenCode config dir extras
-    if matches!(spec.name, "opencode") {
-        if let Some(auth) = opencode_auth_path(spec.name) {
+    // OpenCode / Pi 家族配置目录外的补充文件（auth、供应商模型配置）
+    if matches!(spec.name, "opencode" | "pi" | "oh-my-pi") {
+        if let Some(auth) = agent_auth_path(spec.name) {
             push_file(
                 out,
                 &auth,
@@ -2129,10 +2168,19 @@ fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Ve
                 warnings,
             );
         }
-        // also pack full opencode.json if different from mcp resolve
-        if let Ok(cfg) = mcp_config::resolve_mcp_path(spec.name) {
-            // already added as mcp file name
-            let _ = cfg;
+        for f in agent_model_files(spec.name) {
+            let fname = f
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("models");
+            push_file(
+                out,
+                &f,
+                &format!("{}/{}", archive_root, fname),
+                &unit,
+                false,
+                warnings,
+            );
         }
     }
 

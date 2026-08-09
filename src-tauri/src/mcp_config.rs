@@ -1834,6 +1834,7 @@ mod tests {
 
     #[test]
     fn apply_remove_all_sniffed_agents() {
+        let _home_guard = crate::config::lock_home_for_test();
         let title = "__agentbuddy_all_smoke__";
         let agents = vec![
             "codex".into(),
@@ -1843,9 +1844,11 @@ mod tests {
             "antigravity".into(),
             "codebuddy-cn".into(),
             "workbuddy".into(),
+            "pi".into(),
+            "oh-my-pi".into(),
         ];
         let r = apply_mcp_to_agents(&draft_stdio(title), &agents);
-        assert_eq!(r.results.len(), 7, "{:?}", r.results);
+        assert_eq!(r.results.len(), 9, "{:?}", r.results);
         assert!(r.all_ok, "{:?}", r.results);
 
         // dialect-specific checks
@@ -1865,6 +1868,18 @@ mod tests {
 
         let codex = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
         assert!(codex.contains(title));
+
+        // Pi / Oh-My-Pi: standard mcpServers under agent dir
+        let pi: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".pi/agent/mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(pi["mcpServers"][title]["command"].is_string());
+        let omp: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".omp/agent/mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(omp["mcpServers"][title]["command"].is_string());
 
         // http mapping for gemini
         let title2 = "__agentbuddy_http_smoke__";
@@ -1889,10 +1904,22 @@ mod tests {
         )
         .unwrap();
         assert!(oc2["mcp"].get(title).is_none());
+
+        let pi2: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".pi/agent/mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(pi2["mcpServers"].get(title).is_none());
+        let omp2: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".omp/agent/mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(omp2["mcpServers"].get(title).is_none());
     }
 
     #[test]
     fn sniff_mcp_servers_runs() {
+        let _home_guard = crate::config::lock_home_for_test();
         let r = sniff_mcp_servers();
         // should not panic; servers list is vec
         assert!(r.scanned_agents >= 1);
@@ -1901,6 +1928,7 @@ mod tests {
 
     #[test]
     fn claude_json_preserves_other_keys() {
+        let _home_guard = crate::config::lock_home_for_test();
         let path = dirs::home_dir().unwrap().join(".claude.json");
         let before: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();

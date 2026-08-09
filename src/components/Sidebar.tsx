@@ -73,7 +73,7 @@ const MENU_GROUPS: MenuGroupDef[] = [
     items: [
       { view: "claude-env", label: "Claude环境", icon: Layers },
       { view: "codex-env", label: "Codex环境", icon: SquareTerminal },
-      { view: "opencode-config", label: "OpenCode配置", icon: Braces },
+      { view: "model-config", label: "模型配置", icon: Braces },
       { view: "project-config", label: "项目AI配置", icon: FolderCog },
     ],
   },

@@ -1,10 +1,11 @@
-//! OpenCode 全局配置：提供商 / 模型可视化读写。
+//! OpenCode 全局配置：提供商 / 模型可视化读写（通用模型配置框架的 OpenCode 后端）。
 //!
 //! - 配置：`~/.config/opencode/opencode.json(c)`（与 MCP 路径解析一致）
 //! - 密钥：`~/.local/share/opencode/auth.json`（`{ providerId: { type, key } }`）
 //! - 目录：Models.dev `https://models.dev/api.json`（精简后返回，进程内缓存）
 //!
-//! 列表 DTO **永不**回传明文 API Key；编辑时用 `get_opencode_provider_secret` 按需拉取。
+//! 列表 DTO **永不**回传明文 API Key；编辑时用 `get_provider_secret` 按需拉取。
+//! Pi / Oh-My-Pi 后端见 `pi_model_config`，共用本模块的 DTO 与 IO helper。
 
 use crate::platform;
 use serde::{Deserialize, Serialize};
@@ -23,24 +24,30 @@ const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpencodeConfigView {
+pub struct AgentModelConfigView {
+    /// agent 标识：opencode | pi | oh-my-pi
+    pub agent: String,
     pub config_path: String,
     pub config_exists: bool,
     pub is_jsonc: bool,
-    /// Whether OpenCode App/CLI is installed (same rule as agent sniff).
+    /// Whether the agent App/CLI is installed (same rule as agent sniff).
     /// Config dir alone is **not** enough. UI treats this as the highest-priority gate.
-    pub opencode_installed: bool,
+    pub installed: bool,
+    /// 该 agent 是否支持可视化编辑默认模型。
+    pub defaults_supported: bool,
+    /// 该 agent 是否支持 small model（如 OpenCode 的 small_model）。
+    pub small_model_supported: bool,
     pub model: Option<String>,
     pub small_model: Option<String>,
     pub enabled_providers: Option<Vec<String>>,
     pub disabled_providers: Option<Vec<String>>,
-    pub providers: Vec<OpencodeProviderView>,
+    pub providers: Vec<AgentProviderView>,
     pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpencodeProviderView {
+pub struct AgentProviderView {
     pub id: String,
     pub name: Option<String>,
     pub npm: Option<String>,
@@ -54,12 +61,12 @@ pub struct OpencodeProviderView {
     pub chunk_timeout: Option<i64>,
     pub whitelist: Vec<String>,
     pub blacklist: Vec<String>,
-    pub models: Vec<OpencodeModelView>,
+    pub models: Vec<AgentModelView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpencodeModelView {
+pub struct AgentModelView {
     pub id: String,
     pub name: Option<String>,
     pub limit_context: Option<f64>,
@@ -75,14 +82,14 @@ pub struct OpencodeModelView {
     pub thinking_budget_tokens: Option<u64>,
     pub reasoning_effort: Option<String>,
     pub text_verbosity: Option<String>,
-    pub variants: Vec<OpencodeVariantView>,
+    pub variants: Vec<AgentVariantView>,
     /// 未建模的 options 字段（原样透传，序列化为 JSON 对象）。
     pub extra_options: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpencodeVariantView {
+pub struct AgentVariantView {
     pub id: String,
     pub disabled: Option<bool>,
     pub reasoning_effort: Option<String>,
@@ -135,10 +142,10 @@ pub struct CatalogModelSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpencodeActionResult {
+pub struct AgentActionResult {
     pub ok: bool,
     pub message: String,
-    pub view: Option<OpencodeConfigView>,
+    pub view: Option<AgentModelConfigView>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,7 +198,7 @@ pub struct UpsertModelPayload {
     pub thinking_budget_tokens: Option<u64>,
     pub reasoning_effort: Option<String>,
     pub text_verbosity: Option<String>,
-    pub variants: Option<Vec<OpencodeVariantView>>,
+    pub variants: Option<Vec<AgentVariantView>>,
     /// 合并进 options 的额外字段；传空对象表示不改 extra
     pub extra_options: Option<Map<String, Value>>,
     /// true 时用 extra_options 整体替换 options 中未知字段（删除未列出的）
@@ -231,13 +238,13 @@ fn auth_path() -> Result<PathBuf, String> {
     Ok(home_dir()?.join(".local/share/opencode/auth.json"))
 }
 
-fn display_path(path: &Path) -> String {
+pub(crate) fn display_path(path: &Path) -> String {
     platform::display_path(&path.to_string_lossy())
 }
 
 /* ===== IO helpers ===== */
 
-fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("无效路径: {}", path.display()))?;
@@ -269,13 +276,13 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     }
 }
 
-fn atomic_write_secret(path: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn atomic_write_secret(path: &Path, content: &str) -> Result<(), String> {
     atomic_write(path, content)?;
     platform::set_owner_only_file(path);
     Ok(())
 }
 
-fn read_json_value(path: &Path) -> Result<Value, String> {
+pub(crate) fn read_json_value(path: &Path) -> Result<Value, String> {
     let raw = fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     json5::from_str(&raw).map_err(|e| format!("解析 {} 失败: {e}", path.display()))
 }
@@ -309,25 +316,32 @@ fn load_or_empty_config() -> Result<(PathBuf, bool, Value, bool), String> {
 }
 
 fn load_auth() -> Result<Map<String, Value>, String> {
-    let path = auth_path()?;
-    if !path.exists() {
-        return Ok(Map::new());
-    }
-    let v = read_json_value(&path)?;
-    Ok(v.as_object().cloned().unwrap_or_default())
+    load_auth_file(&auth_path()?)
 }
 
 fn save_auth(map: &Map<String, Value>) -> Result<(), String> {
-    let path = auth_path()?;
+    save_auth_file(&auth_path()?, map)
+}
+
+/// 读取任意 auth.json：`{ providerId: { type, key } }`；不存在时返回空映射。
+pub(crate) fn load_auth_file(path: &Path) -> Result<Map<String, Value>, String> {
+    if !path.exists() {
+        return Ok(Map::new());
+    }
+    let v = read_json_value(path)?;
+    Ok(v.as_object().cloned().unwrap_or_default())
+}
+
+pub(crate) fn save_auth_file(path: &Path, map: &Map<String, Value>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建 auth 目录失败: {e}"))?;
     }
     let text = serde_json::to_string_pretty(&Value::Object(map.clone()))
         .map_err(|e| format!("序列化 auth 失败: {e}"))?;
-    atomic_write_secret(&path, &format!("{text}\n"))
+    atomic_write_secret(path, &format!("{text}\n"))
 }
 
-fn auth_has_key(auth: &Map<String, Value>, provider_id: &str) -> bool {
+pub(crate) fn auth_has_key(auth: &Map<String, Value>, provider_id: &str) -> bool {
     auth.get(provider_id)
         .and_then(|v| v.get("key"))
         .and_then(|k| k.as_str())
@@ -335,7 +349,7 @@ fn auth_has_key(auth: &Map<String, Value>, provider_id: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn auth_get_key(auth: &Map<String, Value>, provider_id: &str) -> Option<String> {
+pub(crate) fn auth_get_key(auth: &Map<String, Value>, provider_id: &str) -> Option<String> {
     auth.get(provider_id)
         .and_then(|v| v.get("key"))
         .and_then(|k| k.as_str())
@@ -359,7 +373,7 @@ fn config_get_key(provider: &Value) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn api_key_source(in_auth: bool, in_config: bool) -> String {
+pub(crate) fn api_key_source(in_auth: bool, in_config: bool) -> String {
     match (in_auth, in_config) {
         (true, true) => "both".into(),
         (true, false) => "auth".into(),
@@ -370,14 +384,14 @@ fn api_key_source(in_auth: bool, in_config: bool) -> String {
 
 /* ===== Parse view ===== */
 
-fn str_opt(v: &Value, key: &str) -> Option<String> {
+pub(crate) fn str_opt(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
 }
 
-fn string_list(v: &Value, key: &str) -> Vec<String> {
+pub(crate) fn string_list(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(|x| x.as_array())
         .map(|arr| {
@@ -388,7 +402,7 @@ fn string_list(v: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn f64_opt(v: &Value, key: &str) -> Option<f64> {
+pub(crate) fn f64_opt(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(|x| x.as_f64()).or_else(|| {
         v.get(key)
             .and_then(|x| x.as_i64())
@@ -396,7 +410,7 @@ fn f64_opt(v: &Value, key: &str) -> Option<f64> {
     })
 }
 
-fn bool_opt(v: &Value, key: &str) -> Option<bool> {
+pub(crate) fn bool_opt(v: &Value, key: &str) -> Option<bool> {
     v.get(key).and_then(|x| x.as_bool())
 }
 
@@ -408,7 +422,7 @@ fn i64_timeout_opt(options: &Value, key: &str) -> Option<i64> {
     }
 }
 
-fn parse_model(id: &str, raw: &Value) -> OpencodeModelView {
+fn parse_model(id: &str, raw: &Value) -> AgentModelView {
     let limit = raw.get("limit").cloned().unwrap_or(Value::Null);
     let modalities = raw.get("modalities").cloned().unwrap_or(Value::Null);
     let options = raw
@@ -468,7 +482,7 @@ fn parse_model(id: &str, raw: &Value) -> OpencodeModelView {
                             }
                         }
                     }
-                    OpencodeVariantView {
+                    AgentVariantView {
                         id: vid.clone(),
                         disabled,
                         reasoning_effort,
@@ -479,7 +493,7 @@ fn parse_model(id: &str, raw: &Value) -> OpencodeModelView {
         })
         .unwrap_or_default();
 
-    OpencodeModelView {
+    AgentModelView {
         id: id.to_string(),
         name: str_opt(raw, "name"),
         limit_context: f64_opt(&limit, "context"),
@@ -500,7 +514,7 @@ fn parse_model(id: &str, raw: &Value) -> OpencodeModelView {
     }
 }
 
-fn parse_provider(id: &str, raw: &Value, auth: &Map<String, Value>) -> OpencodeProviderView {
+fn parse_provider(id: &str, raw: &Value, auth: &Map<String, Value>) -> AgentProviderView {
     let options = raw.get("options").cloned().unwrap_or(Value::Null);
     let in_auth = auth_has_key(auth, id);
     let in_config = config_has_key(raw);
@@ -518,7 +532,7 @@ fn parse_provider(id: &str, raw: &Value, auth: &Map<String, Value>) -> OpencodeP
         })
         .unwrap_or_default();
 
-    OpencodeProviderView {
+    AgentProviderView {
         id: id.to_string(),
         name: str_opt(raw, "name"),
         npm: str_opt(raw, "npm"),
@@ -562,11 +576,11 @@ fn top_string_list(root: &Value, key: &str) -> Option<Vec<String>> {
 
 /* ===== Public API ===== */
 
-pub fn get_config() -> Result<OpencodeConfigView, String> {
+pub fn get_config() -> Result<AgentModelConfigView, String> {
     // Highest priority for the UI: is OpenCode App/CLI actually installed?
     // Config dir alone (e.g. leftover ~/.config/opencode) is not enough —
     // same rule as agent sniff (`found` requires install paths).
-    let opencode_installed = crate::sniff::is_agent_installed("opencode");
+    let installed = crate::sniff::is_agent_installed("opencode");
 
     let (path, is_jsonc, root, exists) = load_or_empty_config()?;
     let auth = load_auth().unwrap_or_default();
@@ -579,12 +593,15 @@ pub fn get_config() -> Result<OpencodeConfigView, String> {
 
     // Not installed → still return path metadata so empty-state copy can mention it,
     // but never surface provider inventory (UI shows not-installed empty state).
-    if !opencode_installed {
-        return Ok(OpencodeConfigView {
+    if !installed {
+        return Ok(AgentModelConfigView {
+            agent: "opencode".into(),
             config_path: display_path(&path),
             config_exists: exists,
             is_jsonc,
-            opencode_installed: false,
+            installed: false,
+            defaults_supported: true,
+            small_model_supported: true,
             model: None,
             small_model: None,
             enabled_providers: None,
@@ -607,11 +624,14 @@ pub fn get_config() -> Result<OpencodeConfigView, String> {
         })
         .unwrap_or_default();
 
-    Ok(OpencodeConfigView {
+    Ok(AgentModelConfigView {
+        agent: "opencode".into(),
         config_path: display_path(&path),
         config_exists: exists,
         is_jsonc,
-        opencode_installed: true,
+        installed: true,
+        defaults_supported: true,
+        small_model_supported: true,
         model: root
             .get("model")
             .and_then(|m| m.as_str())
@@ -656,7 +676,7 @@ fn apply_optional_list_key(root: &mut Value, key: &str, value: &Option<Option<Ve
     }
 }
 
-pub fn set_defaults(payload: SetDefaultsPayload) -> Result<OpencodeActionResult, String> {
+pub fn set_defaults(payload: SetDefaultsPayload) -> Result<AgentActionResult, String> {
     let (path, _, mut root, _) = load_or_empty_config()?;
     if !root.is_object() {
         root = json!({});
@@ -667,7 +687,7 @@ pub fn set_defaults(payload: SetDefaultsPayload) -> Result<OpencodeActionResult,
     apply_optional_list_key(&mut root, "enabled_providers", &payload.enabled_providers);
     apply_optional_list_key(&mut root, "disabled_providers", &payload.disabled_providers);
     write_json_value(&path, &root)?;
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: "默认模型已更新".into(),
         view: Some(get_config()?),
@@ -712,7 +732,7 @@ fn ensure_options_mut(provider: &mut Map<String, Value>) -> &mut Map<String, Val
     opts.as_object_mut().unwrap()
 }
 
-pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<OpencodeActionResult, String> {
+pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResult, String> {
     let id = payload.id.trim().to_string();
     if id.is_empty() {
         return Err("提供商 ID 不能为空".into());
@@ -845,14 +865,14 @@ pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<OpencodeActionR
     }
 
     write_json_value(&path, &root)?;
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: format!("提供商 `{id}` 已保存"),
         view: Some(get_config()?),
     })
 }
 
-pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<OpencodeActionResult, String> {
+pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<AgentActionResult, String> {
     let id = provider_id.trim().to_string();
     if id.is_empty() {
         return Err("提供商 ID 不能为空".into());
@@ -877,7 +897,7 @@ pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<Opencod
         auth.remove(&id);
         save_auth(&auth)?;
     }
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: format!("已删除提供商 `{id}`"),
         view: Some(get_config()?),
@@ -896,7 +916,7 @@ fn set_limit_field(limit: &mut Map<String, Value>, key: &str, value: Option<f64>
     }
 }
 
-pub fn upsert_model(payload: UpsertModelPayload) -> Result<OpencodeActionResult, String> {
+pub fn upsert_model(payload: UpsertModelPayload) -> Result<AgentActionResult, String> {
     let pid = payload.provider_id.trim().to_string();
     let mid = payload.id.trim().to_string();
     if pid.is_empty() || mid.is_empty() {
@@ -1161,14 +1181,14 @@ pub fn upsert_model(payload: UpsertModelPayload) -> Result<OpencodeActionResult,
     }
 
     write_json_value(&path, &root)?;
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: format!("模型 `{pid}/{mid}` 已保存"),
         view: Some(get_config()?),
     })
 }
 
-pub fn delete_model(provider_id: String, model_id: String) -> Result<OpencodeActionResult, String> {
+pub fn delete_model(provider_id: String, model_id: String) -> Result<AgentActionResult, String> {
     let pid = provider_id.trim().to_string();
     let mid = model_id.trim().to_string();
     let (path, _, mut root, exists) = load_or_empty_config()?;
@@ -1189,7 +1209,7 @@ pub fn delete_model(provider_id: String, model_id: String) -> Result<OpencodeAct
         return Err(format!("未找到模型 `{pid}/{mid}`"));
     }
     write_json_value(&path, &root)?;
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: format!("已删除模型 `{pid}/{mid}`"),
         view: Some(get_config()?),
@@ -1215,7 +1235,7 @@ pub fn get_provider_secret(provider_id: String) -> Result<String, String> {
     Ok(String::new())
 }
 
-pub fn set_provider_secret(provider_id: String, api_key: String) -> Result<OpencodeActionResult, String> {
+pub fn set_provider_secret(provider_id: String, api_key: String) -> Result<AgentActionResult, String> {
     upsert_provider(UpsertProviderPayload {
         id: provider_id,
         previous_id: None,
@@ -1232,13 +1252,13 @@ pub fn set_provider_secret(provider_id: String, api_key: String) -> Result<Openc
     })
 }
 
-pub fn reveal_config() -> Result<OpencodeActionResult, String> {
+pub fn reveal_config() -> Result<AgentActionResult, String> {
     let (path, _, _, exists) = load_or_empty_config()?;
     if !exists {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
             platform::open_path(parent).map_err(|e| format!("打开目录失败: {e}"))?;
-            return Ok(OpencodeActionResult {
+            return Ok(AgentActionResult {
                 ok: true,
                 message: format!("已打开目录 {}", display_path(parent)),
                 view: None,
@@ -1247,7 +1267,7 @@ pub fn reveal_config() -> Result<OpencodeActionResult, String> {
         return Err("配置文件尚不存在".into());
     }
     platform::reveal_path(&path).map_err(|e| format!("打开文件管理器失败: {e}"))?;
-    Ok(OpencodeActionResult {
+    Ok(AgentActionResult {
         ok: true,
         message: format!("已在文件管理器中显示 {}", display_path(&path)),
         view: None,
@@ -1499,10 +1519,8 @@ pub fn probe_models_endpoint(base_url: String) -> Result<ProbeModelsResult, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Serialize tests that touch HOME via env — avoid races.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    // 触碰 HOME 环境的测试串行化：使用跨模块共享锁（见 config::TEST_HOME_LOCK）。
 
     struct TempHome {
         path: PathBuf,
@@ -1511,7 +1529,7 @@ mod tests {
 
     impl TempHome {
         fn new() -> Self {
-            let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::config::lock_home_for_test();
             let path = std::env::temp_dir().join(format!(
                 "agentbuddy-oc-test-{}-{}",
                 std::process::id(),

@@ -3,7 +3,7 @@ import Sidebar from "./components/Sidebar";
 import AgentSniff from "./components/pages/AgentSniff";
 import AiProviders from "./components/pages/AiProviders";
 import BackupManage from "./components/pages/BackupManage";
-import OpenCodeConfig from "./components/pages/OpenCodeConfig";
+import ModelConfig from "./components/pages/OpenCodeConfig";
 import ProjectConfig from "./components/pages/ProjectConfig";
 import SkillsManage from "./components/pages/SkillsManage";
 import McpManage from "./components/pages/McpManage";
@@ -19,7 +19,7 @@ import { useGlobalModalA11y } from "./components/ui";
 export type MainView =
   | "agent-sniff"
   | "ai-providers"
-  | "opencode-config"
+  | "model-config"
   | "project-config"
   | "skills-manage"
   | "mcp-manage"
@@ -94,7 +94,7 @@ export default function App() {
       <main className="main-content">
         {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
         {activeView === "ai-providers" && <AiProviders />}
-        {activeView === "opencode-config" && <OpenCodeConfig />}
+        {activeView === "model-config" && <ModelConfig />}
         {activeView === "project-config" && <ProjectConfig />}
         {activeView === "skills-manage" && <SkillsManage />}
         {activeView === "mcp-manage" && <McpManage />}

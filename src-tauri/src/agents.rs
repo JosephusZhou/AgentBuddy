@@ -292,4 +292,50 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
+    // 9. Pi（badlogic/pi-mono，CLI-only）
+    // MCP 非内置：社区标准 pi-mcp-adapter 扩展读取 `~/.pi/agent/mcp.json`（标准 mcpServers）。
+    AgentSpec {
+        name: "pi",
+        display_name: "Pi",
+        icon: "Pi",
+        bin_paths: &[
+            "~/.local/bin/pi",
+            "/usr/local/bin/pi",
+            "/opt/homebrew/bin/pi",
+        ],
+        search_names: &["pi"],
+        config_paths: &["~/.pi"],
+        scan_app_support: false,
+        mcp: McpSpec {
+            dialect: McpDialect::JsonMcpServers,
+            path: McpPath::Fixed(".pi/agent/mcp.json"),
+            jsonc: false,
+        },
+        skills_roots: &["~/.pi/agent/skills"],
+        skills_supported: true,
+        shared_root: None,
+    },
+    // 10. Oh-My-Pi（can1357/oh-my-pi，CLI `omp`，Pi 的全功能 fork）
+    AgentSpec {
+        name: "oh-my-pi",
+        display_name: "Oh-My-Pi",
+        icon: "Om",
+        bin_paths: &[
+            "~/.bun/bin/omp",
+            "~/.local/bin/omp",
+            "/usr/local/bin/omp",
+            "/opt/homebrew/bin/omp",
+        ],
+        search_names: &["omp"],
+        config_paths: &["~/.omp"],
+        scan_app_support: false,
+        mcp: McpSpec {
+            dialect: McpDialect::JsonMcpServers,
+            path: McpPath::Fixed(".omp/agent/mcp.json"),
+            jsonc: false,
+        },
+        skills_roots: &["~/.omp/agent/skills"],
+        skills_supported: true,
+        shared_root: None,
+    },
 ];

@@ -1,13 +1,16 @@
-/** OpenCode 配置页类型（与 Rust DTO camelCase 对齐）。 */
+/** 通用模型配置页的共享类型（OpenCode / Pi / Oh-My-Pi）。 */
 
-export interface OpencodeVariantView {
+/** 支持可视化模型配置的 agent 标识。 */
+export type ModelConfigAgentId = "opencode" | "pi" | "oh-my-pi";
+
+export interface AgentVariantView {
   id: string;
   disabled?: boolean | null;
   reasoningEffort?: string | null;
   extra: Record<string, unknown>;
 }
 
-export interface OpencodeModelView {
+export interface AgentModelView {
   id: string;
   name?: string | null;
   limitContext?: number | null;
@@ -23,11 +26,11 @@ export interface OpencodeModelView {
   thinkingBudgetTokens?: number | null;
   reasoningEffort?: string | null;
   textVerbosity?: string | null;
-  variants: OpencodeVariantView[];
+  variants: AgentVariantView[];
   extraOptions: Record<string, unknown>;
 }
 
-export interface OpencodeProviderView {
+export interface AgentProviderView {
   id: string;
   name?: string | null;
   npm?: string | null;
@@ -41,27 +44,33 @@ export interface OpencodeProviderView {
   chunkTimeout?: number | null;
   whitelist: string[];
   blacklist: string[];
-  models: OpencodeModelView[];
+  models: AgentModelView[];
 }
 
-export interface OpencodeConfigView {
+export interface AgentModelConfigView {
+  /** opencode | pi | oh-my-pi */
+  agent: ModelConfigAgentId;
   configPath: string;
   configExists: boolean;
   isJsonc: boolean;
-  /** OpenCode App/CLI 是否已安装（与 agent sniff 同规则；仅配置目录不算）。 */
-  opencodeInstalled: boolean;
+  /** Agent App/CLI 是否已安装（与 agent sniff 同规则；仅配置目录不算）。 */
+  installed: boolean;
+  /** 是否支持可视化编辑默认模型。 */
+  defaultsSupported: boolean;
+  /** 是否支持 small model（如 OpenCode 的 small_model）。 */
+  smallModelSupported: boolean;
   model?: string | null;
   smallModel?: string | null;
   enabledProviders?: string[] | null;
   disabledProviders?: string[] | null;
-  providers: OpencodeProviderView[];
+  providers: AgentProviderView[];
   warnings: string[];
 }
 
-export interface OpencodeActionResult {
+export interface AgentActionResult {
   ok: boolean;
   message: string;
-  view?: OpencodeConfigView | null;
+  view?: AgentModelConfigView | null;
 }
 
 export interface CatalogReasoningOption {
@@ -146,7 +155,7 @@ export interface UpsertModelPayload {
   thinkingBudgetTokens?: number | null;
   reasoningEffort?: string | null;
   textVerbosity?: string | null;
-  variants?: OpencodeVariantView[] | null;
+  variants?: AgentVariantView[] | null;
   extraOptions?: Record<string, unknown> | null;
   replaceExtraOptions?: boolean | null;
 }
