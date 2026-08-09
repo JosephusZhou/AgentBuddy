@@ -608,7 +608,7 @@ export default function BackupManage() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">备份管理</h1>
+          <h1 className="content-title">备份</h1>
           <div className="header-actions">
             <button
               type="button"

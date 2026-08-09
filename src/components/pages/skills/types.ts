@@ -17,6 +17,36 @@ export interface SkillRecord {
   createdAt: number;
   updatedAt: number;
   updateAvailable: boolean;
+  version?: string;
+}
+
+export interface SkillDuplicateConflict {
+  name: string;
+  importVersion: string;
+  existingId: string;
+  existingVersion: string;
+  existingSource: SkillSource;
+}
+
+export interface SkillDuplicateCheckResult {
+  ok: boolean;
+  conflicts: SkillDuplicateConflict[];
+  totalDetected: number;
+  message: string;
+}
+
+export interface ExportDuplicateConflict {
+  skillId: string;
+  title: string;
+  libraryVersion: string;
+  targetVersion: string;
+}
+
+export interface ExportDuplicateCheckResult {
+  ok: boolean;
+  conflicts: ExportDuplicateConflict[];
+  targetDir: string;
+  message: string;
 }
 
 export interface AgentResult {

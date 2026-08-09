@@ -10,7 +10,7 @@ AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统
 
 | 模块 | 说明 |
 |------|------|
-| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Codex CLI、OpenCode、DevEco Code、Antigravity、CodeBuddy CN、WorkBuddy），展示安装路径、配置目录、MCP 状态等详情 |
+| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Codex CLI、OpenCode、Antigravity、CodeBuddy CN、WorkBuddy），展示安装路径、配置目录、MCP 状态等详情 |
 | MCP 管理 | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量导入导出、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
 | Skills 管理 | 本地 / GitHub / GitCode 多源导入 Skill，支持批量应用到多个 Agent、标签管理、导出 |
 | Claude 多环境 | 管理多个 `CLAUDE_CONFIG_DIR` 环境（别名安装、Token 配置、MCP 同步、模型选择） |

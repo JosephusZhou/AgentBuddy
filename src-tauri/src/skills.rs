@@ -66,6 +66,9 @@ pub struct SkillRecord {
     /// For github skills: whether a remote update is available
     #[serde(default)]
     pub update_available: bool,
+    /// Version from SKILL.md frontmatter (empty if absent)
+    #[serde(default)]
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -142,6 +145,58 @@ pub struct SkillUpdateCheckResult {
 pub struct SkillActionResult {
     pub ok: bool,
     pub skill: Option<SkillRecord>,
+    pub message: String,
+}
+
+/// One conflict discovered when importing a local skill that already exists.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDuplicateConflict {
+    /// Frontmatter `name` (or dir name) of the skill being imported.
+    pub name: String,
+    /// Version of the importing skill (from frontmatter `version`, empty if absent).
+    pub import_version: String,
+    /// Library id of the existing skill.
+    pub existing_id: String,
+    /// Version of the existing skill in the library.
+    pub existing_version: String,
+    /// Source of the existing skill (local / github / gitcode).
+    pub existing_source: SkillSource,
+}
+
+/// Result of checking a local path for duplicate skills before import.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDuplicateCheckResult {
+    pub ok: bool,
+    /// Conflicts found (may be multiple if the path contains several skill dirs).
+    pub conflicts: Vec<SkillDuplicateConflict>,
+    /// Total skill dirs detected in the given path (0 = not a valid skill path).
+    pub total_detected: usize,
+    pub message: String,
+}
+
+/// One conflict when exporting a skill to a directory where it already exists.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDuplicateConflict {
+    /// Skill id (directory name) being exported.
+    pub skill_id: String,
+    /// Skill display title.
+    pub title: String,
+    /// Version in the library (empty if absent).
+    pub library_version: String,
+    /// Version at the target directory (empty if absent).
+    pub target_version: String,
+}
+
+/// Result of checking export target for duplicate skills.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDuplicateCheckResult {
+    pub ok: bool,
+    pub conflicts: Vec<ExportDuplicateConflict>,
+    pub target_dir: String,
     pub message: String,
 }
 
@@ -263,6 +318,9 @@ pub struct SkillMetaEntry {
     pub remote_ref: String,
     #[serde(default)]
     pub local_ref: String,
+    /// Content hash of the installed skill dir, for per-skill update detection.
+    #[serde(default)]
+    pub content_hash: String,
 }
 
 /* ===== Paths ===== */
@@ -306,6 +364,7 @@ fn default_local_meta() -> SkillMetaEntry {
 struct SkillDoc {
     name: String,
     description: String,
+    version: String,
 }
 
 fn parse_skill_md(content: &str) -> SkillDoc {
@@ -359,6 +418,7 @@ fn parse_skill_md(content: &str) -> SkillDoc {
                         let value = joined.trim().to_string();
                         match key.as_str() {
                             "name" => doc.name = value,
+                            "version" => doc.version = value,
                             "description" => {
                                 // Block scalars are often a lead sentence followed by a
                                 // structured trigger list (no blank-line separator). Keep the
@@ -388,6 +448,7 @@ fn parse_skill_md(content: &str) -> SkillDoc {
                     }
                     match key.as_str() {
                         "name" => doc.name = val,
+                        "version" => doc.version = val,
                         "description" => doc.description = val,
                         _ => {}
                     }
@@ -701,6 +762,7 @@ fn build_record(
             now_secs()
         },
         update_available,
+        version: doc.version,
     }
 }
 
@@ -839,6 +901,7 @@ fn import_skill_dir(
     source: SkillSource,
     git: Option<GitRepoRef>,
     tag: &str,
+    overwrite_id: Option<&str>,
 ) -> Result<SkillRecord, String> {
     if !is_skill_dir(src) {
         return Err(format!("目录缺少 SKILL.md: {}", src.display()));
@@ -861,7 +924,17 @@ fn import_skill_dir(
                 .unwrap_or_else(|| format!("skill-{}", now_secs()))
         });
 
-    let id = unique_skill_id(&preferred, &lib);
+    // If overwrite_id is provided, replace the existing skill directory in-place.
+    let id = if let Some(oid) = overwrite_id {
+        let dest = lib.join(oid);
+        // Remove existing dir before copying
+        if dest.exists() {
+            let _ = fs::remove_dir_all(&dest);
+        }
+        oid.to_string()
+    } else {
+        unique_skill_id(&preferred, &lib)
+    };
     let dest = lib.join(&id);
     copy_dir_recursive(src, &dest)?;
 
@@ -877,6 +950,8 @@ fn import_skill_dir(
         updated_at: ts,
         remote_ref: String::new(),
         local_ref: String::new(),
+        // Best-effort baseline; empty on failure is fine (checks recompute).
+        content_hash: hash_skill_dir(&dest).unwrap_or_default(),
     };
     db::upsert_skill_meta(&id, &entry)?;
 
@@ -901,7 +976,117 @@ fn import_skill_dir(
 
 /* ===== Add: local ===== */
 
-pub fn add_skill_local(path: String, tag: String) -> Result<SkillActionResult, String> {
+/// Check a local path for skill dirs and detect duplicates against the library.
+/// Returns a list of conflicts (by frontmatter `name` or dir name match).
+pub fn check_skill_local_duplicate(path: String) -> Result<SkillDuplicateCheckResult, String> {
+    let src = expand_tilde(path.trim());
+    if !src.exists() {
+        return Ok(SkillDuplicateCheckResult {
+            ok: false,
+            conflicts: Vec::new(),
+            total_detected: 0,
+            message: format!("路径不存在: {}", src.display()),
+        });
+    }
+
+    // Collect skill dirs to import
+    let skill_dirs: Vec<PathBuf> = if is_skill_dir(&src) {
+        vec![src.clone()]
+    } else if src.is_dir() {
+        let mut dirs = Vec::new();
+        if let Ok(entries) = fs::read_dir(&src) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if is_skill_dir(&p) {
+                    dirs.push(p);
+                }
+            }
+        }
+        dirs
+    } else {
+        return Ok(SkillDuplicateCheckResult {
+            ok: false,
+            conflicts: Vec::new(),
+            total_detected: 0,
+            message: "请选择包含 SKILL.md 的技能目录".into(),
+        });
+    };
+
+    if skill_dirs.is_empty() {
+        return Ok(SkillDuplicateCheckResult {
+            ok: false,
+            conflicts: Vec::new(),
+            total_detected: 0,
+            message: "所选目录中未找到包含 SKILL.md 的技能".into(),
+        });
+    }
+
+    let total = skill_dirs.len();
+
+    // Build identity map from existing library: lowercased name/dir-id -> (id, version, source)
+    let lib = skills_library_dir()?;
+    let mut existing_map: HashMap<String, (String, String, SkillSource)> = HashMap::new();
+    if let Ok(entries) = fs::read_dir(&lib) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !is_skill_dir(&path) {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if id.starts_with('.') {
+                continue;
+            }
+            let doc = read_skill_doc(&path);
+            let meta = db::get_skill_meta(&id).unwrap_or_default().unwrap_or_default();
+            let version = doc.version.clone();
+            let source = meta.source.clone();
+            // Index by dir id
+            existing_map.insert(id.trim().to_lowercase(), (id.clone(), version.clone(), source.clone()));
+            // Index by frontmatter name
+            if !doc.name.trim().is_empty() {
+                existing_map.insert(doc.name.trim().to_lowercase(), (id, version, source));
+            }
+        }
+    }
+
+    let mut conflicts = Vec::new();
+    for dir in &skill_dirs {
+        let doc = read_skill_doc(dir);
+        let name = if !doc.name.is_empty() {
+            doc.name.clone()
+        } else {
+            dir.file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default()
+        };
+        let key = name.trim().to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some((existing_id, existing_version, existing_source)) = existing_map.get(&key) {
+            conflicts.push(SkillDuplicateConflict {
+                name: name.clone(),
+                import_version: doc.version.clone(),
+                existing_id: existing_id.clone(),
+                existing_version: existing_version.clone(),
+                existing_source: existing_source.clone(),
+            });
+        }
+    }
+
+    Ok(SkillDuplicateCheckResult {
+        ok: true,
+        conflicts,
+        total_detected: total,
+        message: String::new(),
+    })
+}
+
+pub fn add_skill_local(
+    path: String,
+    tag: String,
+    overwrite_ids: Option<Vec<String>>,
+) -> Result<SkillActionResult, String> {
     let src = expand_tilde(path.trim());
     if !src.exists() {
         return Ok(SkillActionResult {
@@ -911,9 +1096,40 @@ pub fn add_skill_local(path: String, tag: String) -> Result<SkillActionResult, S
         });
     }
 
+    // Build overwrite lookup: map from lowercased skill name -> existing_id
+    let overwrite_map: HashMap<String, String> = match &overwrite_ids {
+        Some(ids) if !ids.is_empty() => {
+            let lib = skills_library_dir()?;
+            let mut map = HashMap::new();
+            for id in ids {
+                let dir = lib.join(id);
+                if is_skill_dir(&dir) {
+                    let doc = read_skill_doc(&dir);
+                    let name_key = if !doc.name.is_empty() {
+                        doc.name.trim().to_lowercase()
+                    } else {
+                        id.trim().to_lowercase()
+                    };
+                    map.insert(name_key, id.clone());
+                }
+            }
+            map
+        }
+        _ => HashMap::new(),
+    };
+
     // If path itself is a skill dir
     if is_skill_dir(&src) {
-        let skill = import_skill_dir(&src, None, SkillSource::Local, None, &tag)?;
+        let doc = read_skill_doc(&src);
+        let name_key = if !doc.name.is_empty() {
+            doc.name.trim().to_lowercase()
+        } else {
+            src.file_name()
+                .map(|s| s.to_string_lossy().trim().to_lowercase())
+                .unwrap_or_default()
+        };
+        let overwrite_id = overwrite_map.get(&name_key).map(|s| s.as_str());
+        let skill = import_skill_dir(&src, None, SkillSource::Local, None, &tag, overwrite_id)?;
         return Ok(SkillActionResult {
             ok: true,
             message: format!("已导入本地技能「{}」", skill.title),
@@ -928,7 +1144,16 @@ pub fn add_skill_local(path: String, tag: String) -> Result<SkillActionResult, S
             let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
             let p = entry.path();
             if is_skill_dir(&p) {
-                imported.push(import_skill_dir(&p, None, SkillSource::Local, None, &tag)?);
+                let doc = read_skill_doc(&p);
+                let name_key = if !doc.name.is_empty() {
+                    doc.name.trim().to_lowercase()
+                } else {
+                    p.file_name()
+                        .map(|s| s.to_string_lossy().trim().to_lowercase())
+                        .unwrap_or_default()
+                };
+                let overwrite_id = overwrite_map.get(&name_key).map(|s| s.as_str());
+                imported.push(import_skill_dir(&p, None, SkillSource::Local, None, &tag, overwrite_id)?);
             }
         }
         if imported.is_empty() {
@@ -956,7 +1181,7 @@ pub fn add_skill_local(path: String, tag: String) -> Result<SkillActionResult, S
 /// Native folder picker. Returns selected path or cancel.
 pub fn pick_local_skill_folder(tag: String) -> Result<SkillActionResult, String> {
     match crate::platform::pick_folder("选择 Skill 目录（需包含 SKILL.md）") {
-        Ok(Some(path)) => add_skill_local(path.to_string_lossy().to_string(), tag),
+        Ok(Some(path)) => add_skill_local(path.to_string_lossy().to_string(), tag, None),
         Ok(None) => Ok(SkillActionResult {
             ok: false,
             skill: None,
@@ -1546,82 +1771,6 @@ pub fn batch_delete_skills(
     })
 }
 
-/// 批量应用技能到用户选定的单个目录：只弹一次文件夹选择器。
-/// 目标已存在同名条目的项计入 `skipped`（非致命）。
-pub fn batch_export_skills_to_dir(
-    skill_ids: Vec<String>,
-    install_mode: SkillInstallMode,
-) -> Result<BatchSkillResult, String> {
-    let ids = sanitize_id_batch(&skill_ids);
-    if ids.is_empty() {
-        let list = list_skills()?;
-        return Ok(BatchSkillResult {
-            ok: false,
-            succeeded: 0,
-            failed: 0,
-            skipped: 0,
-            skills: list.skills,
-            message: "未选择有效技能".into(),
-            errors: vec![],
-        });
-    }
-
-    let target_root = match pick_target_folder("选择应用目标目录（批量）") {
-        Ok(Some(root)) => root,
-        Ok(None) => {
-            let list = list_skills()?;
-            return Ok(BatchSkillResult {
-                ok: false,
-                succeeded: 0,
-                failed: 0,
-                skipped: 0,
-                skills: list.skills,
-                message: "已取消选择".into(),
-                errors: vec![],
-            });
-        }
-        Err(msg) => return Err(msg),
-    };
-
-    let mut succeeded = 0usize;
-    let mut skipped = 0usize;
-    let mut failed = 0usize;
-    let mut errors: Vec<String> = Vec::new();
-    for id in &ids {
-        match install_skill_into_dir(id, &target_root, install_mode) {
-            Ok(_) => succeeded += 1,
-            Err(msg) => {
-                // 目标已存在视为跳过而非失败，避免用户误以为出错。
-                if msg.starts_with("目标已存在同名") {
-                    skipped += 1;
-                } else {
-                    failed += 1;
-                }
-                errors.push(format!("「{}」：{}", id, msg));
-            }
-        }
-    }
-
-    // 应用到目录不改动技能库，但为保持返回结构一致仍带上整表。
-    let list = list_skills()?;
-    let mut parts: Vec<String> = vec![format!("已{} {} 个", install_mode.label(), succeeded)];
-    if skipped > 0 {
-        parts.push(format!("跳过 {} 个（同名已存在）", skipped));
-    }
-    if failed > 0 {
-        parts.push(format!("失败 {} 个", failed));
-    }
-    Ok(BatchSkillResult {
-        ok: failed == 0 && skipped == 0,
-        succeeded,
-        failed,
-        skipped,
-        skills: list.skills,
-        message: parts.join("，"),
-        errors,
-    })
-}
-
 /// 批量应用模式：追加（并入现有应用）或覆盖（以选中 Agent 为最终态）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatchApplyMode {
@@ -1846,6 +1995,7 @@ fn install_skill_into_dir(
     id: &str,
     target_root: &Path,
     install_mode: SkillInstallMode,
+    overwrite: bool,
 ) -> Result<String, String> {
     let lib = skills_library_dir()?;
     let src = lib.join(id);
@@ -1857,9 +2007,21 @@ fn install_skill_into_dir(
     if dest.parent() != Some(target_root) {
         return Err("非法的技能路径".into());
     }
-    // 已存在同名条目一律不覆盖，交由用户先行清理。
+    // 已存在同名条目：覆盖模式先删除旧条目再安装；非覆盖模式返回带版本信息的错误。
     if fs::symlink_metadata(&dest).is_ok() {
-        return Err(format!("目标已存在同名条目：{}", dest.display()));
+        if overwrite {
+            remove_path_entry(&dest).map_err(|e| format!("清理目标已有条目失败: {}", e))?;
+        } else {
+            // 读取已有条目和库中 skill 的版本，附带在错误信息中供前端展示。
+            let existing_ver = read_skill_doc(&dest).version;
+            let import_ver = read_skill_doc(&src).version;
+            return Err(format!(
+                "目标已存在同名条目：{}|existing_version={}|import_version={}",
+                dest.display(),
+                existing_ver,
+                import_ver
+            ));
+        }
     }
     let source = fs::canonicalize(&src).unwrap_or(src);
     match install_mode {
@@ -1878,69 +2040,133 @@ fn install_skill_into_dir(
     }
 }
 
-/// “应用到目录”：在用户选定目录下生成 `<target>/<id>`，可选择软链接或完整复制。
-/// 目标若已存在同名条目（软链接 / 文件 / 目录）一律不覆盖，避免破坏用户数据。
-pub fn export_skill_to_dir(
-    skill_id: String,
-    install_mode: SkillInstallMode,
-) -> Result<SkillActionResult, String> {
-    let id = skill_id.trim().to_string();
-    if id.is_empty() {
-        return Ok(SkillActionResult {
+/// Pick a target folder and check for duplicate skills at the target.
+/// Returns conflicts with version info; frontend shows a dialog for user to choose.
+pub fn check_export_duplicates(
+    skill_ids: Vec<String>,
+) -> Result<ExportDuplicateCheckResult, String> {
+    let ids = sanitize_id_batch(&skill_ids);
+    if ids.is_empty() {
+        return Ok(ExportDuplicateCheckResult {
             ok: false,
-            skill: None,
-            message: "缺少技能标识".into(),
-        });
-    }
-    // Guard against path traversal: id must be a plain directory name.
-    if !is_plain_entry_name(&id) {
-        return Ok(SkillActionResult {
-            ok: false,
-            skill: None,
-            message: "非法的技能标识".into(),
-        });
-    }
-
-    let lib = skills_library_dir()?;
-    let src = lib.join(&id);
-    if !is_skill_dir(&src) {
-        return Ok(SkillActionResult {
-            ok: false,
-            skill: None,
-            message: "技能目录不存在或缺少 SKILL.md".into(),
+            conflicts: Vec::new(),
+            target_dir: String::new(),
+            message: "未选择有效技能".into(),
         });
     }
 
     let target_root = match pick_target_folder("选择应用目标目录") {
         Ok(Some(root)) => root,
         Ok(None) => {
-            return Ok(SkillActionResult {
+            return Ok(ExportDuplicateCheckResult {
                 ok: false,
-                skill: None,
+                conflicts: Vec::new(),
+                target_dir: String::new(),
                 message: "已取消选择".into(),
             });
         }
         Err(msg) => {
-            return Ok(SkillActionResult {
+            return Ok(ExportDuplicateCheckResult {
                 ok: false,
-                skill: None,
+                conflicts: Vec::new(),
+                target_dir: String::new(),
                 message: msg,
             });
         }
     };
 
-    match install_skill_into_dir(&id, &target_root, install_mode) {
-        Ok(message) => Ok(SkillActionResult {
-            ok: true,
-            skill: None,
-            message,
-        }),
-        Err(message) => Ok(SkillActionResult {
-            ok: false,
-            skill: None,
-            message,
-        }),
+    let lib = skills_library_dir()?;
+    let mut conflicts = Vec::new();
+    for id in &ids {
+        let src = lib.join(id);
+        if !is_skill_dir(&src) {
+            continue;
+        }
+        let dest = target_root.join(id);
+        if fs::symlink_metadata(&dest).is_ok() {
+            let lib_doc = read_skill_doc(&src);
+            let dest_doc = read_skill_doc(&dest);
+            conflicts.push(ExportDuplicateConflict {
+                skill_id: id.clone(),
+                title: if !lib_doc.name.is_empty() {
+                    lib_doc.name
+                } else {
+                    id.clone()
+                },
+                library_version: lib_doc.version,
+                target_version: dest_doc.version,
+            });
+        }
     }
+
+    Ok(ExportDuplicateCheckResult {
+        ok: true,
+        conflicts,
+        target_dir: target_root.to_string_lossy().to_string(),
+        message: String::new(),
+    })
+}
+
+/// Export skills to a directory, optionally overwriting specified skill ids.
+pub fn export_skills_to_dir(
+    skill_ids: Vec<String>,
+    install_mode: SkillInstallMode,
+    target_dir: String,
+    overwrite_ids: Vec<String>,
+) -> Result<BatchSkillResult, String> {
+    let ids = sanitize_id_batch(&skill_ids);
+    if ids.is_empty() {
+        let list = list_skills()?;
+        return Ok(BatchSkillResult {
+            ok: false,
+            succeeded: 0,
+            failed: 0,
+            skipped: 0,
+            skills: list.skills,
+            message: "未选择有效技能".into(),
+            errors: vec![],
+        });
+    }
+
+    let target_root = PathBuf::from(&target_dir);
+    let overwrite_set: BTreeSet<String> = overwrite_ids.iter().cloned().collect();
+
+    let mut succeeded = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for id in &ids {
+        let overwrite = overwrite_set.contains(id);
+        match install_skill_into_dir(id, &target_root, install_mode, overwrite) {
+            Ok(_) => succeeded += 1,
+            Err(msg) => {
+                if msg.contains("目标已存在同名") {
+                    skipped += 1;
+                } else {
+                    failed += 1;
+                }
+                errors.push(format!("「{}」：{}", id, msg));
+            }
+        }
+    }
+
+    let list = list_skills()?;
+    let mut parts: Vec<String> = vec![format!("已{} {} 个", install_mode.label(), succeeded)];
+    if skipped > 0 {
+        parts.push(format!("跳过 {} 个（同名已存在）", skipped));
+    }
+    if failed > 0 {
+        parts.push(format!("失败 {} 个", failed));
+    }
+    Ok(BatchSkillResult {
+        ok: failed == 0 && skipped == 0,
+        succeeded,
+        failed,
+        skipped,
+        skills: list.skills,
+        message: parts.join("，"),
+        errors,
+    })
 }
 
 /* ===== Add: git repo (GitHub / GitCode) ===== */
@@ -2216,7 +2442,7 @@ fn add_skill_from_git(gh: GitRepoRef, tag: &str) -> Result<SkillActionResult, St
             .unwrap_or_default();
         let mut gh_one = gh.clone();
         gh_one.path = sub_path;
-        match import_skill_dir(dir, None, source.clone(), Some(gh_one), tag) {
+        match import_skill_dir(dir, None, source.clone(), Some(gh_one), tag, None) {
             Ok(rec) => {
                 // capture local git HEAD for update checks
                 if let Ok(head) = git_rev_parse(dir.parent().unwrap_or(dir)) {
@@ -2514,6 +2740,7 @@ pub fn import_sniffed_skills(keys: Vec<String>) -> Result<SniffImportResult, Str
             SkillSource::Local,
             None,
             "",
+            None,
         ) {
             Ok(_rec) => imported += 1,
             Err(e) => {
@@ -2603,7 +2830,7 @@ pub fn sniff_skills() -> Result<SkillSniffResult, String> {
                     continue;
                 }
 
-                match import_skill_dir(&path, Some(&id_hint), SkillSource::Local, None, "") {
+                match import_skill_dir(&path, Some(&id_hint), SkillSource::Local, None, "", None) {
                     Ok(rec) => {
                         imported += 1;
                         meta_map.insert(
@@ -2650,6 +2877,140 @@ pub fn sniff_skills() -> Result<SkillSniffResult, String> {
 }
 
 /* ===== Check updates (github) ===== */
+
+/// Stable content hash of a skill directory: sorted relative paths + raw file
+/// bytes fed into SHA-256. Hidden entries (`.git`, `.DS_Store`, …) and
+/// symlinks are skipped so clones and library dirs hash identically.
+fn hash_skill_dir(dir: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut files: Vec<PathBuf> = Vec::new();
+    let walker = walkdir::WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'));
+    for entry in walker {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_file() {
+            files.push(entry.into_path());
+        }
+    }
+    files.sort();
+    let mut hasher = Sha256::new();
+    for path in &files {
+        let rel = path
+            .strip_prefix(dir)
+            .map_err(|e| format!("路径计算失败: {}", e))?;
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let bytes = fs::read(path)
+            .map_err(|e| format!("读取文件 {} 失败: {}", rel_str, e))?;
+        hasher.update(rel_str.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(&bytes);
+        hasher.update(b"\0");
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Map `items` through `f` on at most `limit` scoped worker threads,
+/// preserving input order. No extra deps needed for bounded concurrency.
+fn map_bounded<T, R, F>(items: &[T], limit: usize, f: F) -> Vec<R>
+where
+    T: Send + Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    use std::sync::Mutex;
+    if items.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let next = Mutex::new(0usize);
+    let results: Mutex<Vec<(usize, R)>> = Mutex::new(Vec::with_capacity(items.len()));
+    std::thread::scope(|s| {
+        for _ in 0..limit.min(items.len()) {
+            s.spawn(|| loop {
+                let i = {
+                    let mut g = next.lock().unwrap();
+                    let i = *g;
+                    *g += 1;
+                    i
+                };
+                if i >= items.len() {
+                    break;
+                }
+                let r = f(&items[i]);
+                results.lock().unwrap().push((i, r));
+            });
+        }
+    });
+    let mut out = results.into_inner().unwrap();
+    out.sort_by_key(|(i, _)| *i);
+    out.into_iter().map(|(_, r)| r).collect()
+}
+
+/* ===== Clone cache (content-addressed, shared by check & update) ===== */
+
+fn clone_cache_root() -> PathBuf {
+    std::env::temp_dir().join("agentbuddy-skills")
+}
+
+fn clone_cache_dir(owner: &str, repo: &str, sha: &str) -> PathBuf {
+    clone_cache_root().join(format!("{}-{}-{}", owner, repo, sha))
+}
+
+/// Drop superseded / stale clones: same owner-repo with a different sha is
+/// obsolete immediately; anything else is cleaned once older than 24h.
+fn cleanup_clone_cache(keep: Option<&str>) {
+    let base = clone_cache_root();
+    let Ok(rd) = fs::read_dir(&base) else {
+        return;
+    };
+    let keep_prefix = keep.and_then(|k| k.rsplit_once('-')).map(|(p, _)| p.to_string());
+    let now = now_secs();
+    for entry in rd.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if Some(name.as_str()) == keep {
+            continue;
+        }
+        let superseded = match (&keep_prefix, name.rsplit_once('-')) {
+            (Some(p), Some((prefix, _))) => prefix == p,
+            _ => false,
+        };
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| now.saturating_sub(d.as_secs() as i64) > 24 * 3600)
+            .unwrap_or(true);
+        if superseded || stale {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Shallow-clone `repo_url` at its current HEAD `sha`, reusing the cache dir
+/// when a valid clone for that exact commit already exists.
+fn cached_clone(repo_url: &str, owner: &str, repo: &str, sha: &str) -> Result<PathBuf, String> {
+    cleanup_clone_cache(Some(&format!("{}-{}-{}", owner, repo, sha)));
+    let dest = clone_cache_dir(owner, repo, sha);
+    let valid = dest.join(".git").exists()
+        && git_rev_parse(&dest).map(|h| h == sha).unwrap_or(false);
+    if valid {
+        return Ok(dest);
+    }
+    if dest.exists() {
+        let _ = fs::remove_dir_all(&dest);
+    }
+    let clone_url = format!("{}.git", repo_url.trim_end_matches(".git"));
+    if let Err(e) = git_clone(&clone_url, "", &dest) {
+        let _ = fs::remove_dir_all(&dest);
+        return Err(e);
+    }
+    Ok(dest)
+}
 
 fn github_default_branch_sha(owner: &str, repo: &str) -> Result<String, String> {
     // Use GitHub API: GET /repos/{owner}/{repo}/commits/HEAD
@@ -2766,62 +3127,164 @@ fn remote_head_for_source(
     }
 }
 
+fn host_domain_for(source: &SkillSource) -> &'static str {
+    match source {
+        SkillSource::Github => GitHost::Github.domain(),
+        SkillSource::Gitcode => GitHost::Gitcode.domain(),
+        SkillSource::Local => "",
+    }
+}
+
 pub fn check_skill_updates() -> Result<SkillUpdateCheckResult, String> {
     let listed = list_skills()?;
+    let lib = skills_library_dir()?;
+    let now = now_secs();
+
+    #[derive(Clone)]
+    struct Target {
+        skill: SkillRecord,
+        key: String,
+    }
+    struct RepoGroup {
+        key: String,
+        source: SkillSource,
+        owner: String,
+        repo: String,
+        repo_url: String,
+    }
+
+    // Group remote skills by (source, owner, repo) to share one HEAD query
+    // and one clone across all skills of the same repository.
+    let mut groups: Vec<RepoGroup> = Vec::new();
+    let mut group_index: HashMap<String, usize> = HashMap::new();
+    let mut targets: Vec<Target> = Vec::new();
     let mut checked = 0usize;
-    let mut updates = 0usize;
-    let mut update_ids: BTreeSet<String> = BTreeSet::new();
-
-    // group by source+owner/repo to avoid redundant remote calls
-    let mut repo_sha: HashMap<(String, String, String), Result<String, String>> = HashMap::new();
-
-    for skill in &listed.skills {
-        if !skill.source.is_remote() {
-            continue;
-        }
-        if skill.github_owner.is_empty() || skill.github_repo.is_empty() {
+    for skill in listed.skills {
+        if !skill.source.is_remote() || skill.github_owner.is_empty() || skill.github_repo.is_empty() {
             continue;
         }
         checked += 1;
-        let source_key = match skill.source {
-            SkillSource::Github => "github",
-            SkillSource::Gitcode => "gitcode",
-            SkillSource::Local => continue,
-        };
-        let key = (
-            source_key.to_string(),
-            skill.github_owner.clone(),
-            skill.github_repo.clone(),
+        let key = format!(
+            "{:?}:{}/{}",
+            skill.source, skill.github_owner, skill.github_repo
         );
-        if !repo_sha.contains_key(&key) {
-            let sha = remote_head_for_source(
-                &skill.source,
-                &skill.github_owner,
-                &skill.github_repo,
-                &skill.repo_url,
-            );
-            repo_sha.insert(key.clone(), sha);
+        if !group_index.contains_key(&key) {
+            group_index.insert(key.clone(), groups.len());
+            groups.push(RepoGroup {
+                key: key.clone(),
+                source: skill.source.clone(),
+                owner: skill.github_owner.clone(),
+                repo: skill.github_repo.clone(),
+                repo_url: skill.repo_url.clone(),
+            });
         }
-        let remote = match repo_sha.get(&key) {
-            Some(Ok(sha)) => sha.clone(),
-            Some(Err(_)) | None => continue,
-        };
+        targets.push(Target { skill, key });
+    }
 
-        let mut entry = match db::get_skill_meta(&skill.id)? {
+    // Stage 1 (lightweight, concurrent): fetch each repo's remote HEAD.
+    let heads: Vec<Result<String, String>> =
+        map_bounded(&groups, 6, |g| {
+            remote_head_for_source(&g.source, &g.owner, &g.repo, &g.repo_url)
+        });
+    let mut head_map: HashMap<String, Result<String, String>> = HashMap::new();
+    for (g, h) in groups.iter().zip(heads) {
+        head_map.insert(g.key.clone(), h);
+    }
+
+    // Repos whose HEAD moved beyond at least one installed skill's baseline
+    // need a stage-2 clone for content-hash comparison.
+    let stale_keys: std::collections::HashSet<String> = targets
+        .iter()
+        .filter(|t| {
+            let meta_local = db::get_skill_meta(&t.skill.id)
+                .ok()
+                .flatten()
+                .map(|m| m.local_ref)
+                .unwrap_or_default();
+            matches!(head_map.get(&t.key), Some(Ok(head)) if !head.is_empty() && *head != meta_local)
+        })
+        .map(|t| t.key.clone())
+        .collect();
+    let to_clone: Vec<&RepoGroup> = groups
+        .iter()
+        .filter(|g| stale_keys.contains(&g.key))
+        .collect();
+
+    // Stage 2 (bounded clones): shallow-clone each stale repo once into the
+    // content-addressed cache (reused later by updates).
+    let clone_results: Vec<Result<PathBuf, String>> = map_bounded(&to_clone, 2, |g| {
+        let head = match head_map.get(&g.key) {
+            Some(Ok(h)) => h.clone(),
+            _ => return Err("缺少远端 HEAD".into()),
+        };
+        let url = if g.repo_url.is_empty() {
+            format!("https://{}/{}/{}", host_domain_for(&g.source), g.owner, g.repo)
+        } else {
+            g.repo_url.clone()
+        };
+        cached_clone(&url, &g.owner, &g.repo, &head)
+    });
+    let mut clone_map: HashMap<String, Result<PathBuf, String>> = HashMap::new();
+    for (g, r) in to_clone.iter().zip(clone_results) {
+        clone_map.insert(g.key.clone(), r);
+    }
+
+    // Compare per-skill content hashes against the clone.
+    let mut updates = 0usize;
+    let mut update_ids: BTreeSet<String> = BTreeSet::new();
+    let mut missing = 0usize;
+    for t in &targets {
+        let head = match head_map.get(&t.key) {
+            Some(Ok(h)) if !h.is_empty() => h.clone(),
+            _ => continue,
+        };
+        let mut entry = match db::get_skill_meta(&t.skill.id)? {
             Some(e) => e,
             None => continue,
         };
-        let local = entry.local_ref.clone();
-        entry.remote_ref = remote.clone();
-        entry.updated_at = now_secs();
-        if !local.is_empty() && local != remote {
-            updates += 1;
-            update_ids.insert(skill.id.clone());
-        } else if local.is_empty() {
-            // no baseline — store remote as baseline without flagging
-            entry.local_ref = remote;
+        entry.remote_ref = head.clone();
+        entry.updated_at = now;
+        if entry.local_ref == head {
+            // Fast path: repo hasn't moved past this skill's baseline.
+            db::upsert_skill_meta(&t.skill.id, &entry)?;
+            continue;
         }
-        db::upsert_skill_meta(&skill.id, &entry)?;
+        let Some(Ok(clone_dir)) = clone_map.get(&t.key) else {
+            // Clone unavailable: keep refs fresh but don't flag an update.
+            db::upsert_skill_meta(&t.skill.id, &entry)?;
+            continue;
+        };
+        let search_root = if t.skill.github_path.is_empty() {
+            clone_dir.clone()
+        } else {
+            clone_dir.join(&t.skill.github_path)
+        };
+        let remote_dir = if is_skill_dir(&search_root) {
+            Some(search_root)
+        } else {
+            find_skill_dirs(&search_root).into_iter().next()
+        };
+        let Some(remote_dir) = remote_dir else {
+            missing += 1;
+            db::upsert_skill_meta(&t.skill.id, &entry)?;
+            continue;
+        };
+        let changed = match (
+            hash_skill_dir(&remote_dir),
+            hash_skill_dir(&lib.join(&t.skill.id)),
+        ) {
+            (Ok(remote_hash), Ok(local_hash)) => remote_hash != local_hash,
+            _ => true, // unreadable: let the user decide via an update
+        };
+        if changed {
+            updates += 1;
+            update_ids.insert(t.skill.id.clone());
+        } else {
+            // Unrelated commit elsewhere in the repo: realign baseline so the
+            // next check takes the cheap stage-1 path again.
+            entry.local_ref = head;
+        }
+        db::upsert_skill_meta(&t.skill.id, &entry)?;
     }
 
     let mut skills = list_skills()?.skills;
@@ -2837,6 +3300,11 @@ pub fn check_skill_updates() -> Result<SkillUpdateCheckResult, String> {
         format!("已检查 {} 个远程技能，其中 {} 个有更新", checked, updates)
     } else {
         format!("已检查 {} 个远程技能，全部为最新", checked)
+    };
+    let message = if missing > 0 {
+        format!("{}（{} 个技能在远端仓库中已不存在）", message, missing)
+    } else {
+        message
     };
 
     Ok(SkillUpdateCheckResult {
@@ -3245,7 +3713,7 @@ pub fn migrate_cc_switch_skills(cc_ids: Vec<String>) -> Result<CcSwitchMigrateRe
             None
         };
 
-        match import_skill_dir(&src, Some(preferred), source, git, "") {
+        match import_skill_dir(&src, Some(preferred), source, git, "", None) {
             Ok(_rec) => {
                 imported += 1;
             }
@@ -3285,12 +3753,77 @@ pub fn open_external_url(url: String) -> Result<(), String> {
 
 /* ===== Update: pull a remote skill to the repo's latest ===== */
 
+/// 在克隆内定位技能目录：优先 github_path，其次浅搜第一个 skill 目录。
+fn locate_skill_in_clone(clone_root: &Path, github_path: &str) -> Option<PathBuf> {
+    let search_root = if github_path.is_empty() {
+        clone_root.to_path_buf()
+    } else {
+        clone_root.join(github_path)
+    };
+    if is_skill_dir(&search_root) {
+        Some(search_root)
+    } else {
+        find_skill_dirs(&search_root).into_iter().next()
+    }
+}
+
+/// 在暂存目录构建新内容后原子替换库内技能目录，返回新内容的 hash。
+/// 「先复制、成功后再替换」避免中途失败清空既有技能。
+fn replace_skill_from_clone(lib: &Path, id: &str, src_dir: &Path) -> Result<String, String> {
+    let dest = lib.join(id);
+    let staging = lib.join(format!(".{}.update-{}", id, std::process::id()));
+    let _ = fs::remove_dir_all(&staging);
+    if let Err(e) = copy_dir_recursive(src_dir, &staging) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    if let Err(e) = fs::remove_dir_all(&dest) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("清理旧技能目录失败: {}", e));
+    }
+    if let Err(e) = fs::rename(&staging, &dest) {
+        return Err(format!(
+            "替换技能目录失败: {}（新内容暂存于 {}，可手动恢复）",
+            e,
+            staging.display()
+        ));
+    }
+    hash_skill_dir(&dest)
+}
+
+/// 更新后对齐 ref 到克隆 HEAD 并写入新内容 hash（拿不到 HEAD 不致命）。
+fn finalize_skill_update(id: &str, clone_root: &Path, new_hash: String) {
+    let ts = now_secs();
+    let head = git_rev_parse(clone_root).ok().filter(|h| !h.is_empty());
+    match &head {
+        Some(h) => {
+            let _ = db::update_skill_refs(id, Some(h), Some(h), ts);
+        }
+        None => {
+            let _ = db::update_skill_refs(id, None, None, ts);
+        }
+    }
+    if !new_hash.is_empty() {
+        if let Ok(Some(mut entry)) = db::get_skill_meta(id) {
+            entry.content_hash = new_hash;
+            let _ = db::upsert_skill_meta(id, &entry);
+        }
+    }
+}
+
+/// 计算仓库的基础 URL（元数据缺失 repo_url 时按平台域名拼接）。
+fn repo_base_url(source: &SkillSource, repo_url: &str, owner: &str, repo: &str) -> String {
+    if repo_url.is_empty() {
+        format!("https://{}/{}/{}", host_domain_for(source), owner, repo)
+    } else {
+        repo_url.to_string()
+    }
+}
+
 /// 把一个来自 GitHub / GitCode 的技能更新到远端仓库最新内容：
-/// 重新浅克隆 → 定位子目录 → 在暂存目录构建新内容 → 原子替换库目录 →
-/// 对齐 `local_ref` 到远端 HEAD。本地技能不支持更新。
-///
-/// 采用「先复制到暂存目录、成功后再替换」而非「先删后拷」，避免克隆或复制
-/// 中途失败导致既有技能被清空的数据丢失。
+/// 浅克隆（优先复用内容寻址缓存）→ 定位子目录 → 暂存目录构建新内容 →
+/// 原子替换库目录 → 对齐 `local_ref` / `content_hash` 到远端 HEAD。
+/// 本地技能不支持更新。
 pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
     let id = skill_id.trim().to_string();
     // Guard against path traversal: id must be a plain directory name.
@@ -3326,49 +3859,38 @@ pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
         });
     }
 
-    // 借用 source（unit 变体无字段），避免 move 掉 meta 以便后续复用。
-    let host = match &meta.source {
-        SkillSource::Github => GitHost::Github,
-        SkillSource::Gitcode => GitHost::Gitcode,
-        SkillSource::Local => {
-            return Ok(SkillActionResult {
-                ok: false,
-                skill: None,
-                message: "本地技能无远程源".into(),
-            })
-        }
-    };
-    let repo_url = if meta.repo_url.is_empty() {
-        format!(
-            "https://{}/{}/{}",
-            host.domain(),
-            meta.github_owner,
-            meta.github_repo
-        )
-    } else {
-        meta.repo_url.clone()
-    };
+    let repo_url = repo_base_url(&meta.source, &meta.repo_url, &meta.github_owner, &meta.github_repo);
     let clone_url = format!("{}.git", repo_url.trim_end_matches(".git"));
 
-    let tmp = temp_clone_dir(&meta.github_owner, &meta.github_repo)?;
-    if let Err(e) = git_clone(&clone_url, "", &tmp) {
-        let _ = fs::remove_dir_all(&tmp);
-        return Err(e);
-    }
+    // 优先内容寻址克隆缓存（与检查更新共享）；解析不到 HEAD 时退回一次性临时克隆。
+    let (tmp, cached) = match remote_head_for_source(
+        &meta.source,
+        &meta.github_owner,
+        &meta.github_repo,
+        &repo_url,
+    ) {
+        Ok(head) if !head.is_empty() => (
+            cached_clone(&repo_url, &meta.github_owner, &meta.github_repo, &head)?,
+            true,
+        ),
+        _ => {
+            let tmp = temp_clone_dir(&meta.github_owner, &meta.github_repo)?;
+            if let Err(e) = git_clone(&clone_url, "", &tmp) {
+                let _ = fs::remove_dir_all(&tmp);
+                return Err(e);
+            }
+            (tmp, false)
+        }
+    };
+    // 缓存目录保留供后续复用；仅临时克隆用后清理。
+    let cleanup_tmp = |tmp: &Path| {
+        if !cached {
+            let _ = fs::remove_dir_all(tmp);
+        }
+    };
 
-    // 定位仓库内该技能目录：优先 github_path，其次浅搜第一个 skill 目录。
-    let search_root = if meta.github_path.is_empty() {
-        tmp.clone()
-    } else {
-        tmp.join(&meta.github_path)
-    };
-    let src_dir = if is_skill_dir(&search_root) {
-        Some(search_root.clone())
-    } else {
-        find_skill_dirs(&search_root).into_iter().next()
-    };
-    let Some(src_dir) = src_dir else {
-        let _ = fs::remove_dir_all(&tmp);
+    let Some(src_dir) = locate_skill_in_clone(&tmp, &meta.github_path) else {
+        cleanup_tmp(&tmp);
         return Ok(SkillActionResult {
             ok: false,
             skill: None,
@@ -3376,39 +3898,15 @@ pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
         });
     };
 
-    // 先在暂存目录构建新内容，成功后再原子替换，避免中途失败清空既有技能。
-    let staging = lib.join(format!(".{}.update-{}", id, std::process::id()));
-    let _ = fs::remove_dir_all(&staging);
-    if let Err(e) = copy_dir_recursive(&src_dir, &staging) {
-        let _ = fs::remove_dir_all(&staging);
-        let _ = fs::remove_dir_all(&tmp);
-        return Err(e);
-    }
-    if let Err(e) = fs::remove_dir_all(&dest) {
-        let _ = fs::remove_dir_all(&staging);
-        let _ = fs::remove_dir_all(&tmp);
-        return Err(format!("清理旧技能目录失败: {}", e));
-    }
-    if let Err(e) = fs::rename(&staging, &dest) {
-        let _ = fs::remove_dir_all(&tmp);
-        return Err(format!(
-            "替换技能目录失败: {}（新内容暂存于 {}，可手动恢复）",
-            e,
-            staging.display()
-        ));
-    }
-
-    // 对齐 ref 到远端 HEAD（拿不到也不致命，仅刷新 updated_at）。
-    let ts = now_secs();
-    match git_rev_parse(&tmp) {
-        Ok(head) if !head.is_empty() => {
-            let _ = db::update_skill_refs(&id, Some(&head), Some(&head), ts);
+    let new_hash = match replace_skill_from_clone(&lib, &id, &src_dir) {
+        Ok(h) => h,
+        Err(e) => {
+            cleanup_tmp(&tmp);
+            return Err(e);
         }
-        _ => {
-            let _ = db::update_skill_refs(&id, None, None, ts);
-        }
-    }
-    let _ = fs::remove_dir_all(&tmp);
+    };
+    finalize_skill_update(&id, &tmp, new_hash);
+    cleanup_tmp(&tmp);
 
     let meta2 = db::get_skill_meta(&id)?.unwrap_or(meta);
     let applied = applied_after_for(&id, &dest);
@@ -3418,6 +3916,148 @@ pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
         ok: true,
         skill: Some(record),
         message: format!("已将「{}」更新到远端最新", title),
+    })
+}
+
+/// 批量把多个远程技能更新到远端最新：按 (source, owner, repo) 分组，
+/// 每个仓库只克隆一次（组间并发上限 2，复用检查更新留下的缓存），
+/// 组内逐个替换技能目录；单个技能失败不影响其余。
+pub fn update_skills_batch(ids: Vec<String>) -> Result<BatchSkillResult, String> {
+    let lib = skills_library_dir()?;
+
+    struct Item {
+        id: String,
+        title: String,
+        meta: SkillMetaEntry,
+        repo_url: String,
+    }
+
+    let mut failed = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    let mut groups: Vec<Vec<Item>> = Vec::new();
+    let mut group_index: HashMap<String, usize> = HashMap::new();
+
+    for raw in ids {
+        let id = raw.trim().to_string();
+        let title_of = |lib: &Path, id: &str| {
+            let name = read_skill_doc(&lib.join(id)).name;
+            if name.trim().is_empty() {
+                id.to_string()
+            } else {
+                name
+            }
+        };
+        let invalid = |msg: &str| -> Result<Item, String> {
+            Err(format!("{}: {}", title_of(&lib, &id), msg))
+        };
+        let item = (|| -> Result<Item, String> {
+            if !is_plain_entry_name(&id) {
+                return invalid("非法的技能标识");
+            }
+            let dir = lib.join(&id);
+            if !is_skill_dir(&dir) {
+                return invalid("技能不存在或缺少 SKILL.md");
+            }
+            let meta = db::get_skill_meta(&id)?
+                .ok_or_else(|| format!("{}: 技能元数据缺失", title_of(&lib, &id)))?;
+            if !meta.source.is_remote() {
+                return invalid("仅支持更新来自 GitHub / GitCode 的技能");
+            }
+            if meta.github_owner.is_empty() || meta.github_repo.is_empty() {
+                return invalid("缺少仓库信息，无法更新");
+            }
+            Ok(Item {
+                repo_url: repo_base_url(&meta.source, &meta.repo_url, &meta.github_owner, &meta.github_repo),
+                id: id.clone(),
+                title: title_of(&lib, &id),
+                meta,
+            })
+        })();
+        match item {
+            Ok(it) => {
+                let key = format!(
+                    "{:?}:{}/{}",
+                    it.meta.source, it.meta.github_owner, it.meta.github_repo
+                );
+                match group_index.get(&key) {
+                    Some(gi) => groups[*gi].push(it),
+                    None => {
+                        group_index.insert(key, groups.len());
+                        groups.push(vec![it]);
+                    }
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                errors.push(e);
+            }
+        }
+    }
+
+    // 每组：解析 HEAD → 取/建克隆缓存 → 组内逐个替换。
+    let group_results: Vec<Vec<(String, String, Result<(), String>)>> =
+        map_bounded(&groups, 2, |items| {
+            let first = &items[0];
+            let owner = &first.meta.github_owner;
+            let repo = &first.meta.github_repo;
+            let clone = remote_head_for_source(&first.meta.source, owner, repo, &first.repo_url)
+                .and_then(|head| {
+                    if head.is_empty() {
+                        return Err("无法获取远端 HEAD".into());
+                    }
+                    cached_clone(&first.repo_url, owner, repo, &head)
+                });
+            items
+                .iter()
+                .map(|item| {
+                    let r = match &clone {
+                        Err(e) => Err(e.clone()),
+                        Ok(clone_dir) => (|| -> Result<(), String> {
+                            let src = locate_skill_in_clone(clone_dir, &item.meta.github_path)
+                                .ok_or_else(|| {
+                                    "远端仓库中未找到该技能目录（可能已被移动或删除）"
+                                        .to_string()
+                                })?;
+                            let new_hash = replace_skill_from_clone(&lib, &item.id, &src)?;
+                            finalize_skill_update(&item.id, clone_dir, new_hash);
+                            Ok(())
+                        })(),
+                    };
+                    (item.id.clone(), item.title.clone(), r)
+                })
+                .collect()
+        });
+
+    let mut succeeded = 0usize;
+    for results in group_results {
+        for (_id, title, r) in results {
+            match r {
+                Ok(()) => succeeded += 1,
+                Err(e) => {
+                    failed += 1;
+                    errors.push(format!("{}: {}", title, e));
+                }
+            }
+        }
+    }
+
+    let list = list_skills()?;
+    let message = if succeeded == 0 && failed == 0 {
+        "没有可更新的远程技能".to_string()
+    } else if failed == 0 {
+        format!("已更新 {} 个技能到远端最新", succeeded)
+    } else {
+        format!("批量更新结束：成功 {}，失败 {}", succeeded, failed)
+    };
+
+    Ok(BatchSkillResult {
+        ok: failed == 0,
+        succeeded,
+        failed,
+        skipped: 0,
+        skills: list.skills,
+        message,
+        errors,
     })
 }
 
@@ -3461,6 +4101,49 @@ body
         assert_eq!(g.repo, "bar");
         assert_eq!(g.branch, "main");
         assert_eq!(g.path, "skills/baz");
+    }
+
+    #[test]
+    fn hash_skill_dir_stable_and_ignores_hidden() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy_hash_test_{}_{}",
+            now_secs(),
+            std::process::id()
+        ));
+        let write = |root: &Path, files: &[(&str, &str)]| {
+            for (rel, content) in files {
+                let p = root.join(rel);
+                fs::create_dir_all(p.parent().unwrap()).unwrap();
+                fs::write(&p, content).unwrap();
+            }
+        };
+        let a = base.join("a");
+        let b = base.join("b");
+        write(
+            &a,
+            &[("SKILL.md", "# demo"), ("scripts/run.sh", "echo hi")],
+        );
+        // Same content plus hidden noise (.git / .DS_Store) must hash equal.
+        write(
+            &b,
+            &[
+                ("SKILL.md", "# demo"),
+                ("scripts/run.sh", "echo hi"),
+                (".git/HEAD", "ref: refs/heads/main"),
+                (".DS_Store", "junk"),
+            ],
+        );
+        let ha = hash_skill_dir(&a).unwrap();
+        let hb = hash_skill_dir(&b).unwrap();
+        assert_eq!(ha, hb);
+        assert!(!ha.is_empty());
+
+        // A content change must change the hash.
+        fs::write(a.join("SKILL.md"), "# demo v2").unwrap();
+        let ha2 = hash_skill_dir(&a).unwrap();
+        assert_ne!(ha, ha2);
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -3649,6 +4332,7 @@ body
         let doc = SkillDoc {
             name: "My-Skill".into(),
             description: String::new(),
+            version: String::new(),
         };
         // frontmatter name wins, lowercased
         assert_eq!(skill_identity("some-dir", &doc), "my-skill");

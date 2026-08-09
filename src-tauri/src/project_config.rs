@@ -150,18 +150,6 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
             jsonc: false,
         }),
     },
-    AgentProjectSpec {
-        name: "deveco-code",
-        root_file: Some("AGENTS.md"),
-        config_dir: ".deveco",
-        full_sub_dirs: &["rules", "skills"],
-        config_files: &[],
-        mcp: Some(ProjectMcpSpec {
-            file: ".deveco/deveco.jsonc",
-            dialect: McpDialect::JsonMcp,
-            jsonc: true,
-        }),
-    },
 ];
 
 fn find_spec(name: &str) -> Option<&'static AgentProjectSpec> {

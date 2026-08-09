@@ -4,8 +4,6 @@ import type {
   ModelsDevCatalog,
   OpencodeActionResult,
   OpencodeConfigView,
-  OpencodeForkSyncResult,
-  OpencodeForkSyncStatus,
   ProbeModelsResult,
   SetDefaultsPayload,
   UpsertModelPayload,
@@ -89,33 +87,4 @@ export async function invokeProbeModels(baseUrl: string): Promise<ProbeModelsRes
 export async function invokeRevealConfig(): Promise<OpencodeActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("reveal_opencode_config") as Promise<OpencodeActionResult>;
-}
-
-export async function invokeGetForkSyncStatus(): Promise<OpencodeForkSyncStatus> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("get_opencode_fork_sync_status") as Promise<OpencodeForkSyncStatus>;
-}
-
-export async function invokeSyncToFork(
-  agent: string,
-  syncMcp = false,
-  syncSkills = false,
-): Promise<OpencodeForkSyncResult> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("sync_opencode_to_fork", {
-    agent,
-    syncMcp,
-    syncSkills,
-  }) as Promise<OpencodeForkSyncResult>;
-}
-
-export async function invokeSyncToAllForks(
-  syncMcp = false,
-  syncSkills = false,
-): Promise<OpencodeForkSyncResult> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("sync_opencode_to_all_forks", {
-    syncMcp,
-    syncSkills,
-  }) as Promise<OpencodeForkSyncResult>;
 }

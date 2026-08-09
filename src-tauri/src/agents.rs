@@ -11,7 +11,7 @@ pub enum McpDialect {
     TomlMcpServers,
     /// Claude Desktop / CodeBuddy CN / WorkBuddy: 顶层 `mcpServers`
     JsonMcpServers,
-    /// OpenCode / DevEco: 顶层 `mcp`（JSON/JSONC）
+    /// OpenCode: 顶层 `mcp`（JSON/JSONC）
     JsonMcp,
     /// Antigravity / Gemini: `mcpServers`，远程用 `httpUrl`
     JsonGeminiMixed,
@@ -77,17 +77,6 @@ pub fn agents() -> &'static [AgentSpec] {
 /// 按 sniff `name` 查找规格。
 pub fn find(name: &str) -> Option<&'static AgentSpec> {
     AGENTS.iter().find(|a| a.name == name)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::find;
-
-    #[test]
-    fn deveco_code_searches_the_official_capitalized_cli_name() {
-        let deveco = find("deveco-code").expect("DevEco Code 应已注册");
-        assert!(deveco.search_names.contains(&"Deveco"));
-    }
 }
 
 /// Windows 上额外的静态安装路径候选（从环境变量解析，不硬编码盘符）。
@@ -248,27 +237,7 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
-    // 5. DevEco Code CLI（华为，npm 安装）
-    AgentSpec {
-        name: "deveco-code",
-        display_name: "DevEco Code",
-        icon: "De",
-        bin_paths: &[],
-        // DevEco Code 的 macOS/Linux CLI 名为 `Deveco`（保留历史小写别名，
-        // 以兼容不同安装渠道）。Unix 文件系统的可执行文件名大小写敏感。
-        search_names: &["Deveco", "deveco", "devecocli"],
-        config_paths: &["~/.config/deveco"],
-        scan_app_support: false,
-        mcp: McpSpec {
-            dialect: McpDialect::JsonMcp,
-            path: McpPath::Fixed(".config/deveco/deveco.jsonc"),
-            jsonc: true,
-        },
-        skills_roots: &["~/.config/deveco/skills"],
-        skills_supported: true,
-        shared_root: None,
-    },
-    // 6. Antigravity（Google）
+    // 5. Antigravity（Google）
     AgentSpec {
         name: "antigravity",
         display_name: "Antigravity",

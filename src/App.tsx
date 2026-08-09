@@ -19,7 +19,6 @@ import { useGlobalModalA11y } from "./components/ui";
 export type MainView =
   | "agent-sniff"
   | "ai-providers"
-  | "backup-manage"
   | "opencode-config"
   | "project-config"
   | "skills-manage"
@@ -27,7 +26,7 @@ export type MainView =
   | "claude-env"
   | "codex-env"
   | "route-aggregation";
-export type SettingsView = "preferences" | "network" | "webdav";
+export type SettingsView = "preferences" | "network" | "webdav" | "backup";
 export type AppMode = "main" | "settings";
 
 export default function App() {
@@ -95,7 +94,6 @@ export default function App() {
       <main className="main-content">
         {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
         {activeView === "ai-providers" && <AiProviders />}
-        {activeView === "backup-manage" && <BackupManage />}
         {activeView === "opencode-config" && <OpenCodeConfig />}
         {activeView === "project-config" && <ProjectConfig />}
         {activeView === "skills-manage" && <SkillsManage />}
@@ -108,6 +106,7 @@ export default function App() {
         )}
         {activeView === "network" && <NetworkSettings />}
         {activeView === "webdav" && <WebDAV />}
+        {activeView === "backup" && <BackupManage />}
       </main>
     </div>
   );

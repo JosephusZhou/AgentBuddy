@@ -28,10 +28,9 @@
 | 2 | `claude-code` | Claude Code | `~/.claude` |
 | 3 | `claude-desktop` | Claude Desktop | `~/Library/Application Support/Claude*`（含 `claude_desktop_config.json`） |
 | 4 | `opencode` | OpenCode | `~/.config/opencode` |
-| 5 | `deveco-code` | DevEco Code | `~/.config/deveco` |
-| 6 | `antigravity` | Antigravity | `~/.gemini` |
-| 7 | `codebuddy-cn` | CodeBuddy CN | `~/.codebuddy` |
-| 8 | `workbuddy` | WorkBuddy | `~/.workbuddy` |
+| 5 | `antigravity` | Antigravity | `~/.gemini` |
+| 6 | `codebuddy-cn` | CodeBuddy CN | `~/.codebuddy` |
+| 7 | `workbuddy` | WorkBuddy | `~/.workbuddy` |
 
 ---
 
@@ -45,7 +44,7 @@
 |------------|--------|----------|------------|
 | `toml.mcp_servers` | `[mcp_servers.<name>]` | TOML | Codex |
 | `json.mcpServers` | `mcpServers` | JSON | Claude Code / Desktop / CodeBuddy CN / WorkBuddy |
-| `json.mcp` | `mcp` | JSON / JSONC | OpenCode / DevEco |
+| `json.mcp` | `mcp` | JSON / JSONC | OpenCode |
 | `json.gemini_mixed` | `mcpServers`（字段混用） | JSON | Antigravity（Gemini 系） |
 
 ### 3.2 Skills 方言
@@ -78,7 +77,6 @@
 | `claude-code` | 用户：`~/.claude.json` 顶层 `mcpServers`；项目：`.mcp.json` | `json.mcpServers` | `~/.claude/skills/<name>/SKILL.md` | 高 |
 | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | `json.mcpServers` | 无明确全局 Skills（缺口） | MCP 高 / Skills 低 |
 | `opencode` | `~/.config/opencode/opencode.json`（或 `.jsonc`） | `json.mcp` | `~/.config/opencode/skills/` | 高 |
-| `deveco-code` | `~/.config/deveco/deveco.jsonc` | `json.mcp` + JSONC | `~/.config/deveco/skills/` | 中高 |
 | `antigravity` | 主：`~/.gemini/settings.json`；兼容：`~/.gemini/config/mcp_config.json` | `json.gemini_mixed` | `~/.gemini/skills/`（迁移路径另有 `antigravity-cli/skills`） | 中 |
 | `codebuddy-cn` | 优先 `~/.codebuddy/.mcp.json`，兼容 `mcp.json` | `json.mcpServers` | `~/.codebuddy/skills/`（可缺省；有 marketplace） | 中高 |
 | `workbuddy` | `~/.workbuddy/.mcp.json` | `json.mcpServers` | `~/.workbuddy/skills/` | 中高 |
@@ -320,41 +318,7 @@ url = "https://example.com/mcp"
 
 ---
 
-### 5.5 DevEco Code (`deveco-code`)
-
-**配置根**：`~/.config/deveco`  
-**背景**：基于 OpenCode 扩展，配置 schema 兼容 OpenCode。
-
-**MCP**
-
-| 项 | 值 |
-|----|-----|
-| 文件 | `~/.config/deveco/deveco.jsonc` |
-| 方言 | `json.mcp` + **JSONC**（注释、尾逗号） |
-| 键 | `mcp`，结构同 OpenCode（`local` / `remote`） |
-| 项目级 | `.deveco/deveco.jsonc`、`deveco.jsonc`（优先级高于用户） |
-
-**Skills**
-
-| 项 | 值 |
-|----|-----|
-| 全局 | `~/.config/deveco/skills/` |
-| 安装 | 社区常用 `npx skills add …` 类流程 |
-
-**推荐写策略**
-
-1. 必须用 **JSONC 安全** 读写（`jsonc-aware-merge`），不能用严格 `JSON.parse` 覆盖写坏注释  
-2. 字段映射同 OpenCode  
-3. 全局应用写 `~/.config/deveco/deveco.jsonc`  
-
-**来源**
-
-- OpenCode schema（DevEco 声明兼容）  
-- 社区/HarmonyOS 文档对 `~/.config/deveco` 路径的说明  
-
----
-
-### 5.6 Antigravity (`antigravity`)
+### 5.5 Antigravity (`antigravity`)
 
 **配置根**：`~/.gemini`  
 **说明**：Gemini CLI → Antigravity 迁移中，路径存在新旧两套；以**本机实测 + 官方迁移文档**双轨兼容。
@@ -409,7 +373,7 @@ Gemini 混用字段示例骨架：
 
 ---
 
-### 5.7 CodeBuddy CN（`codebuddy-cn`）
+### 5.6 CodeBuddy CN（`codebuddy-cn`）
 
 **配置根**：`~/.codebuddy`（原与国际版 CodeBuddy 共享；国际版移除后由 CN 独占）
 
@@ -466,7 +430,7 @@ Gemini 混用字段示例骨架：
 
 ---
 
-### 5.8 WorkBuddy (`workbuddy`)
+### 5.7 WorkBuddy (`workbuddy`)
 
 **配置根**：`~/.workbuddy`（与 CodeBuddy CN 分离）
 
@@ -510,7 +474,7 @@ AgentBuddy UI 当前模型（`McpManage.tsx`）：
 - `command` / `args[]` / `env{}`  
 - `url` / `headers{}`  
 
-| UI | `json.mcpServers`（Claude/CodeBuddy CN/WorkBuddy） | `json.mcp`（OpenCode/DevEco） | `toml.mcp_servers`（Codex） | `json.gemini_mixed` |
+| UI | `json.mcpServers`（Claude/CodeBuddy CN/WorkBuddy） | `json.mcp`（OpenCode） | `toml.mcp_servers`（Codex） | `json.gemini_mixed` |
 |----|------------------------------------------------------|------------------------------|-----------------------------|---------------------|
 | title | 对象键 `mcpServers[title]` | 对象键 `mcp[title]` | 表名 `mcp_servers.title` | `mcpServers[title]` |
 | stdio | `command` + `args` + `env`；可选 `type: "stdio"` | `type: "local"` + `command: [cmd, ...args]` + `environment` | `type="stdio"` + `command` + `args` + `[.env]` | `command` + `args` + `env` |
@@ -594,7 +558,6 @@ interface McpAdapter {
 | Antigravity 双路径 | 迁移中主路径可能变 | 主写 `settings.json`；读兼容 `mcp_config.json` |
 | Gemini `httpUrl` | 与 UI `url` 不一致 | 映射表强制转换；headers 需实测 |
 | Codex Skills 双路径 | `~/.codex/skills` vs `~/.agents/skills` | 写本机已存在者；两者都无则写 `~/.codex/skills` |
-| DevEco JSONC | 严格 JSON 写坏注释 | 必须 jsonc 库 |
 | Claude Code 大文件 | `~/.claude.json` 含大量状态 | 只改 `mcpServers` 键 |
 | 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目；项目级写入仅在「项目 AI 配置」页由用户显式勾选触发（见 §13） |
 | SSE 方言差异 | 各产品支持不一 | 能映射则映射，否则提示跳过 |
@@ -605,7 +568,7 @@ interface McpAdapter {
 ## 9. 实现优先级建议（后续任务，非本次）
 
 1. **P0**：`json.mcpServers` 适配器（覆盖 Claude Code/Desktop、CodeBuddy CN、WorkBuddy）  
-2. **P0**：`json.mcp` 适配器（OpenCode + DevEco JSONC）  
+2. **P0**：`json.mcp` 适配器（OpenCode JSONC）  
 3. **P1**：`toml.mcp_servers`（Codex）  
 4. **P1**：`json.gemini_mixed`（Antigravity）  
 5. **P2**：Skills 安装/卸载（`dir.SKILL.md`）  
@@ -627,7 +590,6 @@ interface McpAdapter {
 | `~/Library/Application Support/Claude/claude_desktop_config.json` | 存在 |
 | `~/.config/opencode/opencode.json` | 存在；键为 `mcp` |
 | `~/.config/opencode/skills` | 存在 |
-| `~/.config/deveco/deveco.jsonc` | 存在；键含 `mcp` |
 | `~/.kiro/settings/` | 存在；**尚无** `mcp.json` |
 | `~/.gemini/settings.json` | 存在；`mcpServers` + `httpUrl` |
 | `~/.gemini/config/mcp_config.json` | 存在但可能为空 |
@@ -663,7 +625,7 @@ interface McpAdapter {
 2. **Skills** 主流是 `skills/<name>/SKILL.md`；Claude Desktop 暂不支持；Codex 需兼容双路径。  
 3. **全局应用**默认只写用户级文件；Claude Code 写 `~/.claude.json` 顶层 `mcpServers`。  
 4. **CodeBuddy / CN 共享** `~/.codebuddy`，写盘必须去重。  
-5. **OpenCode / DevEco** 用 `mcp` + `local`/`remote`，不是 `mcpServers`。  
+5. **OpenCode** 用 `mcp` + `local`/`remote`，不是 `mcpServers`。  
 6. **Antigravity** 远程字段优先 `httpUrl`。  
 7. 下一步实现按 §9 优先级做适配器，删除勾选接入真实 `remove` 即可闭环 MCP 管理页。
 
@@ -682,7 +644,6 @@ interface McpAdapter {
 | `workbuddy` | `.mcp.json`（同上） | `json.mcpServers` |
 | `codex` | `.codex/config.toml` | `toml.mcp_servers` |
 | `opencode` | `opencode.json` | `json.mcp` |
-| `deveco-code` | `.deveco/deveco.jsonc` | `json.mcp` + JSONC |
 | `antigravity` | `.gemini/settings.json` | `json.gemini_mixed` |
 
 写策略：复用全局应用的方言写器（`mcp_config::apply_draft_to_file`），**按 server title 合并**、保留文件其它键、原子写；不参与「覆盖/跳过」确认。

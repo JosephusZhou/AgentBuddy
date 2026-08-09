@@ -423,11 +423,21 @@ async fn check_skill_updates() -> Result<skills::SkillUpdateCheckResult, String>
 async fn add_skill_local(
     path: String,
     tag: Option<String>,
+    overwrite_ids: Option<Vec<String>>,
 ) -> Result<skills::SkillActionResult, String> {
     let tag = tag.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || skills::add_skill_local(path, tag))
+    tauri::async_runtime::spawn_blocking(move || skills::add_skill_local(path, tag, overwrite_ids))
         .await
         .map_err(|e| format!("导入本地 skill 任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn check_skill_local_duplicate(
+    path: String,
+) -> Result<skills::SkillDuplicateCheckResult, String> {
+    tauri::async_runtime::spawn_blocking(move || skills::check_skill_local_duplicate(path))
+        .await
+        .map_err(|e| format!("检查本地 skill 重复任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -439,6 +449,15 @@ async fn pick_and_add_skill_local(
     tauri::async_runtime::spawn_blocking(move || skills::pick_local_skill_folder(tag))
         .await
         .map_err(|e| format!("选择 skill 目录任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn pick_skill_folder_path(title: Option<String>) -> Result<Option<String>, String> {
+    let title = title.unwrap_or_else(|| "选择目录".into());
+    let result = tauri::async_runtime::spawn_blocking(move || crate::platform::pick_folder(&title))
+        .await
+        .map_err(|e| format!("选择目录任务失败: {}", e))??;
+    Ok(result.map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
@@ -471,14 +490,32 @@ async fn update_skill(skill_id: String) -> Result<skills::SkillActionResult, Str
 }
 
 #[tauri::command]
-async fn export_skill_to_dir(
-    skill_id: String,
+async fn update_skills_batch(ids: Vec<String>) -> Result<skills::BatchSkillResult, String> {
+    tauri::async_runtime::spawn_blocking(move || skills::update_skills_batch(ids))
+        .await
+        .map_err(|e| format!("批量更新 skills 任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn check_export_duplicates(
+    skill_ids: Vec<String>,
+) -> Result<skills::ExportDuplicateCheckResult, String> {
+    tauri::async_runtime::spawn_blocking(move || skills::check_export_duplicates(skill_ids))
+        .await
+        .map_err(|e| format!("检查导出重复任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn export_skills_to_dir(
+    skill_ids: Vec<String>,
     install_mode: Option<String>,
-) -> Result<skills::SkillActionResult, String> {
-    // Folder picker must run on a blocking thread; osascript is sync.
+    target_dir: String,
+    overwrite_ids: Option<Vec<String>>,
+) -> Result<skills::BatchSkillResult, String> {
     let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
+    let overwrite_ids = overwrite_ids.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
-        skills::export_skill_to_dir(skill_id, install_mode)
+        skills::export_skills_to_dir(skill_ids, install_mode, target_dir, overwrite_ids)
     })
     .await
     .map_err(|e| format!("应用 skill 到目录任务失败: {}", e))?
@@ -529,20 +566,6 @@ async fn batch_delete_skills(
     })
     .await
     .map_err(|e| format!("批量删除 skill 任务失败: {}", e))?
-}
-
-#[tauri::command]
-async fn batch_export_skills_to_dir(
-    skill_ids: Vec<String>,
-    install_mode: Option<String>,
-) -> Result<skills::BatchSkillResult, String> {
-    // Folder picker must run on a blocking thread; osascript is sync.
-    let install_mode = skills::SkillInstallMode::from_wire(install_mode.as_deref());
-    tauri::async_runtime::spawn_blocking(move || {
-        skills::batch_export_skills_to_dir(skill_ids, install_mode)
-    })
-    .await
-    .map_err(|e| format!("批量应用 skill 到目录任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -811,43 +834,6 @@ async fn probe_opencode_models_endpoint(
 #[tauri::command]
 async fn reveal_opencode_config() -> Result<opencode_config::OpencodeActionResult, String> {
     opencode_config::reveal_config()
-}
-
-#[tauri::command]
-async fn get_opencode_fork_sync_status() -> Result<opencode_config::OpencodeForkSyncStatus, String>
-{
-    tauri::async_runtime::spawn_blocking(opencode_config::get_fork_sync_status)
-        .await
-        .map_err(|e| format!("查询 OpenCode fork 同步状态失败: {e}"))?
-}
-
-#[tauri::command]
-async fn sync_opencode_to_fork(
-    agent: String,
-    sync_mcp: Option<bool>,
-    sync_skills: Option<bool>,
-) -> Result<opencode_config::OpencodeForkSyncResult, String> {
-    let sync_mcp = sync_mcp.unwrap_or(false);
-    let sync_skills = sync_skills.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || {
-        opencode_config::sync_to_fork_agent(agent, sync_mcp, sync_skills)
-    })
-    .await
-    .map_err(|e| format!("同步 OpenCode 配置任务失败: {e}"))?
-}
-
-#[tauri::command]
-async fn sync_opencode_to_all_forks(
-    sync_mcp: Option<bool>,
-    sync_skills: Option<bool>,
-) -> Result<opencode_config::OpencodeForkSyncResult, String> {
-    let sync_mcp = sync_mcp.unwrap_or(false);
-    let sync_skills = sync_skills.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || {
-        opencode_config::sync_to_all_forks(sync_mcp, sync_skills)
-    })
-        .await
-        .map_err(|e| format!("批量同步 OpenCode 配置任务失败: {e}"))?
 }
 
 /* ===== Codex multi-env (CODEX_HOME) ===== */
@@ -1470,15 +1456,18 @@ pub fn run() {
             check_skill_updates,
             add_skill_local,
             pick_and_add_skill_local,
+            pick_skill_folder_path,
+            check_skill_local_duplicate,
             add_skill_github,
             add_skill_gitcode,
             update_skill,
-            export_skill_to_dir,
+            update_skills_batch,
+            check_export_duplicates,
+            export_skills_to_dir,
             open_external_url,
             delete_skill,
             apply_skill_to_agents,
             batch_delete_skills,
-            batch_export_skills_to_dir,
             batch_apply_skills_to_agents,
             batch_set_skill_tag,
             preview_cc_switch_skills,
@@ -1529,9 +1518,6 @@ pub fn run() {
             fetch_models_dev_catalog,
             probe_opencode_models_endpoint,
             reveal_opencode_config,
-            get_opencode_fork_sync_status,
-            sync_opencode_to_fork,
-            sync_opencode_to_all_forks,
             pick_project_folder,
             check_project_config_exists,
             init_project_config,
@@ -1563,8 +1549,8 @@ pub fn run() {
             }
 
             // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
-            // 否则 Agent 管理页会一直展示 kiro / codebuddy 等已下线的 agent）。
-            if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy"]) {
+            // 否则 Agent 管理页会一直展示 kiro / codebuddy / deveco-code 等已下线的 agent）。
+            if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy", "deveco-code"]) {
                 eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
             }
 

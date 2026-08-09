@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
@@ -26,6 +27,8 @@ use zip::ZipWriter;
 
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 多 WebDAV 目标并发上传时的最大并发数。
+const UPLOAD_CONCURRENCY: usize = 3;
 
 // ===== Public DTOs =====
 
@@ -628,8 +631,8 @@ fn build_generic_agent_unit(
                 }
             }
         }
-        // OpenCode / DevEco auth
-        if matches!(spec.name, "opencode" | "deveco-code") {
+        // OpenCode auth
+        if matches!(spec.name, "opencode") {
             if let Some(auth) = opencode_auth_path(spec.name) {
                 if auth.is_file() {
                     bytes = bytes.saturating_add(file_size(&auth));
@@ -663,7 +666,7 @@ fn build_generic_agent_unit(
         kind: "agent".into(),
         available,
         selected_by_default: is_found && available,
-        contains_secrets: secrets || matches!(spec.name, "opencode" | "deveco-code" | "codex"),
+        contains_secrets: secrets || matches!(spec.name, "opencode" | "codex"),
         estimated_bytes: bytes,
         path_summary: paths.into_iter().take(3).collect::<Vec<_>>().join(" · "),
         warnings: if is_found {
@@ -790,7 +793,6 @@ fn opencode_auth_path(agent_name: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let share = match agent_name {
         "opencode" => "opencode",
-        "deveco-code" => "deveco",
         _ => return None,
     };
     Some(home.join(".local/share").join(share).join("auth.json"))
@@ -1196,71 +1198,154 @@ pub fn run_backup_upload(
     }
     let rel_dir = prefix;
 
-    let mut targets = Vec::new();
-    for (idx, cid) in upload_ids.iter().enumerate() {
-        let display_name = db::get_webdav_connection_row(cid)
-            .ok()
-            .flatten()
-            .map(|r| r.name)
-            .unwrap_or_else(|| cid.clone());
-        advance(
-            &app,
-            "upload",
+    // 多目标并发上传（最多 UPLOAD_CONCURRENCY 路），各目标独立上传 + 清理旧备份。
+    let display_names: Vec<String> = upload_ids
+        .iter()
+        .map(|cid| {
+            db::get_webdav_connection_row(cid)
+                .ok()
+                .flatten()
+                .map(|r| r.name)
+                .unwrap_or_else(|| cid.clone())
+        })
+        .collect();
+    advance(
+        &app,
+        "upload",
+        if upload_ids.len() > 1 {
             format!(
-                "正在上传到 {}（{}/{}）…",
-                display_name,
-                idx + 1,
-                upload_ids.len()
-            ),
-            Some(cid.clone()),
-        );
-        match webdav::upload_file_for_connection(cid, &rel_dir, &archive_file_name, &final_path) {
-            Ok((name, remote)) => {
-                // Keep only the newest N archives in this remote dir.
-                match webdav::prune_old_backups_for_connection(
+                "正在并发上传到 {} 个 WebDAV（最多 {} 路并发）…",
+                upload_ids.len(),
+                UPLOAD_CONCURRENCY.min(upload_ids.len())
+            )
+        } else {
+            format!("正在上传到 {}…", display_names[0])
+        },
+        None,
+    );
+
+    // 并发段需要直接读写 step，先结束 advance 闭包对 step 的可变借用。
+    drop(advance);
+
+    let base_step = step;
+    let total_targets = upload_ids.len() as u32;
+    let (tx, rx) = mpsc::channel::<(usize, BackupUploadTargetResult, Vec<String>)>();
+    let next = std::sync::Mutex::new(0usize);
+    std::thread::scope(|s| {
+        let worker_n = UPLOAD_CONCURRENCY.min(upload_ids.len());
+        for _ in 0..worker_n {
+            s.spawn(|| loop {
+                let idx = {
+                    let mut g = next.lock().expect("上传任务队列锁异常");
+                    let i = *g;
+                    *g += 1;
+                    i
+                };
+                if idx >= upload_ids.len() {
+                    break;
+                }
+                let cid = &upload_ids[idx];
+                let name = &display_names[idx];
+                let res = match webdav::upload_file_for_connection(
                     cid,
                     &rel_dir,
-                    webdav::BACKUP_REMOTE_KEEP,
+                    &archive_file_name,
+                    &final_path,
                 ) {
-                    Ok(prune_warns) => {
-                        for w in prune_warns {
-                            warnings.push(format!("[{}] {}", name, w));
+                    Ok((up_name, remote)) => {
+                        // Keep only the newest N archives in this remote dir.
+                        let mut warns = Vec::new();
+                        match webdav::prune_old_backups_for_connection(
+                            cid,
+                            &rel_dir,
+                            webdav::BACKUP_REMOTE_KEEP,
+                        ) {
+                            Ok(prune_warns) => {
+                                for w in prune_warns {
+                                    warns.push(format!("[{}] {}", up_name, w));
+                                }
+                            }
+                            Err(e) => {
+                                warns.push(format!("[{}] 清理旧备份失败: {}", up_name, e));
+                            }
                         }
+                        (
+                            BackupUploadTargetResult {
+                                connection_id: cid.to_string(),
+                                name: up_name,
+                                ok: true,
+                                message: format!(
+                                    "上传成功（远程仅保留最新 {} 份）",
+                                    webdav::BACKUP_REMOTE_KEEP
+                                ),
+                                remote_path: remote,
+                            },
+                            warns,
+                        )
                     }
-                    Err(e) => {
-                        warnings.push(format!("[{}] 清理旧备份失败: {}", name, e));
-                    }
-                }
-                targets.push(BackupUploadTargetResult {
-                    connection_id: cid.to_string(),
-                    name,
-                    ok: true,
-                    message: format!(
-                        "上传成功（远程仅保留最新 {} 份）",
-                        webdav::BACKUP_REMOTE_KEEP
+                    Err(e) => (
+                        BackupUploadTargetResult {
+                            connection_id: cid.to_string(),
+                            name: name.clone(),
+                            ok: false,
+                            message: e,
+                            remote_path: String::new(),
+                        },
+                        Vec::new(),
                     ),
-                    remote_path: remote,
-                });
-            }
-            Err(e) => {
-                targets.push(BackupUploadTargetResult {
-                    connection_id: cid.to_string(),
-                    name: display_name,
-                    ok: false,
-                    message: e,
-                    remote_path: String::new(),
-                });
-            }
+                };
+                let _ = tx.send((idx, res.0, res.1));
+            });
         }
-    }
+        // 主线程接收结果并按完成进度推进 UI
+        for finished in 1..=upload_ids.len() {
+            let (idx, target, prune_warns) = rx.recv().expect("上传线程异常退出");
+            warnings.extend(prune_warns);
+            let finished = finished as u32;
+            step = base_step + finished;
+            emit_backup_progress(
+                &app,
+                BackupProgressEvent {
+                    phase: "upload".to_string(),
+                    current: step.min(total_steps),
+                    total: total_steps,
+                    message: if target.ok {
+                        format!("已上传到 {}（{}/{}）", target.name, finished, total_targets)
+                    } else {
+                        format!(
+                            "上传到 {} 失败（{}/{}）：{}",
+                            target.name, finished, total_targets, target.message
+                        )
+                    },
+                    connection_id: Some(upload_ids[idx].clone()),
+                },
+            );
+        }
+    });
+
+    let mut targets: Vec<BackupUploadTargetResult> = rx
+        .try_iter()
+        .map(|(_, t, _)| t)
+        .collect();
+    targets.sort_by(|a, b| {
+        let pa = upload_ids.iter().position(|id| *id == a.connection_id);
+        let pb = upload_ids.iter().position(|id| *id == b.connection_id);
+        pa.cmp(&pb)
+    });
+    debug_assert_eq!(targets.len(), upload_ids.len());
 
     let any_ok = targets.iter().any(|t| t.ok);
 
-    advance(
+    step = step.saturating_add(1);
+    emit_backup_progress(
         &app,
-        "finalize",
-        "正在清理临时文件…".into(),
-        None,
+        BackupProgressEvent {
+            phase: "finalize".into(),
+            current: step.min(total_steps),
+            total: total_steps,
+            message: "正在清理临时文件…".into(),
+            connection_id: None,
+        },
     );
 
     // Always drop staging — never keep a local copy of the archive.
@@ -2033,7 +2118,7 @@ fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Ve
     }
 
     // OpenCode config dir extras
-    if matches!(spec.name, "opencode" | "deveco-code") {
+    if matches!(spec.name, "opencode") {
         if let Some(auth) = opencode_auth_path(spec.name) {
             push_file(
                 out,

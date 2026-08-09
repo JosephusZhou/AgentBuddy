@@ -105,48 +105,6 @@ export interface ProbeModelsResult {
   modelIds: string[];
 }
 
-/** OpenCode 同源 fork（如 DevEco Code）同步目标 */
-export interface OpencodeForkTarget {
-  agent: string;
-  displayName: string;
-  found: boolean;
-  configPath: string;
-  configExists: boolean;
-  /** in_sync | out_of_sync | missing | no_source | not_installed | error */
-  status: string;
-  providerCount: number;
-  mcpCount: number;
-  sourceProviderCount: number;
-  sourceMcpCount: number;
-  message: string;
-}
-
-export interface OpencodeForkSyncStatus {
-  sourceConfigPath: string;
-  sourceExists: boolean;
-  sourceProviderCount: number;
-  sourceMcpCount: number;
-  targets: OpencodeForkTarget[];
-}
-
-export interface OpencodeForkSyncItem {
-  agent: string;
-  displayName: string;
-  ok: boolean;
-  status: string;
-  providerCount: number;
-  mcpCount: number;
-  authKeysSynced: number;
-  skillsSynced: number;
-  message: string;
-}
-
-export interface OpencodeForkSyncResult {
-  ok: boolean;
-  message: string;
-  results: OpencodeForkSyncItem[];
-}
-
 export interface SetDefaultsPayload {
   model?: string | null;
   smallModel?: string | null;

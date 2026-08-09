@@ -156,7 +156,7 @@ Managed fields (non-default envs): `config.toml` → `model` / `model_provider` 
 
 Identifiers (`name`) must stay stable — MCP writers and DB keys use them:
 
-`codex`, `claude-code`, `claude-desktop`, `opencode`, `deveco-code`, `kiro`, `antigravity`, `codebuddy`, `codebuddy-cn`, `workbuddy`
+`codex`, `claude-code`, `claude-desktop`, `opencode`, `kiro`, `antigravity`, `codebuddy`, `codebuddy-cn`, `workbuddy`
 
 Rules:
 
@@ -177,14 +177,14 @@ Implements apply/remove/sniff against each agent’s user-global config. Spec so
 |---------|--------|------------|
 | `TomlMcpServers` | codex | `~/.codex/config.toml` → `[mcp_servers.*]` |
 | `ClaudeJsonUser` / `JsonMcpServers` | claude-code, claude-desktop, kiro, codebuddy*, workbuddy | top-level `mcpServers` |
-| `JsonMcp` | opencode, deveco-code | top-level `mcp` (JSON/JSONC) |
+| `JsonMcp` | opencode | top-level `mcp` (JSON/JSONC) |
 | `JsonGeminiMixed` | antigravity | `~/.gemini/settings.json` `mcpServers` |
 
 Important behaviors:
 
 - `dedupe_write_targets`: codebuddy + codebuddy-cn write once to the shared root (`shared_root`)
 - Writes are atomic (temp file + rename)
-- JSONC (OpenCode/DevEco) is parsed with `json5`; rewrite is pretty JSON (comments not preserved)
+- JSONC (OpenCode) is parsed with `json5`; rewrite is pretty JSON (comments not preserved)
 - Sniff merges disk entries into SQLite by title (case-insensitive); disk is source of truth for `appliedAgents`
 - Internal smoke titles prefixed `__agentbuddy` are ignored on sniff
 - `test_mcp_connection`: runtime probe only (stdio spawns the process + sends `initialize`; http/sse POSTs `initialize`); never writes config
@@ -208,7 +208,7 @@ Important behaviors:
 
 Per-repo init for a picked folder: skeleton (Full / Symlink modes) plus two optional selections the UI offers from app-configured data:
 
-- **MCP（可选）**：从 MCP 管理页的列表勾选，写入每个被勾选 agent 的**项目级** MCP 文件（`AGENT_SPECS[].mcp`）：claude-code / codebuddy-cn / workbuddy → 项目根 `.mcp.json`（同路径去重只写一次）；codex → `.codex/config.toml`；opencode → `opencode.json`；deveco-code → `.deveco/deveco.jsonc`（JSONC）；antigravity → `.gemini/settings.json`。写入复用 `mcp_config::apply_draft_to_file` 的方言写器，按 server title 合并（保留文件其它键），不受 overwrite 开关阻断、不计入冲突列表。
+- **MCP（可选）**：从 MCP 管理页的列表勾选，写入每个被勾选 agent 的**项目级** MCP 文件（`AGENT_SPECS[].mcp`）：claude-code / codebuddy-cn / workbuddy → 项目根 `.mcp.json`（同路径去重只写一次）；codex → `.codex/config.toml`；opencode → `opencode.json`；antigravity → `.gemini/settings.json`。写入复用 `mcp_config::apply_draft_to_file` 的方言写器，按 server title 合并（保留文件其它键），不受 overwrite 开关阻断、不计入冲突列表。
 - **Skills（可选）**：从技能库（`skills::library_skill_dir`）勾选，以「软链接 / 完整复制」安装到 `<repo>/.agents/skills/<id>`（overwrite 语义与骨架一致：非空真实目录拒绝删除）。Symlink 模式下 `<config_dir>/skills` 本已链接到 `.agents/skills`；Full 模式下选中 skills 时改为为每个 agent 创建 `<config_dir>/skills → ../.agents/skills` 软链接（跳过创建真实 skills 子目录），实现多 agent 共享。
 
 Implemented end-to-end today: Agent sniff, MCP manage, Skills manage, Claude Env (multi `CLAUDE_CONFIG_DIR`), Codex Env (multi `CODEX_HOME`), OpenCode provider/model config, Project AI config (per-repo Full/Symlink skeleton under a picked folder; see `project_config.rs` / `PROJECT_AI_CONFIG_IMPROVEMENTS.md`), Preferences (theme), WebDAV, Backup manage (pack + multi-WebDAV upload; restore is future). See `BACKUP_MANAGE_PLAN.md`.

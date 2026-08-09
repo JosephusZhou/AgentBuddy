@@ -17,7 +17,11 @@ import {
   SlidersHorizontal,
   Sparkles,
   SquareTerminal,
+  Route,
+  Cog,
+  Wrench,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 interface SidebarProps {
   mode: AppMode;
@@ -28,6 +32,52 @@ interface SidebarProps {
   onEnterSettings: () => void;
   onExitSettings: () => void;
 }
+
+interface MenuChild {
+  view: MainView;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface MenuGroupDef {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  items: MenuChild[];
+}
+
+const MENU_GROUPS: MenuGroupDef[] = [
+  {
+    id: "management",
+    label: "管理",
+    icon: Wrench,
+    items: [
+      { view: "agent-sniff", label: "Agent管理", icon: Bot },
+      { view: "mcp-manage", label: "MCP管理", icon: Blocks },
+      { view: "skills-manage", label: "skills管理", icon: Sparkles },
+    ],
+  },
+  {
+    id: "routing",
+    label: "路由",
+    icon: Route,
+    items: [
+      { view: "ai-providers", label: "AI供应商", icon: CloudCog },
+      { view: "route-aggregation", label: "路由聚合", icon: Network },
+    ],
+  },
+  {
+    id: "env-config",
+    label: "环境与配置",
+    icon: Cog,
+    items: [
+      { view: "claude-env", label: "Claude环境", icon: Layers },
+      { view: "codex-env", label: "Codex环境", icon: SquareTerminal },
+      { view: "opencode-config", label: "OpenCode配置", icon: Braces },
+      { view: "project-config", label: "项目AI配置", icon: FolderCog },
+    ],
+  },
+];
 
 export default function Sidebar({
   mode,
@@ -52,76 +102,32 @@ export default function Sidebar({
             </div>
           </div>
           <nav className="sidebar-nav">
-            <button
-              className={`menu-item ${mainView === "agent-sniff" ? "active" : ""}`}
-              onClick={() => onNavigateMain("agent-sniff")}
-            >
-              <Bot size={18} strokeWidth={1.8} />
-              <span className="menu-label">Agent管理</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "mcp-manage" ? "active" : ""}`}
-              onClick={() => onNavigateMain("mcp-manage")}
-            >
-              <Blocks size={18} strokeWidth={1.8} />
-              <span className="menu-label">mcp管理</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "skills-manage" ? "active" : ""}`}
-              onClick={() => onNavigateMain("skills-manage")}
-            >
-              <Sparkles size={18} strokeWidth={1.8} />
-              <span className="menu-label">skills管理</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "ai-providers" ? "active" : ""}`}
-              onClick={() => onNavigateMain("ai-providers")}
-            >
-              <CloudCog size={18} strokeWidth={1.8} />
-              <span className="menu-label">AI供应商</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "route-aggregation" ? "active" : ""}`}
-              onClick={() => onNavigateMain("route-aggregation")}
-            >
-              <Network size={18} strokeWidth={1.8} />
-              <span className="menu-label">路由聚合</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "claude-env" ? "active" : ""}`}
-              onClick={() => onNavigateMain("claude-env")}
-            >
-              <Layers size={18} strokeWidth={1.8} />
-              <span className="menu-label">Claude环境</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "codex-env" ? "active" : ""}`}
-              onClick={() => onNavigateMain("codex-env")}
-            >
-              <SquareTerminal size={18} strokeWidth={1.8} />
-              <span className="menu-label">Codex环境</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "opencode-config" ? "active" : ""}`}
-              onClick={() => onNavigateMain("opencode-config")}
-            >
-              <Braces size={18} strokeWidth={1.8} />
-              <span className="menu-label">OpenCode配置</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "project-config" ? "active" : ""}`}
-              onClick={() => onNavigateMain("project-config")}
-            >
-              <FolderCog size={18} strokeWidth={1.8} />
-              <span className="menu-label">项目AI配置</span>
-            </button>
-            <button
-              className={`menu-item ${mainView === "backup-manage" ? "active" : ""}`}
-              onClick={() => onNavigateMain("backup-manage")}
-            >
-              <Archive size={18} strokeWidth={1.8} />
-              <span className="menu-label">备份管理</span>
-            </button>
+            {MENU_GROUPS.map((group) => {
+              const GroupIcon = group.icon;
+              return (
+                <div className="menu-group" key={group.id}>
+                  <div className="menu-group-header">
+                    <GroupIcon size={15} strokeWidth={1.8} />
+                    <span>{group.label}</span>
+                  </div>
+                  <div className="menu-group-items">
+                    {group.items.map((item) => {
+                      const ItemIcon = item.icon;
+                      return (
+                        <button
+                          key={item.view}
+                          className={`menu-item ${mainView === item.view ? "active" : ""}`}
+                          onClick={() => onNavigateMain(item.view)}
+                        >
+                          <ItemIcon size={18} strokeWidth={1.8} />
+                          <span className="menu-label">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </nav>
           <div className="sidebar-bottom">
             <button className="menu-item" onClick={onEnterSettings}>
@@ -160,6 +166,13 @@ export default function Sidebar({
             >
               <Cloud size={18} strokeWidth={1.8} />
               <span className="menu-label">WebDAV</span>
+            </button>
+            <button
+              className={`menu-item ${settingsView === "backup" ? "active" : ""}`}
+              onClick={() => onNavigateSettings("backup")}
+            >
+              <Archive size={18} strokeWidth={1.8} />
+              <span className="menu-label">备份</span>
             </button>
           </nav>
         </>

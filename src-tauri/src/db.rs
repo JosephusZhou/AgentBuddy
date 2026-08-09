@@ -125,6 +125,7 @@ fn get_connection() -> Result<Connection, String> {
     // Additive migrations for DBs created before a column existed. `ALTER TABLE
     // ADD COLUMN` errors if the column is already present, so ignore that case.
     ensure_column(&conn, "skills", "tag", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(&conn, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "ai_providers", "openai_default_model", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "ai_providers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(&conn, "claude_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
@@ -544,6 +545,7 @@ fn row_to_skill_meta(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, Skill
             remote_ref: row.get(8)?,
             created_at: row.get(9)?,
             updated_at: row.get(10)?,
+            content_hash: row.get(11)?,
         },
     ))
 }
@@ -554,7 +556,7 @@ pub fn load_skill_meta_map() -> Result<HashMap<String, SkillMetaEntry>, String> 
     let mut stmt = conn
         .prepare(
             "SELECT id, source, repo_url, github_owner, github_repo, github_path,
-                    tag, local_ref, remote_ref, created_at, updated_at
+                    tag, local_ref, remote_ref, created_at, updated_at, content_hash
              FROM skills",
         )
         .map_err(|e| format!("Failed to prepare skills query: {}", e))?;
@@ -573,7 +575,7 @@ pub fn get_skill_meta(id: &str) -> Result<Option<SkillMetaEntry>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, source, repo_url, github_owner, github_repo, github_path,
-                    tag, local_ref, remote_ref, created_at, updated_at
+                    tag, local_ref, remote_ref, created_at, updated_at, content_hash
              FROM skills
              WHERE id = ?1",
         )
@@ -590,8 +592,8 @@ pub fn upsert_skill_meta(id: &str, entry: &SkillMetaEntry) -> Result<(), String>
     conn.execute(
         "INSERT INTO skills
             (id, source, repo_url, github_owner, github_repo, github_path,
-             tag, local_ref, remote_ref, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             tag, local_ref, remote_ref, created_at, updated_at, content_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
             source = excluded.source,
             repo_url = excluded.repo_url,
@@ -602,7 +604,8 @@ pub fn upsert_skill_meta(id: &str, entry: &SkillMetaEntry) -> Result<(), String>
             local_ref = excluded.local_ref,
             remote_ref = excluded.remote_ref,
             created_at = skills.created_at,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            content_hash = excluded.content_hash",
         params![
             id,
             skill_source_to_str(&entry.source),
@@ -615,6 +618,7 @@ pub fn upsert_skill_meta(id: &str, entry: &SkillMetaEntry) -> Result<(), String>
             entry.remote_ref,
             entry.created_at,
             entry.updated_at,
+            entry.content_hash,
         ],
     )
     .map_err(|e| format!("Failed to upsert skill {}: {}", id, e))?;
@@ -1288,6 +1292,7 @@ mod tests {
             remote_ref: "def".into(),
             created_at: 1,
             updated_at: 2,
+            content_hash: "hash0".into(),
         };
         upsert_skill_meta(&id, &entry).expect("upsert");
         let loaded = get_skill_meta(&id).expect("get").expect("exists");

@@ -64,5 +64,4 @@ export const AGENT_PROJECT_INFOS: AgentProjectInfo[] = [
   { name: "antigravity",  displayName: "Antigravity",  rootFile: "GEMINI.md",  configDir: ".gemini"    },
   { name: "codebuddy-cn", displayName: "CodeBuddy CN", rootFile: "AGENTS.md",  configDir: ".codebuddy" },
   { name: "workbuddy",    displayName: "WorkBuddy",    rootFile: "AGENTS.md",  configDir: ".workbuddy" },
-  { name: "deveco-code",  displayName: "DevEco Code",  rootFile: "AGENTS.md",  configDir: ".deveco"    },
 ];

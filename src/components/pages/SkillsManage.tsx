@@ -12,6 +12,8 @@ import type {
   CcSwitchPreviewResult,
   BatchApplyMode,
   SkillInstallMode,
+  SkillDuplicateConflict,
+  ExportDuplicateConflict,
 } from "./skills/types";
 
 import {
@@ -19,18 +21,19 @@ import {
   invokePreviewSniff,
   invokeImportSniffed,
   invokeCheckUpdates,
-  invokePickLocal,
   invokeAddGithub,
   invokeAddGitcode,
-  invokeExportSkill,
+  invokeCheckExportDuplicates,
+  invokeExportSkillsToDir,
   invokeUpdateSkill,
+  invokeUpdateSkillsBatch,
   invokeDeleteSkill,
   invokeApplySkill,
   invokeAddLocalPath,
+  invokeCheckLocalDuplicate,
   invokePreviewCcSwitch,
   invokeMigrateCcSwitch,
   invokeBatchDelete,
-  invokeBatchExport,
   invokeBatchApply,
   invokeBatchSetTag,
 } from "./skills/api";
@@ -62,6 +65,17 @@ import {
 } from "./skills/controls";
 import { AgentFilterChips } from "../agent-filter";
 
+/* ===== Module-level persistence for update progress =====
+ * When the user switches pages, conditional rendering unmounts SkillsManage.
+ * These variables persist outside React's lifecycle so that when the component
+ * remounts, it can restore the in-flight update progress state.
+ */
+const _persist = {
+  updatingId: null as string | null,
+  isBatchRunning: false,
+  batchUpdatingScope: null as "available" | "selected" | null,
+};
+
 /* ===== Component ===== */
 
 export default function SkillsManage() {
@@ -78,7 +92,12 @@ export default function SkillsManage() {
   const [directoryApplyMode, setDirectoryApplyMode] = useState<SkillInstallMode>("link");
   const [batchDirectoryApplyOpen, setBatchDirectoryApplyOpen] = useState(false);
   const [batchDirectoryApplyMode, setBatchDirectoryApplyMode] = useState<SkillInstallMode>("link");
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // Initialise from module-level store so progress survives page navigation
+  const [updatingId, setUpdatingId] = useState<string | null>(_persist.updatingId);
+  const setUpdatingIdP = useCallback((v: string | null) => {
+    _persist.updatingId = v;
+    setUpdatingId(v);
+  }, []);
   const [deleteTarget, setDeleteTarget] = useState<SkillRecord | null>(null);
   const [deleteAgentCopies, setDeleteAgentCopies] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -98,6 +117,17 @@ export default function SkillsManage() {
   const [formError, setFormError] = useState("");
   // 添加时选择的标签（空 = 无标签）
   const [addTag, setAddTag] = useState("");
+  // 本地导入重复冲突弹窗
+  const [dupConflicts, setDupConflicts] = useState<SkillDuplicateConflict[] | null>(null);
+  const [dupCheckedPath, setDupCheckedPath] = useState("");
+  const [dupChecking, setDupChecking] = useState(false);
+  const [dupSelectedOverwrite, setDupSelectedOverwrite] = useState<Set<string>>(new Set());
+  // 导出/应用到目录的重复冲突弹窗
+  const [exportConflicts, setExportConflicts] = useState<ExportDuplicateConflict[] | null>(null);
+  const [exportTargetDir, setExportTargetDir] = useState("");
+  const [exportSkillIds, setExportSkillIds] = useState<string[]>([]);
+  const [exportInstallMode, setExportInstallMode] = useState<SkillInstallMode>("link");
+  const [exportSelectedOverwrite, setExportSelectedOverwrite] = useState<Set<string>>(new Set());
   const githubInputRef = useRef<HTMLInputElement>(null);
   const gitcodeInputRef = useRef<HTMLInputElement>(null);
   const hasLoaded = useRef(false);
@@ -131,8 +161,16 @@ export default function SkillsManage() {
   // 显式选择模式：进入后卡片改为可勾选，隐藏单卡操作，底部浮出操作条
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
-  const [batchUpdatingScope, setBatchUpdatingScope] = useState<"available" | "selected" | null>(null);
+  const [isBatchRunning, setIsBatchRunning] = useState(_persist.isBatchRunning);
+  const setIsBatchRunningP = useCallback((v: boolean) => {
+    _persist.isBatchRunning = v;
+    setIsBatchRunning(v);
+  }, []);
+  const [batchUpdatingScope, setBatchUpdatingScope] = useState<"available" | "selected" | null>(_persist.batchUpdatingScope);
+  const setBatchUpdatingScopeP = useCallback((v: "available" | "selected" | null) => {
+    _persist.batchUpdatingScope = v;
+    setBatchUpdatingScope(v);
+  }, []);
   // 批量删除确认
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [batchDeleteAgentCopies, setBatchDeleteAgentCopies] = useState(false);
@@ -339,24 +377,76 @@ export default function SkillsManage() {
     setFormError("");
     setStatusMsg("请选择本地 Skill 目录…");
     try {
-      const res = await invokePickLocal(addTag.trim());
-      if (res.ok) {
-        setShowAddModal(false);
-        await reload({ quiet: true });
-        setStatusMsg(res.message);
-      } else if (res.message && res.message !== "已取消选择") {
-        setFormError(res.message);
-        setStatusMsg(res.message);
-      } else {
-        setStatusMsg(res.message || "已取消");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const pickedPath = (await invoke("pick_skill_folder_path", {
+        title: "选择 Skill 目录（需包含 SKILL.md）",
+      }).catch(() => null)) as string | null;
+      if (!pickedPath) {
+        setStatusMsg("已取消选择");
+        return;
       }
+      setLocalPath(pickedPath);
+      await checkAndImportLocal(pickedPath, addTag.trim());
     } catch (e) {
       setFormError(String(e));
       setStatusMsg(`导入失败: ${e}`);
     } finally {
       isPickingLocalFolder.current = false;
     }
-  }, [isAdding, reload, addTag]);
+  }, [isAdding, addTag]);
+
+  const doImportLocal = useCallback(
+    async (path: string, tag: string, overwriteIds?: string[]) => {
+      setIsAdding(true);
+      setFormError("");
+      try {
+        const res = await invokeAddLocalPath(path, tag, overwriteIds);
+        if (res.ok) {
+          setShowAddModal(false);
+          await reload({ quiet: true });
+          setStatusMsg(res.message);
+        } else {
+          setFormError(res.message);
+        }
+      } catch (e) {
+        setFormError(String(e));
+      } finally {
+        setIsAdding(false);
+      }
+    },
+    [reload]
+  );
+
+  const checkAndImportLocal = useCallback(
+    async (path: string, tag: string) => {
+      setDupChecking(true);
+      setFormError("");
+      try {
+        const checkRes = await invokeCheckLocalDuplicate(path);
+        if (!checkRes.ok) {
+          setFormError(checkRes.message);
+          setStatusMsg(checkRes.message);
+          return;
+        }
+        if (checkRes.conflicts.length > 0) {
+          // Show conflict dialog
+          setDupCheckedPath(path);
+          setDupConflicts(checkRes.conflicts);
+          // Default: skip all (no overwrite selected)
+          setDupSelectedOverwrite(new Set());
+          return;
+        }
+        // No conflicts, import directly
+        await doImportLocal(path, tag);
+      } catch (e) {
+        setFormError(String(e));
+        setStatusMsg(`检查失败: ${e}`);
+      } finally {
+        setDupChecking(false);
+      }
+    },
+    [doImportLocal]
+  );
 
   const doAddLocalPath = useCallback(async () => {
     const path = localPath.trim();
@@ -364,24 +454,9 @@ export default function SkillsManage() {
       setFormError("请填写本地目录路径");
       return;
     }
-    if (isAdding) return;
-    setIsAdding(true);
-    setFormError("");
-    try {
-      const res = await invokeAddLocalPath(path, addTag.trim());
-      if (res.ok) {
-        setShowAddModal(false);
-        await reload({ quiet: true });
-        setStatusMsg(res.message);
-      } else {
-        setFormError(res.message);
-      }
-    } catch (e) {
-      setFormError(String(e));
-    } finally {
-      setIsAdding(false);
-    }
-  }, [isAdding, localPath, reload, addTag]);
+    if (isAdding || dupChecking) return;
+    await checkAndImportLocal(path, addTag.trim());
+  }, [isAdding, dupChecking, localPath, addTag, checkAndImportLocal]);
 
   const doAddGithub = useCallback(async () => {
     const url = githubUrl.trim();
@@ -603,27 +678,60 @@ export default function SkillsManage() {
     setDirectoryApplyMode("link");
   }, []);
 
+  const doExportToDir = useCallback(
+    async (skillIds: string[], installMode: SkillInstallMode, targetDir: string, overwriteIds?: string[]) => {
+      setExportingId(skillIds[0] || null);
+      setIsBatchRunning(true);
+      try {
+        const res = await invokeExportSkillsToDir(skillIds, installMode, targetDir, overwriteIds);
+        setStatusMsg(res.message);
+        setDirectoryApplyTarget(null);
+        setBatchDirectoryApplyOpen(false);
+        await reload({ quiet: true });
+      } catch (e) {
+        setStatusMsg(`应用到目录失败: ${e}`);
+      } finally {
+        setExportingId(null);
+        setIsBatchRunning(false);
+      }
+    },
+    [reload]
+  );
+
   const confirmDirectoryApply = useCallback(async () => {
     if (!directoryApplyTarget || exportingId) return;
     const skill = directoryApplyTarget;
-    const modeLabel = directoryApplyMode === "link" ? "软链接" : "完整复制";
     setExportingId(skill.id);
     setStatusMsg(`请选择「${skill.title}」的应用目标目录…`);
     try {
-      const res = await invokeExportSkill(skill.id, directoryApplyMode);
-      setStatusMsg(res.ok ? res.message : res.message || "已取消");
-      if (res.ok) setDirectoryApplyTarget(null);
+      const checkRes = await invokeCheckExportDuplicates([skill.id]);
+      if (!checkRes.ok) {
+        setStatusMsg(checkRes.message || "已取消");
+        return;
+      }
+      if (checkRes.conflicts.length > 0) {
+        // Show conflict dialog, close the export mode selection modal
+        setDirectoryApplyTarget(null);
+        setExportConflicts(checkRes.conflicts);
+        setExportTargetDir(checkRes.targetDir);
+        setExportSkillIds([skill.id]);
+        setExportInstallMode(directoryApplyMode);
+        setExportSelectedOverwrite(new Set());
+        return;
+      }
+      // No conflicts, export directly
+      await doExportToDir([skill.id], directoryApplyMode, checkRes.targetDir);
     } catch (e) {
-      setStatusMsg(`以${modeLabel}应用到目录失败: ${e}`);
+      setStatusMsg(`应用到目录失败: ${e}`);
     } finally {
       setExportingId(null);
     }
-  }, [directoryApplyMode, directoryApplyTarget, exportingId]);
+  }, [directoryApplyMode, directoryApplyTarget, exportingId, doExportToDir]);
 
   const doUpdateSkill = useCallback(
     async (skill: SkillRecord) => {
       if (updatingId) return;
-      setUpdatingId(skill.id);
+      setUpdatingIdP(skill.id);
       setStatusMsg(`正在从远端更新「${skill.title}」…`);
       try {
         const res = await invokeUpdateSkill(skill.id);
@@ -632,10 +740,10 @@ export default function SkillsManage() {
       } catch (e) {
         setStatusMsg(`更新失败: ${e}`);
       } finally {
-        setUpdatingId(null);
+        setUpdatingIdP(null);
       }
     },
-    [updatingId, reload]
+    [updatingId, reload, setUpdatingIdP]
   );
 
   const confirmDelete = useCallback(async () => {
@@ -905,42 +1013,30 @@ export default function SkillsManage() {
         return;
       }
 
-      setIsBatchRunning(true);
-      setBatchUpdatingScope(opts?.scope ?? null);
+      setIsBatchRunningP(true);
+      setBatchUpdatingScopeP(opts?.scope ?? null);
       setStatusMsg(`正在更新 ${remoteTargets.length} 个技能…`);
-      let succeeded = 0;
-      let failed = 0;
-      const errors: string[] = [];
       try {
-        for (const skill of remoteTargets) {
-          try {
-            const res = await invokeUpdateSkill(skill.id);
-            if (res.ok) {
-              succeeded += 1;
-            } else {
-              failed += 1;
-              errors.push(`${skill.title}: ${res.message}`);
-            }
-          } catch (e) {
-            failed += 1;
-            errors.push(`${skill.title}: ${String(e)}`);
-          }
-        }
+        // 后端按仓库分组并发克隆替换，同仓库多技能共享一次克隆
+        const res = await invokeUpdateSkillsBatch(remoteTargets.map((s) => s.id));
         await reload({ quiet: true });
-        if (failed === 0) {
-          setStatusMsg(`已更新 ${succeeded} 个技能到远端最新`);
+        if (res.failed === 0) {
+          setStatusMsg(res.message || `已更新 ${res.succeeded} 个技能到远端最新`);
           if (opts?.exitWhenDone) exitBatchMode();
         } else {
           setStatusMsg(
-            `批量更新结束：成功 ${succeeded}，失败 ${failed}。${errors.slice(0, 3).join("；")}`
+            `批量更新结束：成功 ${res.succeeded}，失败 ${res.failed}。${res.errors.slice(0, 3).join("；")}`
           );
         }
+      } catch (e) {
+        await reload({ quiet: true });
+        setStatusMsg(`批量更新失败: ${String(e)}`);
       } finally {
-        setBatchUpdatingScope(null);
-        setIsBatchRunning(false);
+        setBatchUpdatingScopeP(null);
+        setIsBatchRunningP(false);
       }
     },
-    [isBatchRunning, reload, exitBatchMode]
+    [isBatchRunning, reload, exitBatchMode, setIsBatchRunningP, setBatchUpdatingScopeP]
   );
 
   const doPullAvailableUpdates = useCallback(async () => {
@@ -999,22 +1095,30 @@ export default function SkillsManage() {
       setStatusMsg("请先选择要应用的技能");
       return;
     }
-    const modeLabel = batchDirectoryApplyMode === "link" ? "软链接" : "完整复制";
     setIsBatchRunning(true);
     setStatusMsg("请选择应用目标目录…");
     try {
-      const res = await invokeBatchExport(ids, batchDirectoryApplyMode);
-      setStatusMsg(res.message);
-      if (res.succeeded > 0) {
-        setBatchDirectoryApplyOpen(false);
-        exitBatchMode();
+      const checkRes = await invokeCheckExportDuplicates(ids);
+      if (!checkRes.ok) {
+        setStatusMsg(checkRes.message || "已取消");
+        return;
       }
+      if (checkRes.conflicts.length > 0) {
+        setBatchDirectoryApplyOpen(false);
+        setExportConflicts(checkRes.conflicts);
+        setExportTargetDir(checkRes.targetDir);
+        setExportSkillIds(ids);
+        setExportInstallMode(batchDirectoryApplyMode);
+        setExportSelectedOverwrite(new Set());
+        return;
+      }
+      await doExportToDir(ids, batchDirectoryApplyMode, checkRes.targetDir);
     } catch (e) {
-      setStatusMsg(`批量以${modeLabel}应用到目录失败: ${e}`);
+      setStatusMsg(`批量应用到目录失败: ${e}`);
     } finally {
       setIsBatchRunning(false);
     }
-  }, [batchDirectoryApplyMode, isBatchRunning, validSelectedIds, exitBatchMode]);
+  }, [batchDirectoryApplyMode, isBatchRunning, validSelectedIds, doExportToDir]);
 
   // 打开批量应用弹窗：默认追加模式，Agent 选择初始为空
   const openBatchApply = useCallback(() => {
@@ -1118,7 +1222,7 @@ export default function SkillsManage() {
           <h1 className="content-title">Skills 管理</h1>
           <div className="header-actions">
             {/* 从右到左：添加、扫描、检查更新、从 CC Switch 迁移、批量管理 */}
-            {updateAvailableCount > 0 && (
+            {(updateAvailableCount > 0 || batchUpdatingScope === "available") && (
               <button
                 className={`action-btn ${batchUpdatingScope === "available" ? "sniffing" : ""}`}
                 data-tooltip={
@@ -1386,6 +1490,9 @@ export default function SkillsManage() {
                       <div className="skill-card-main">
                         <div className="skill-card-title-row">
                           <span className="skill-card-title">{skill.title}</span>
+                          {skill.version?.trim() && (
+                            <span className="skill-tag skill-tag-version">v{skill.version.trim()}</span>
+                          )}
                           {isRemote ? (
                             (() => {
                               const repoUrl = skillRepoUrl(skill);
@@ -1432,11 +1539,13 @@ export default function SkillsManage() {
                           {isRemote && (
                             <button
                               type="button"
-                              className="claude-env-action-btn"
+                              className={`claude-env-action-btn ${updatingId === skill.id ? "sniffing" : ""}`}
                               data-tooltip={
-                                skill.updateAvailable
-                                  ? "有更新，点击拉取远端最新"
-                                  : "更新到远端最新"
+                                updatingId === skill.id
+                                  ? "正在更新…"
+                                  : skill.updateAvailable
+                                    ? "有更新，点击拉取远端最新"
+                                    : "更新到远端最新"
                               }
                               onClick={() => void doUpdateSkill(skill)}
                               disabled={updatingId === skill.id || isDeleting || isBatchRunning}
@@ -1666,7 +1775,7 @@ export default function SkillsManage() {
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => void doPickLocal()}
-                    disabled={isAdding}
+                    disabled={isAdding || dupChecking}
                   >
                     浏览文件夹…
                   </button>
@@ -1674,9 +1783,9 @@ export default function SkillsManage() {
                     type="button"
                     className="btn btn-primary"
                     onClick={() => void doAddLocalPath()}
-                    disabled={isAdding || !localPath.trim()}
+                    disabled={isAdding || dupChecking || !localPath.trim()}
                   >
-                    {isAdding ? "导入中…" : "导入路径"}
+                    {dupChecking ? "检查中…" : isAdding ? "导入中…" : "导入路径"}
                   </button>
                 </div>
               </>
@@ -1754,6 +1863,260 @@ export default function SkillsManage() {
           </div>
         </div>
       </div>
+
+      {/* ===== Duplicate Conflict Modal ===== */}
+      {dupConflicts && (
+        <div className="modal-overlay visible">
+          <div className="modal modal-lg">
+            <div className="modal-header">
+              <h2 className="modal-title">检测到重复技能</h2>
+              <button
+                className="modal-close"
+                onClick={() => {
+                  setDupConflicts(null);
+                  setDupSelectedOverwrite(new Set());
+                }}
+                disabled={isAdding}
+              >
+                <IconClose />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="skill-add-hint">
+                以下技能在技能库中已存在，请选择要覆盖的技能。覆盖将替换已有技能的全部文件，未选择的将跳过。
+              </p>
+              <div className="skill-dup-toolbar">
+                <label className="skill-dup-select-all">
+                  <input
+                    type="checkbox"
+                    checked={dupConflicts.length > 0 && dupSelectedOverwrite.size === dupConflicts.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setDupSelectedOverwrite(new Set(dupConflicts.map((c) => c.existingId)));
+                      } else {
+                        setDupSelectedOverwrite(new Set());
+                      }
+                    }}
+                    disabled={isAdding}
+                  />
+                  <span>全选</span>
+                </label>
+                <span className="skill-dup-count">
+                  已选 {dupSelectedOverwrite.size} / {dupConflicts.length}
+                </span>
+              </div>
+              <div className="skill-dup-list">
+                {dupConflicts.map((c) => {
+                  const checked = dupSelectedOverwrite.has(c.existingId);
+                  return (
+                    <div
+                      key={c.existingId}
+                      className={`skill-dup-item ${checked ? "checked" : ""}`}
+                    >
+                      <label className="skill-dup-check">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setDupSelectedOverwrite((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(c.existingId)) next.delete(c.existingId);
+                              else next.add(c.existingId);
+                              return next;
+                            });
+                          }}
+                          disabled={isAdding}
+                        />
+                      </label>
+                      <div className="skill-dup-info">
+                        <div className="skill-dup-name">{c.name}</div>
+                        <div className="skill-dup-versions">
+                          <span className="skill-dup-version-existing">
+                            已有版本: <strong>{c.existingVersion || "未标注"}</strong>
+                            <span className="skill-dup-source">
+                              （{c.existingSource === "github" ? "GitHub" : c.existingSource === "gitcode" ? "GitCode" : "本地"}）
+                            </span>
+                          </span>
+                          <span className="skill-dup-version-arrow">→</span>
+                          <span className="skill-dup-version-import">
+                            导入版本: <strong>{c.importVersion || "未标注"}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setDupConflicts(null);
+                  setDupSelectedOverwrite(new Set());
+                }}
+                disabled={isAdding}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  // Skip all conflicts, import only non-conflicting skills
+                  setDupConflicts(null);
+                  setDupSelectedOverwrite(new Set());
+                  setStatusMsg("已跳过全部重复技能");
+                }}
+                disabled={isAdding}
+              >
+                全部跳过
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const overwriteIds = Array.from(dupSelectedOverwrite);
+                  setDupConflicts(null);
+                  setDupSelectedOverwrite(new Set());
+                  void doImportLocal(dupCheckedPath, addTag.trim(), overwriteIds);
+                }}
+                disabled={isAdding || dupSelectedOverwrite.size === 0}
+              >
+                {isAdding ? "导入中…" : `覆盖选中 (${dupSelectedOverwrite.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Export Duplicate Conflict Modal ===== */}
+      {exportConflicts && (
+        <div className="modal-overlay visible">
+          <div className="modal modal-lg">
+            <div className="modal-header">
+              <h2 className="modal-title">目标目录存在同名技能</h2>
+              <button
+                className="modal-close"
+                onClick={() => {
+                  setExportConflicts(null);
+                  setExportSelectedOverwrite(new Set());
+                  setStatusMsg("已取消");
+                }}
+                disabled={Boolean(exportingId) || isBatchRunning}
+              >
+                <IconClose />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="skill-add-hint">
+                以下技能在目标目录中已存在，请选择要覆盖的技能。覆盖将替换目标目录中的同名项，未选择的将跳过。
+              </p>
+              <div className="skill-dup-toolbar">
+                <label className="skill-dup-select-all">
+                  <input
+                    type="checkbox"
+                    checked={exportConflicts.length > 0 && exportSelectedOverwrite.size === exportConflicts.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setExportSelectedOverwrite(new Set(exportConflicts.map((c) => c.skillId)));
+                      } else {
+                        setExportSelectedOverwrite(new Set());
+                      }
+                    }}
+                    disabled={Boolean(exportingId) || isBatchRunning}
+                  />
+                  <span>全选</span>
+                </label>
+                <span className="skill-dup-count">
+                  已选 {exportSelectedOverwrite.size} / {exportConflicts.length}
+                </span>
+              </div>
+              <div className="skill-dup-list">
+                {exportConflicts.map((c) => {
+                  const checked = exportSelectedOverwrite.has(c.skillId);
+                  return (
+                    <div
+                      key={c.skillId}
+                      className={`skill-dup-item ${checked ? "checked" : ""}`}
+                    >
+                      <label className="skill-dup-check">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setExportSelectedOverwrite((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(c.skillId)) next.delete(c.skillId);
+                              else next.add(c.skillId);
+                              return next;
+                            });
+                          }}
+                          disabled={Boolean(exportingId) || isBatchRunning}
+                        />
+                      </label>
+                      <div className="skill-dup-info">
+                        <div className="skill-dup-name">{c.title}</div>
+                        <div className="skill-dup-versions">
+                          <span className="skill-dup-version-existing">
+                            目标版本: <strong>{c.targetVersion || "未标注"}</strong>
+                          </span>
+                          <span className="skill-dup-version-arrow">→</span>
+                          <span className="skill-dup-version-import">
+                            技能库版本: <strong>{c.libraryVersion || "未标注"}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setExportConflicts(null);
+                  setExportSelectedOverwrite(new Set());
+                  setStatusMsg("已取消");
+                }}
+                disabled={Boolean(exportingId) || isBatchRunning}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  const overwriteIds: string[] = [];
+                  // Export only non-conflicting skills, skip all conflicts
+                  setExportConflicts(null);
+                  setExportSelectedOverwrite(new Set());
+                  void doExportToDir(exportSkillIds, exportInstallMode, exportTargetDir, overwriteIds);
+                }}
+                disabled={Boolean(exportingId) || isBatchRunning}
+              >
+                全部跳过
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const overwriteIds = Array.from(exportSelectedOverwrite);
+                  setExportConflicts(null);
+                  setExportSelectedOverwrite(new Set());
+                  void doExportToDir(exportSkillIds, exportInstallMode, exportTargetDir, overwriteIds);
+                }}
+                disabled={Boolean(exportingId) || isBatchRunning || exportSelectedOverwrite.size === 0}
+              >
+                {Boolean(exportingId) || isBatchRunning ? "应用中…" : `覆盖选中 (${exportSelectedOverwrite.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== CC Switch migrate preview modal ===== */}
       <div
@@ -2258,7 +2621,7 @@ export default function SkillsManage() {
               </div>
             </div>
             <p className="skill-add-hint">
-              确认后选择目标目录，将在其中创建同名技能目录；若同名项已存在，将不会覆盖。
+              确认后选择目标目录，将在其中创建同名技能目录；若同名项已存在，将提示版本对比并可选择覆盖或跳过。
             </p>
           </div>
           <div className="modal-footer">
@@ -2327,7 +2690,7 @@ export default function SkillsManage() {
               </div>
             </div>
             <p className="skill-add-hint">
-              确认后选择一个目标目录，所有选中技能将以相同方式应用到该目录；同名项不会被覆盖。
+              确认后选择一个目标目录，所有选中技能将以相同方式应用到该目录；同名项将提示版本对比并可选择覆盖或跳过。
             </p>
           </div>
           <div className="modal-footer">

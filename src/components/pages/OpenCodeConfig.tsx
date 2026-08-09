@@ -9,7 +9,6 @@ import type {
   CatalogReasoningOption,
   ModelsDevCatalog,
   OpencodeConfigView,
-  OpencodeForkSyncStatus,
   OpencodeModelView,
   OpencodeProviderView,
   OpencodeVariantView,
@@ -20,11 +19,9 @@ import {
   invokeDeleteProvider,
   invokeFetchCatalog,
   invokeGetConfig,
-  invokeGetForkSyncStatus,
   invokeGetSecret,
   invokeRevealConfig,
   invokeSetDefaults,
-  invokeSyncToFork,
   invokeUpsertModel,
   invokeUpsertProvider,
 } from "./opencode-config/api";
@@ -498,13 +495,6 @@ export default function OpenCodeConfig() {
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogProviderFilter, setCatalogProviderFilter] = useState("");
 
-  const [forkStatus, setForkStatus] = useState<OpencodeForkSyncStatus | null>(null);
-  const [forkStatusLoading, setForkStatusLoading] = useState(false);
-  /** 每个二开 agent 是否勾选「同步 MCP」；默认 false，仅勾选时覆盖目标 mcp。 */
-  const [forkSyncMcp, setForkSyncMcp] = useState<Record<string, boolean>>({});
-  /** 每个二开 agent 是否勾选「同步 skills」；默认 false，仅勾选时替换目标 skills。 */
-  const [forkSyncSkills, setForkSyncSkills] = useState<Record<string, boolean>>({});
-
   const providerIdRef = useRef<HTMLInputElement>(null);
   const modelIdRef = useRef<HTMLInputElement>(null);
 
@@ -531,24 +521,9 @@ export default function OpenCodeConfig() {
   );
   const defaultsDismiss = useOverlayDismiss(() => !busy && setDefaultsOpen(false), !busy);
 
-  const loadForkStatus = useCallback(async () => {
-    setForkStatusLoading(true);
-    try {
-      const status = await invokeGetForkSyncStatus();
-      setForkStatus(status);
-    } catch {
-      // 非关键路径：同步条失败不阻塞主配置
-      setForkStatus(null);
-    } finally {
-      setForkStatusLoading(false);
-    }
-  }, []);
-
   const applyView = useCallback((next: OpencodeConfigView) => {
     setView(next);
-    // provider / mcp 源变化后刷新 fork 对齐状态（失败静默）
-    void loadForkStatus();
-  }, [loadForkStatus]);
+  }, []);
 
   const loadConfig = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -585,85 +560,6 @@ export default function OpenCodeConfig() {
     },
     [],
   );
-
-  const handleSyncFork = useCallback(
-    async (agent: string) => {
-      setBusy(true);
-      try {
-        const syncMcp = !!forkSyncMcp[agent];
-        const syncSkills = !!forkSyncSkills[agent];
-        const res = await invokeSyncToFork(agent, syncMcp, syncSkills);
-        setStatusMsg(res.message);
-        await loadForkStatus();
-      } catch (e) {
-        setStatusMsg(`同步失败: ${e}`);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [forkSyncMcp, forkSyncSkills, loadForkStatus, setStatusMsg],
-  );
-
-  const handleSyncAllForks = useCallback(async () => {
-    setBusy(true);
-    try {
-      // 按各目标的 MCP / skills 勾选逐个同步，避免批量按钮误覆盖未选中的目标内容。
-      const targets = forkStatus?.targets.filter((t) => t.found) ?? [];
-      if (targets.length === 0) {
-        setStatusMsg("没有可同步的 OpenCode 二开 agent");
-        return;
-      }
-      let okN = 0;
-      let failN = 0;
-      let skipN = 0;
-      for (const t of targets) {
-        const syncMcp = !!forkSyncMcp[t.agent];
-        const syncSkills = !!forkSyncSkills[t.agent];
-        try {
-          const res = await invokeSyncToFork(t.agent, syncMcp, syncSkills);
-          for (const item of res.results) {
-            if (item.ok) {
-              if (item.status === "not_installed" || item.status === "no_source") {
-                skipN += 1;
-              } else {
-                okN += 1;
-              }
-            } else if (item.status === "not_installed" || item.status === "no_source") {
-              skipN += 1;
-            } else {
-              failN += 1;
-            }
-          }
-        } catch {
-          failN += 1;
-        }
-      }
-      const message =
-        failN === 0
-          ? `已同步 ${okN} 个目标${skipN > 0 ? `，跳过 ${skipN} 个` : ""}`
-          : `部分失败：成功 ${okN}，失败 ${failN}，跳过 ${skipN}`;
-      setStatusMsg(message);
-      await loadForkStatus();
-    } catch (e) {
-      setStatusMsg(`批量同步失败: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [forkStatus, forkSyncMcp, forkSyncSkills, loadForkStatus, setStatusMsg]);
-
-  const forkOutOfSyncCount = useMemo(() => {
-    if (!forkStatus) return 0;
-    return forkStatus.targets.filter(
-      (t) =>
-        t.found &&
-        (t.status === "out_of_sync" || t.status === "missing" || t.status === "error"),
-    ).length;
-  }, [forkStatus]);
-
-  const forkInstalledTargets = useMemo(() => {
-    if (!forkStatus) return [];
-    return forkStatus.targets.filter((t) => t.found);
-  }, [forkStatus]);
 
   useEffect(() => {
     (async () => {
@@ -1077,133 +973,6 @@ export default function OpenCodeConfig() {
             <button type="button" className="btn btn-secondary" onClick={openDefaults} disabled={busy}>
               设置默认模型
             </button>
-          </div>
-        )}
-
-        {view?.opencodeInstalled && (forkStatus || forkStatusLoading) && (
-          <div className="oc-fork-sync-bar">
-            <div className="oc-fork-sync-main">
-              <div className="oc-fork-sync-title">同步到 OpenCode 二开 Agent</div>
-              <div className="oc-fork-sync-desc">
-                将本页维护的 <code>provider</code> 覆盖同步到同源配置（如 DevEco Code），并合并对应{" "}
-                <code>auth.json</code> 密钥条目。勾选「同步 MCP」后才会覆盖目标的{" "}
-                <code>mcp</code>；勾选「同步 skills」后会以 OpenCode 的最新 skills 替换目标 skills 目录。
-              </div>
-              {forkStatusLoading && !forkStatus ? (
-                <div className="oc-fork-sync-empty">正在检测本机 fork…</div>
-              ) : forkInstalledTargets.length === 0 ? (
-                <div className="oc-fork-sync-empty">
-                  未检测到已安装的 OpenCode 二开 agent（当前支持 JsonMcp 方言，例如 DevEco Code）
-                </div>
-              ) : (
-                <>
-                  <div className="oc-fork-sync-toolbar">
-                    <button
-                      type="button"
-                      className="claude-env-link-btn"
-                      disabled={busy || !forkStatus?.sourceExists}
-                      onClick={() => void handleSyncAllForks()}
-                    >
-                      {forkOutOfSyncCount > 0
-                        ? `同步全部（${forkOutOfSyncCount} 未对齐）`
-                        : "同步全部"}
-                    </button>
-                  </div>
-                  <ul className="oc-fork-sync-list">
-                    {forkInstalledTargets.map((t) => {
-                      const syncMcpChecked = !!forkSyncMcp[t.agent];
-                      const syncSkillsChecked = !!forkSyncSkills[t.agent];
-                      const mcpCheckId = `oc-fork-sync-mcp-${t.agent}`;
-                      const skillsCheckId = `oc-fork-sync-skills-${t.agent}`;
-                      return (
-                        <li key={t.agent} className="oc-fork-sync-item">
-                          <div className="oc-fork-sync-item-body">
-                            <div className="oc-fork-sync-item-main">
-                              <span className="oc-fork-sync-name">{t.displayName}</span>
-                              <span
-                                className={`oc-fork-sync-badge oc-fork-sync-badge-${t.status}`}
-                                data-tooltip={t.message}
-                              >
-                                {t.status === "in_sync"
-                                  ? "已对齐"
-                                  : t.status === "out_of_sync"
-                                    ? "未对齐"
-                                    : t.status === "missing"
-                                      ? "无配置文件"
-                                      : t.status === "no_source"
-                                        ? "无源配置"
-                                        : t.status === "error"
-                                          ? "错误"
-                                          : t.status}
-                              </span>
-                              <span className="oc-fork-sync-meta">
-                                provider {t.providerCount}/{t.sourceProviderCount} · mcp{" "}
-                                {t.mcpCount}/{t.sourceMcpCount}
-                              </span>
-                              <code className="oc-fork-sync-path" title={t.configPath}>
-                                {t.configPath}
-                              </code>
-                            </div>
-                            <label className="ui-check oc-fork-sync-mcp-check" htmlFor={mcpCheckId}>
-                              <input
-                                id={mcpCheckId}
-                                type="checkbox"
-                                className="ui-check-input"
-                                checked={syncMcpChecked}
-                                onChange={(e) =>
-                                  setForkSyncMcp((prev) => ({
-                                    ...prev,
-                                    [t.agent]: e.target.checked,
-                                  }))
-                                }
-                                disabled={busy}
-                              />
-                              <CheckGlyph />
-                              <span className="ui-check-label">
-                                同步 MCP
-                                {syncMcpChecked
-                                  ? "（将覆盖目标 mcp）"
-                                  : "（默认仅同步 provider）"}
-                              </span>
-                            </label>
-                            <label className="ui-check oc-fork-sync-mcp-check" htmlFor={skillsCheckId}>
-                              <input
-                                id={skillsCheckId}
-                                type="checkbox"
-                                className="ui-check-input"
-                                checked={syncSkillsChecked}
-                                onChange={(e) =>
-                                  setForkSyncSkills((prev) => ({
-                                    ...prev,
-                                    [t.agent]: e.target.checked,
-                                  }))
-                                }
-                                disabled={busy}
-                              />
-                              <CheckGlyph />
-                              <span className="ui-check-label">
-                                同步 skills
-                                {syncSkillsChecked
-                                  ? "（将替换目标 skills）"
-                                  : "（不修改目标 skills）"}
-                              </span>
-                            </label>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            disabled={busy || !forkStatus?.sourceExists}
-                            onClick={() => void handleSyncFork(t.agent)}
-                          >
-                            同步
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
-              )}
-            </div>
           </div>
         )}
 

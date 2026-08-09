@@ -1840,13 +1840,12 @@ mod tests {
             "claude-code".into(),
             "claude-desktop".into(),
             "opencode".into(),
-            "deveco-code".into(),
             "antigravity".into(),
             "codebuddy-cn".into(),
             "workbuddy".into(),
         ];
         let r = apply_mcp_to_agents(&draft_stdio(title), &agents);
-        assert_eq!(r.results.len(), 8, "{:?}", r.results);
+        assert_eq!(r.results.len(), 7, "{:?}", r.results);
         assert!(r.all_ok, "{:?}", r.results);
 
         // dialect-specific checks
