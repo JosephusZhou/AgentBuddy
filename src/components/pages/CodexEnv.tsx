@@ -31,8 +31,11 @@ import {
 } from "./codex-env/api";
 import {
 invokeList as invokeProviderList,
-invokeGetSecret as invokeProviderGetSecret,
 } from "./ai-providers/api";
+import {
+  fetchRouteAggregationProvider,
+  resolveProviderSecret,
+} from "./route-aggregation/virtual-provider";
 import type { AiProvider, ProviderType } from "./ai-providers/types";
 import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
@@ -447,10 +450,11 @@ export default function CodexEnv() {
     setDirTouched(false);
     setCloneSelectedProvider(null);
     setShowClone(true);
-    // 加载供应商列表（Codex 环境只展示 OpenAI / 通用供应商）
-    void invokeProviderList().then((rows) => {
+    // 加载供应商列表（Codex 环境只展示 OpenAI / 通用供应商）；路由聚合运行时置顶虚拟供应商
+    void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
-      setCloneProviders(eligible);
+      const routeAgg = await fetchRouteAggregationProvider("openai");
+      setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
     }).catch(() => setCloneProviders([]));
   }, [envs]);
 
@@ -598,12 +602,14 @@ providerId: cloneSelectedProvider?.id || undefined,
         // 拉取失败则保持空，用户可重新输入
       }
     }
-    // 加载供应商列表
-    void invokeProviderList().then((rows) => {
+    // 加载供应商列表；路由聚合运行时置顶虚拟供应商
+    void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
-      setEditProviders(eligible);
+      const routeAgg = await fetchRouteAggregationProvider("openai");
+      const all = routeAgg ? [routeAgg, ...eligible] : eligible;
+      setEditProviders(all);
       // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
-      const linked = eligible.find((p) => p.id === env.providerId) ?? null;
+      const linked = all.find((p) => p.id === env.providerId) ?? null;
       setEditSelectedProvider(linked);
       setEditRemoteModels(customModelOptionsOf(linked));
     }).catch(() => setEditProviders([]));
@@ -1308,7 +1314,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       setCloneRemoteModels(customModelOptionsOf(p));
                       if (p.hasApiKey) {
                         try {
-                          const secret = await invokeProviderGetSecret(p.id);
+                          const secret = await resolveProviderSecret(p);
                           setCloneApiKey(secret);
                         } catch {
                           // 拉取失败则保持原值
@@ -1566,7 +1572,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       setEditRemoteModels(customModelOptionsOf(p));
                       if (p.hasApiKey) {
                         try {
-                          const secret = await invokeProviderGetSecret(p.id);
+                          const secret = await resolveProviderSecret(p);
                           setEditApiKey(secret);
                         } catch {
                           // 拉取失败则保持原值

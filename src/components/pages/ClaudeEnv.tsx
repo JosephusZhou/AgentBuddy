@@ -31,8 +31,11 @@ import {
 } from "./claude-env/api";
 import {
   invokeList as invokeProviderList,
-  invokeGetSecret as invokeProviderGetSecret,
 } from "./ai-providers/api";
+import {
+  fetchRouteAggregationProvider,
+  resolveProviderSecret,
+} from "./route-aggregation/virtual-provider";
 import { MODEL_TIERS, type AiProvider, type ProviderType } from "./ai-providers/types";
 import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
@@ -445,11 +448,12 @@ export default function ClaudeEnv() {
     setCloneSelectedProvider(null);
     setCloneTierModels({});
     setShowClone(true);
-    // 加载供应商列表
-    void invokeProviderList().then((rows) => {
+    // 加载供应商列表；路由聚合运行时将虚拟供应商「路由聚合」置顶
+    void invokeProviderList().then(async (rows) => {
       // Claude 环境只展示 Anthropic / 通用供应商
       const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
-      setCloneProviders(eligible);
+      const routeAgg = await fetchRouteAggregationProvider("universal");
+      setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
     }).catch(() => setCloneProviders([]));
   }, [envs]);
 
@@ -608,12 +612,14 @@ providerId: cloneSelectedProvider?.id || undefined,
         // 拉取失败则保持空，用户可重新输入
       }
     }
-    // 加载供应商列表用于选择
-    void invokeProviderList().then((rows) => {
+    // 加载供应商列表用于选择；路由聚合运行时将虚拟供应商「路由聚合」置顶
+    void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
-      setEditProviders(eligible);
+      const routeAgg = await fetchRouteAggregationProvider("universal");
+      const all = routeAgg ? [routeAgg, ...eligible] : eligible;
+      setEditProviders(all);
       // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
-      const linked = eligible.find((p) => p.id === env.providerId) ?? null;
+      const linked = all.find((p) => p.id === env.providerId) ?? null;
       setEditSelectedProvider(linked);
       setEditRemoteModels(customModelOptionsOf(linked));
     }).catch(() => setEditProviders([]));
@@ -1336,7 +1342,7 @@ providerId: cloneSelectedProvider?.id || undefined,
                           // 填入 API Key
                           if (p.hasApiKey) {
                             try {
-                              const secret = await invokeProviderGetSecret(p.id);
+                              const secret = await resolveProviderSecret(p);
                               setCloneApiKey(secret);
                             } catch {
                               // 拉取失败则保持原值
@@ -1624,7 +1630,7 @@ return (
                       // 填入 API Key
                       if (p.hasApiKey) {
                         try {
-                          const secret = await invokeProviderGetSecret(p.id);
+                          const secret = await resolveProviderSecret(p);
                           setEditApiKey(secret);
                         } catch {
                           // 拉取失败则保持原值

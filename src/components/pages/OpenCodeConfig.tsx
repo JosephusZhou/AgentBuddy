@@ -9,7 +9,6 @@ import type {
   AgentProviderView,
   AgentVariantView,
   CatalogModelSummary,
-  CatalogProvider,
   CatalogReasoningOption,
   ModelConfigAgentId,
   ModelsDevCatalog,
@@ -26,6 +25,16 @@ import {
   invokeUpsertModel,
   invokeUpsertProvider,
 } from "./opencode-config/api";
+import {
+  invokeFetchRemoteModels,
+  invokeList as invokeAiProviderList,
+} from "./ai-providers/api";
+import type { AiProvider } from "./ai-providers/types";
+import {
+  fetchRouteAggregationProvider,
+  isRouteAggregationProvider,
+  resolveProviderSecret,
+} from "./route-aggregation/virtual-provider";
 import { ChevronDown, Code, Eye, EyeOff, FolderOpen, Key, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
@@ -104,6 +113,31 @@ function formatLimit(
   return parts.join(" / ") || "未设置 limit";
 }
 
+const MODALITY_LABEL: Record<string, string> = {
+  text: "文本",
+  image: "图像",
+  pdf: "PDF",
+  audio: "音频",
+  video: "视频",
+};
+
+/** 把 input/output modalities 拼成「文本/图像/PDF in | 文本 out」形式，没有则返回空串。 */
+function formatModalityTags(
+  inputMods?: ReadonlyArray<string>,
+  outputMods?: ReadonlyArray<string>,
+): string {
+  const inPart = inputMods?.length
+    ? inputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/")
+    : "";
+  const outPart = outputMods?.length
+    ? outputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/")
+    : "";
+  const parts: string[] = [];
+  if (inPart) parts.push(`${inPart} in`);
+  if (outPart) parts.push(`${outPart} out`);
+  return parts.join(" | ");
+}
+
 function apiKeySourceLabel(source: string): string {
   switch (source) {
     case "auth":
@@ -137,9 +171,65 @@ function findCatalogModel(
   providerId: string,
   modelId: string,
 ): CatalogModelSummary | null {
-  if (!catalog) return null;
-  const p = catalog.providers.find((x) => x.id === providerId);
-  return p?.models.find((m) => m.id === modelId) ?? null;
+  if (!catalog || !modelId) return null;
+  // 1. 收集所有同名 model 的条目（严格同 provider 优先排序在后取）
+  //    不同 provider 可能对同一个 modelId 给出不同字段：
+  //    例如 grok-4.5 在 opencode 条目 input 只有 ['text','image']，但 xai 条目还带 pdf。
+  //    合并策略：union 所有 limit 字段 + 模态字段——谁有填谁，互不冲突。
+  // 2. priority 上下文：表单 providerId 与目录 provider id 严格匹配时，把这一条置顶，
+  //    用它的 name / reasoning / toolCall / attachment 等身份类字段。
+  //    典型场景：用户使用自定义聚合/路由 provider（如 router、openai-compat 等），
+  //    目录中不同 provider 可能都收录了同名模型（model id 在业内通常全局唯一）。
+  const matches: { providerId: string; model: CatalogModelSummary }[] = [];
+  for (const p of catalog.providers) {
+    const found = p.models.find((m) => m.id === modelId);
+    if (found) matches.push({ providerId: p.id, model: found });
+    if (matches.length > 64) break; // 安全护栏
+  }
+  if (matches.length === 0) return null;
+
+  // 身份字段以"严格匹配"的那条优先；如果没有，取第一条
+  const identity =
+    matches.find((m) => m.providerId === providerId)?.model ?? matches[0].model;
+
+  // limit 字段取并集：任一条目有非空值就采纳（第一个非空生效）
+  const ctx = matches.find((m) => m.model.limitContext != null)?.model.limitContext;
+  const inp = matches.find((m) => m.model.limitInput != null)?.model.limitInput;
+  const out = matches.find((m) => m.model.limitOutput != null)?.model.limitOutput;
+
+  // 模态字段取并集：把同名模型出现在不同 provider 下的 modalities 能力并到一起
+  // （不去重到 identity 条目，避免 grok-4.5 在 xai 之外的条目漏掉 pdf 这类能力）
+  const inputMods = unionModalityStrings(
+    matches.map((m) => m.model.modalitiesInput),
+  );
+  const outputMods = unionModalityStrings(
+    matches.map((m) => m.model.modalitiesOutput),
+  );
+
+  return {
+    ...identity,
+    limitContext: ctx ?? null,
+    limitInput: inp ?? null,
+    limitOutput: out ?? null,
+    modalitiesInput: inputMods,
+    modalitiesOutput: outputMods,
+  };
+}
+
+/** 把多个 modalities 数组合并成去重并集（保留首次出现顺序）。空数组会被忽略。 */
+function unionModalityStrings(lists: ReadonlyArray<ReadonlyArray<string>>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const list of lists) {
+    if (!list || list.length === 0) continue;
+    for (const m of list) {
+      if (!seen.has(m)) {
+        seen.add(m);
+        out.push(m);
+      }
+    }
+  }
+  return out;
 }
 
 function reasoningOptionsFor(
@@ -148,6 +238,88 @@ function reasoningOptionsFor(
   modelId: string,
 ): CatalogReasoningOption[] {
   return findCatalogModel(catalog, providerId, modelId)?.reasoningOptions ?? [];
+}
+
+/**
+ * 按 providerId/modelId 在 Models.dev 目录中匹配，把命中项的：
+ *   - context/input/output 限制
+ *   - 输入/输出模态（input modalities / output modalities）
+ * 写回表单。
+ * agent 无关：opencode / pi / oh-my-pi 三个 tab 共用本函数，因为 ModelForm 的 limit 字段对三者都是
+ * 同一组（`limitContext` / `limitInput` / `limitOutput`），后端在 `UpsertModelPayload` 里也接受。
+ * - 默认（overwrite=false）只补空白字段，避免覆盖用户已输入的值。
+ * - overwrite=true 时强制按目录覆盖（含「把已填值清空」）：用于「从目录补全」按钮和
+ *   供应商模型列表选择场景——必须支持从有 input 的模型切到无 input 的模型时把 input 字段清空。
+ * - `agent` 用于决定 `limitInput` 与「输出模态」是否生效：
+ *   - Pi / Oh-My-Pi 后端没有 limit.input / output modalities 字段，填了会被静默丢弃。
+ * - 模态字段（modalities）永远跟随 overwrite 一起被覆盖，因为目录里这些字段几乎齐全
+ *   （都有至少 text），让用户从 picker 切换模型时能立刻看到正确的能力范围。
+ * 目录未命中时返回原表单。
+ */
+function applyCatalogLimits(
+  form: ModelForm,
+  catalog: ModelsDevCatalog | null,
+  options: { overwrite?: boolean; agent?: ModelConfigAgentId } = {},
+): ModelForm {
+  const hit = findCatalogModel(catalog, form.providerId, form.id.trim());
+  if (!hit) return form;
+  const overwrite = options.overwrite ?? false;
+  // Pi / Oh-My-Pi 后端对 limit_input / output modalities 是 no-op，跳过避免无效回填
+  const supportsInputLimit = options.agent == null || options.agent === "opencode";
+  const supportsOutputModality = options.agent == null || options.agent === "opencode";
+  let next: ModelForm = form;
+
+  // context
+  if (overwrite || !form.limitContext.trim()) {
+    const v = hit.limitContext != null ? numToInput(hit.limitContext) : "";
+    next = { ...next, limitContext: v };
+  }
+  // input (limit)
+  if (supportsInputLimit && (overwrite || !form.limitInput.trim())) {
+    const v = hit.limitInput != null ? numToInput(hit.limitInput) : "";
+    next = { ...next, limitInput: v };
+  }
+  // output (limit)
+  if (overwrite || !form.limitOutput.trim()) {
+    const v = hit.limitOutput != null ? numToInput(hit.limitOutput) : "";
+    next = { ...next, limitOutput: v };
+  }
+
+  // —— 模态字段 ——
+  // 目录里 modalities 字段几乎一定能拿到（非空向量），overwrite 模式直接覆盖；
+  // 非 overwrite 模式（用户手输 ID 触发）只在当前为空且目录非空时补全。
+  const hitInputMods = hit.modalitiesInput;
+  const hitOutputMods = hit.modalitiesOutput;
+  if (overwrite) {
+    // 强制覆盖：input 始终写（Pi 系也支持），output 仅 opencode 写
+    if (hitInputMods && hitInputMods.length > 0) {
+      next = { ...next, modalitiesInput: [...hitInputMods] };
+    } else if (hitInputMods && hitInputMods.length === 0) {
+      // 目录返回空数组（极少）——保留用户当前选择，不强行清空
+    }
+    if (supportsOutputModality && hitOutputMods && hitOutputMods.length > 0) {
+      next = { ...next, modalitiesOutput: [...hitOutputMods] };
+    }
+  } else {
+    // 仅当表单为空且目录非空时补全
+    if (
+      form.modalitiesInput.length === 0 &&
+      hitInputMods &&
+      hitInputMods.length > 0
+    ) {
+      next = { ...next, modalitiesInput: [...hitInputMods] };
+    }
+    if (
+      supportsOutputModality &&
+      form.modalitiesOutput.length === 0 &&
+      hitOutputMods &&
+      hitOutputMods.length > 0
+    ) {
+      next = { ...next, modalitiesOutput: [...hitOutputMods] };
+    }
+  }
+
+  return next;
 }
 
 const NPM_PRESETS = [
@@ -286,6 +458,11 @@ const THINKING_TYPE_OPTIONS: AppSelectOption[] = [
   { value: "enabled", label: "enabled" },
   { value: "disabled", label: "disabled" },
 ];
+
+/** AI 供应商（OpenAI / 通用类型）面向 OpenAI 兼容端点的 Base URL。 */
+function aiProviderOpenaiBaseUrl(p: AiProvider): string {
+  return p.providerType === "universal" ? p.openaiBaseUrl : p.baseUrl;
+}
 
 type ProviderForm = {
   id: string;
@@ -517,6 +694,9 @@ export default function ModelConfig() {
   const [statusMsg, setStatusMsg] = useStatusMessage();
 
   const [providerForm, setProviderForm] = useState<ProviderForm | null>(null);
+  // 供应商弹窗内的「选择 AI 供应商」：候选列表 + 当前选中 ID（"" = 未选择）
+  const [aiProviders, setAiProviders] = useState<AiProvider[]>([]);
+  const [formAiProviderId, setFormAiProviderId] = useState("");
   const [modelForm, setModelForm] = useState<ModelForm | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [formError, setFormError] = useState("");
@@ -533,9 +713,12 @@ export default function ModelConfig() {
   const [draftSmallModel, setDraftSmallModel] = useState("");
   const [modelSearch, setModelSearch] = useState("");
 
-  const [catalogPickOpen, setCatalogPickOpen] = useState(false);
-  const [catalogQuery, setCatalogQuery] = useState("");
-  const [catalogProviderFilter, setCatalogProviderFilter] = useState("");
+  // 模型弹窗内的「从供应商模型列表选择」：拉取当前提供商端点的模型列表
+  const [providerPickOpen, setProviderPickOpen] = useState(false);
+  const [providerPickQuery, setProviderPickQuery] = useState("");
+  const [providerPickModels, setProviderPickModels] = useState<string[]>([]);
+  const [providerPickLoading, setProviderPickLoading] = useState(false);
+  const [providerPickMsg, setProviderPickMsg] = useState("");
 
   const providerIdRef = useRef<HTMLInputElement>(null);
   const modelIdRef = useRef<HTMLInputElement>(null);
@@ -550,7 +733,7 @@ export default function ModelConfig() {
     if (!busy) {
       setModelForm(null);
       setFormError("");
-      setCatalogPickOpen(false);
+      setProviderPickOpen(false);
     }
   }, !busy);
   const deleteProviderDismiss = useOverlayDismiss(
@@ -621,7 +804,7 @@ export default function ModelConfig() {
     setDeleteProvider(null);
     setDeleteModelTarget(null);
     setDefaultsOpen(false);
-    setCatalogPickOpen(false);
+    setProviderPickOpen(false);
     setFormError("");
     setView(null);
     setAgent(next);
@@ -635,7 +818,7 @@ export default function ModelConfig() {
       setDeleteProvider(null);
       setDeleteModelTarget(null);
       setDefaultsOpen(false);
-      setCatalogPickOpen(false);
+      setProviderPickOpen(false);
       setFormError("");
     };
     document.addEventListener("keydown", handler);
@@ -659,29 +842,85 @@ export default function ModelConfig() {
     return configuredModelOptions.filter((x) => x.toLowerCase().includes(q));
   }, [configuredModelOptions, modelSearch]);
 
-  const catalogHits = useMemo(() => {
-    if (!catalog || !catalogPickOpen) return [] as { provider: CatalogProvider; model: CatalogModelSummary }[];
-    const q = catalogQuery.trim().toLowerCase();
-    const pid = catalogProviderFilter.trim();
-    const hits: { provider: CatalogProvider; model: CatalogModelSummary }[] = [];
-    for (const p of catalog.providers) {
-      if (pid && p.id !== pid) continue;
-      for (const m of p.models) {
-        if (q) {
-          const hay = `${p.id} ${p.name} ${m.id} ${m.name}`.toLowerCase();
-          if (!hay.includes(q)) continue;
-        }
-        hits.push({ provider: p, model: m });
-        if (hits.length >= 80) return hits;
+  const providerPickHits = useMemo(() => {
+    const q = providerPickQuery.trim().toLowerCase();
+    if (!q) return providerPickModels;
+    return providerPickModels.filter((m) => m.toLowerCase().includes(q));
+  }, [providerPickModels, providerPickQuery]);
+
+  // 把过滤后的列表附上 Models.dev 目录命中信息（用于展示「目录」小角标与 ctx/out 提示）
+  const providerPickHitDetails = useMemo(() => {
+    const pid = modelForm?.providerId ?? "";
+    return providerPickHits.map((id) => ({
+      id,
+      catalogHit: findCatalogModel(catalog, pid, id),
+    }));
+  }, [providerPickHits, catalog, modelForm?.providerId]);
+
+  /** 加载已配置的 AI 供应商（仅 OpenAI / 通用类型可对接本页面）；编辑时按 Base URL 预选。
+   * 路由聚合运行时将虚拟供应商「路由聚合」置顶。 */
+  const loadAiProviders = useCallback(async (presetBaseUrl?: string) => {
+    setFormAiProviderId("");
+    try {
+      const rows = await invokeAiProviderList();
+      const eligible = rows.filter(
+        (p) => p.providerType === "openai" || p.providerType === "universal",
+      );
+      const routeAgg = await fetchRouteAggregationProvider("openai");
+      const all = routeAgg ? [routeAgg, ...eligible] : eligible;
+      setAiProviders(all);
+      if (presetBaseUrl) {
+        const match = all.find((p) => aiProviderOpenaiBaseUrl(p) === presetBaseUrl);
+        setFormAiProviderId(match?.id ?? "");
+      }
+    } catch {
+      setAiProviders([]);
+    }
+  }, []);
+
+  const aiProviderOptions = useMemo<AppSelectOption[]>(
+    () => [
+      { value: "", label: "未选择（自行填写）" },
+      ...aiProviders.map((p) => ({
+        value: p.id,
+        label: p.name,
+        sub: isRouteAggregationProvider(p.id)
+          ? `本地端点 · ${aiProviderOpenaiBaseUrl(p)}`
+          : `${p.providerType === "openai" ? "OpenAI" : "通用"} · ${aiProviderOpenaiBaseUrl(p)}`,
+      })),
+    ],
+    [aiProviders],
+  );
+
+  /** 选中已配置 AI 供应商：自动回填显示名称 / Base URL / API Key（类似 Claude 环境页）。 */
+  const pickAiProvider = async (v: string) => {
+    if (!providerForm) return;
+    setFormAiProviderId(v);
+    if (!v) return;
+    const p = aiProviders.find((x) => x.id === v);
+    if (!p) return;
+    setProviderForm({
+      ...providerForm,
+      name: p.name || providerForm.name,
+      baseUrl: aiProviderOpenaiBaseUrl(p),
+    });
+    if (p.hasApiKey) {
+      try {
+        const secret = await resolveProviderSecret(p);
+        setProviderForm((prev) =>
+          prev ? { ...prev, apiKey: secret, apiKeyTouched: true } : prev,
+        );
+      } catch {
+        // 拉取失败则保持现值，用户可手动填写
       }
     }
-    return hits;
-  }, [catalog, catalogPickOpen, catalogQuery, catalogProviderFilter]);
+  };
 
   const openAddProvider = () => {
     setFormError("");
     setShowApiKey(false);
     setProviderForm(emptyProviderForm());
+    void loadAiProviders();
     setTimeout(() => providerIdRef.current?.focus(), 80);
   };
 
@@ -703,6 +942,7 @@ export default function ModelConfig() {
       isNew: false,
     };
     setProviderForm(form);
+    void loadAiProviders(form.baseUrl);
     if (p.hasApiKey) {
       try {
         const secret = await invokeGetSecret(agent, p.id);
@@ -717,18 +957,23 @@ export default function ModelConfig() {
     }
   };
 
+  const resetProviderPick = () => {
+    setProviderPickOpen(false);
+    setProviderPickQuery("");
+    setProviderPickModels([]);
+    setProviderPickMsg("");
+  };
+
   const openAddModel = (providerId: string) => {
     setFormError("");
-    setCatalogPickOpen(false);
-    setCatalogQuery("");
-    setCatalogProviderFilter(providerId);
+    resetProviderPick();
     setModelForm(emptyModelForm(providerId));
     setTimeout(() => modelIdRef.current?.focus(), 80);
   };
 
   const openEditModel = (providerId: string, model: AgentModelView) => {
     setFormError("");
-    setCatalogPickOpen(false);
+    resetProviderPick();
     setModelForm({
       providerId,
       id: model.id,
@@ -756,25 +1001,53 @@ export default function ModelConfig() {
     });
   };
 
-  const applyCatalogPick = (provider: CatalogProvider, model: CatalogModelSummary) => {
+  /** 点击「从供应商模型列表选择」：从当前提供商的 Base URL 拉取模型列表。 */
+  const loadProviderModels = async (providerId: string) => {
+    setProviderPickOpen(true);
+    setProviderPickMsg("");
+    const p = view?.providers.find((x) => x.id === providerId);
+    const baseUrl = (p?.baseUrl ?? "").trim();
+    if (!baseUrl) {
+      setProviderPickModels([]);
+      setProviderPickMsg("该提供商未配置 Base URL，无法拉取模型列表，请手动填写模型 ID");
+      return;
+    }
+    setProviderPickLoading(true);
+    try {
+      let apiKey = "";
+      if (p?.hasApiKey) {
+        try {
+          apiKey = await invokeGetSecret(agent, p.id);
+        } catch {
+          // 密钥读取失败则匿名拉取，失败后用户仍可手动填写
+        }
+      }
+      const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
+      setProviderPickModels(models);
+      setProviderPickMsg(
+        models.length === 0 ? "远端未返回可用模型，仍可手动填写" : `已加载 ${models.length} 个模型`,
+      );
+    } catch (e) {
+      setProviderPickModels([]);
+      setProviderPickMsg(`拉取模型列表失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setProviderPickLoading(false);
+    }
+  };
+
+  const applyProviderPick = (modelId: string) => {
     setModelForm((prev) => {
       if (!prev) return prev;
-      return {
-        ...prev,
-        providerId: prev.providerId || provider.id,
-        id: model.id,
-        name: model.name || model.id,
-        limitContext: numToInput(model.limitContext),
-        limitInput: numToInput(model.limitInput),
-        limitOutput: numToInput(model.limitOutput),
-        modalitiesInput: model.modalitiesInput.length ? [...model.modalitiesInput] : ["text"],
-        modalitiesOutput: model.modalitiesOutput.length ? [...model.modalitiesOutput] : ["text"],
-        reasoning: model.reasoning,
-        toolCall: model.toolCall,
-        attachment: model.attachment,
-      };
+      // 每次从 picker 挑选都视为"明确选定"，整体重置：
+      // - id 换成新的
+      // - name 优先取 catalog 显示名，否则回退到 modelId（强制覆盖，避免前一次的 id 残留）
+      // - limit 字段按目录强制覆盖（即使是空值也清空）
+      const hit = findCatalogModel(catalog, prev.providerId, modelId);
+      const name = hit?.name ?? modelId;
+      const base = { ...prev, id: modelId, name };
+      return applyCatalogLimits(base, catalog, { overwrite: true, agent });
     });
-    setCatalogPickOpen(false);
+    setProviderPickOpen(false);
   };
 
   const saveProvider = async () => {
@@ -968,6 +1241,21 @@ export default function ModelConfig() {
   const hasToggle = catalogReasoning.some((r) => r.type === "toggle");
   const effortValues =
     catalogReasoning.find((r) => r.type === "effort")?.values ?? [...EFFORT_PRESETS];
+  // 当前表单的 providerId/modelId 是否在 Models.dev 目录里命中，且至少带有限制字段
+  // 该判断同时覆盖 opencode / pi / oh-my-pi 三个 tab：表单共享同一组 limit 字段
+  // Pi/Oh-My-Pi 后端不写 limitInput，故仅当 context/output 至少有一个非空时才显示按钮/提示
+  const catalogMatchForLimits = modelForm
+    ? (() => {
+        const hit = findCatalogModel(catalog, modelForm.providerId, modelForm.id);
+        if (!hit) return null;
+        const hasContext = hit.limitContext != null;
+        const hasOutput = hit.limitOutput != null;
+        const hasInput =
+          agent === "opencode" && hit.limitInput != null;
+        if (!hasContext && !hasOutput && !hasInput) return null;
+        return hit;
+      })()
+    : null;
 
   return (
     <>
@@ -1117,9 +1405,7 @@ export default function ModelConfig() {
         ) : !view || view.providers.length === 0 ? (
           <div className="empty-state">
             <IconEmpty />
-            <div className="empty-state-text">
-              还没有自定义提供商。可添加 OpenAI Compatible 端点，或从本地配置读取已有 provider。
-            </div>
+            <div className="empty-state-text">暂无自定义提供商</div>
             <button type="button" className="btn btn-primary" onClick={openAddProvider}>
               添加提供商
             </button>
@@ -1233,6 +1519,25 @@ export default function ModelConfig() {
           {providerForm && (
             <>
               <div className="modal-body oc-modal-body">
+                {aiProviders.length > 0 && (
+                  <div className="form-group">
+                    <label className="form-label" id="oc-ai-provider-label" htmlFor="oc-ai-provider">
+                      选择 AI 供应商（可选）
+                    </label>
+                    <AppSelect
+                      id="oc-ai-provider"
+                      labelId="oc-ai-provider-label"
+                      value={formAiProviderId}
+                      options={aiProviderOptions}
+                      onChange={(v) => void pickAiProvider(v)}
+                      disabled={busy}
+                      placeholder="未选择（自行填写）"
+                    />
+                    <p className="oc-form-hint">
+                      从已配置的 AI 供应商中选择，自动回填显示名称、Base URL 与 API Key。
+                    </p>
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="oc-pid">
                     提供商 ID
@@ -1486,47 +1791,103 @@ export default function ModelConfig() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    disabled={!catalog || busy}
-                    onClick={() => setCatalogPickOpen((v) => !v)}
+                    disabled={busy || providerPickLoading}
+                    onClick={() => {
+                      if (providerPickOpen) {
+                        setProviderPickOpen(false);
+                      } else {
+                        void loadProviderModels(modelForm.providerId);
+                      }
+                    }}
                   >
-                    {catalogPickOpen ? "收起目录" : "从 Models.dev 选择"}
+                    {providerPickLoading
+                      ? "加载中…"
+                      : providerPickOpen
+                        ? "收起列表"
+                        : "从供应商模型列表选择"}
                   </button>
-                  {!catalog && (
-                    <span className="oc-form-hint" style={{ margin: 0 }}>
-                      目录不可用时仍可手动填写
-                    </span>
-                  )}
                 </div>
 
-                {catalogPickOpen && (
+                {providerPickOpen && (
                   <div className="oc-catalog-picker">
                     <input
                       className="form-input"
-                      placeholder="搜索提供商 / 模型…"
-                      value={catalogQuery}
-                      onChange={(e) => setCatalogQuery(e.target.value)}
+                      placeholder="搜索模型…"
+                      value={providerPickQuery}
+                      onChange={(e) => setProviderPickQuery(e.target.value)}
                       disabled={busy}
                     />
+                    {providerPickMsg && (
+                      <div className="oc-catalog-picker-hint">{providerPickMsg}</div>
+                    )}
                     <div className="oc-catalog-hits">
-                      {catalogHits.length === 0 ? (
+                      {providerPickLoading ? (
+                        <div className="app-select-empty">正在拉取模型列表…</div>
+                      ) : providerPickHitDetails.length === 0 ? (
                         <div className="app-select-empty">无匹配结果</div>
                       ) : (
-                        catalogHits.map(({ provider, model }) => (
-                          <button
-                            key={`${provider.id}/${model.id}`}
-                            type="button"
-                            className="oc-catalog-hit"
-                            onClick={() => applyCatalogPick(provider, model)}
-                            disabled={busy}
-                          >
-                            <span className="oc-catalog-hit-title">
-                              {provider.id}/{model.id}
-                            </span>
-                            <span className="oc-catalog-hit-sub">
-                              {model.name} · {formatLimit(model.limitContext, model.limitOutput)}
-                            </span>
-                          </button>
-                        ))
+                        providerPickHitDetails.map(({ id, catalogHit }) => {
+                          const subParts: string[] = [];
+                          if (catalogHit?.name && catalogHit.name !== id) {
+                            subParts.push(catalogHit.name);
+                          }
+                          const limitText = formatLimit(
+                            catalogHit?.limitContext,
+                            catalogHit?.limitOutput,
+                            catalogHit?.limitInput,
+                          );
+                          if (limitText && limitText !== "未设置 limit") {
+                            subParts.push(limitText);
+                          }
+                          // 模态短标签：把 input + output modalities 合并一行展示
+                          if (catalogHit) {
+                            const modalityText = formatModalityTags(
+                              catalogHit.modalitiesInput,
+                              catalogHit.modalitiesOutput,
+                            );
+                            if (modalityText) subParts.push(modalityText);
+                          }
+                          const inputMissing =
+                            !!catalogHit &&
+                            catalogHit.limitInput == null &&
+                            catalogHit.limitContext != null;
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              className="oc-catalog-hit"
+                              onClick={() => applyProviderPick(id)}
+                              disabled={busy}
+                            >
+                              <div className="oc-catalog-hit-row">
+                                <span
+                                  className="oc-catalog-hit-title"
+                                  title={catalogHit?.name ?? id}
+                                >
+                                  {id}
+                                </span>
+                                {catalogHit && (
+                                  <span
+                                    className="oc-catalog-hit-badge"
+                                    title={`来自 Models.dev 目录：${catalogHit.name ?? id}`}
+                                  >
+                                    目录
+                                  </span>
+                                )}
+                              </div>
+                              {subParts.length > 0 && (
+                                <span className="oc-catalog-hit-sub">
+                                  {subParts.join(" · ")}
+                                </span>
+                              )}
+                              {inputMissing && (
+                                <span className="oc-catalog-hit-meta">
+                                  input 目录未提供
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -1546,7 +1907,22 @@ export default function ModelConfig() {
                     className="form-input"
                     placeholder="例如 grok-4.5"
                     value={modelForm.id}
-                    onChange={(e) => setModelForm({ ...modelForm, id: e.target.value })}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      setModelForm((prev) => {
+                        if (!prev) return prev;
+                        const base = { ...prev, id: newId };
+                        // 新建模式下：若用户尚未手动填过限制，命中目录时自动补全空字段
+                        // 编辑模式下不自动覆盖，避免改动已存在的模型
+                        if (prev.isNew) {
+                          return applyCatalogLimits(base, catalog, {
+                            overwrite: false,
+                            agent,
+                          });
+                        }
+                        return base;
+                      });
+                    }}
                     disabled={busy}
                     spellCheck={false}
                   />
@@ -1565,7 +1941,28 @@ export default function ModelConfig() {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">上下文 / 输出限制</label>
+                  <div className="oc-form-label-row">
+                    <label className="form-label">上下文 / 输出限制</label>
+                    {catalogMatchForLimits && (
+                      <button
+                        type="button"
+                        className="oc-link-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          setModelForm((prev) =>
+                            prev
+                              ? applyCatalogLimits(prev, catalog, {
+                                  overwrite: true,
+                                  agent,
+                                })
+                              : prev,
+                          );
+                        }}
+                      >
+                        从 Models.dev 补全
+                      </button>
+                    )}
+                  </div>
                   <div className="oc-form-grid oc-form-grid-3">
                     <input
                       className="form-input"
@@ -1598,6 +1995,16 @@ export default function ModelConfig() {
                       disabled={busy}
                     />
                   </div>
+                  {catalogMatchForLimits && (
+                    <div className="oc-form-hint">
+                      Models.dev 目录已匹配到 <code>{catalogMatchForLimits.name}</code>
+                      {agent === "opencode" && catalogMatchForLimits.limitInput == null
+                        ? "；input 字段目录未提供，已自动跳过"
+                        : ""}
+                      ，{agent === "opencode" ? "上下文/输入/输出" : "上下文/输出"}
+                      限制可在命中时自动或手动补全
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-group">
