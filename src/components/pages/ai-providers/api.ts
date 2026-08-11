@@ -29,6 +29,12 @@ export async function invokeGetSecret(id: string): Promise<string> {
   return invoke("get_ai_provider_secret", { id }) as Promise<string>;
 }
 
+/** 按需拉取全部明文 API Key（编辑表单用，支持多 Key）。 */
+export async function invokeGetSecrets(id: string): Promise<string[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_ai_provider_secrets", { id }) as Promise<string[]>;
+}
+
 /** 从 Base URL 拉取远端模型列表（复用 Claude/Codex 环境页的同一个命令）。 */
 export async function invokeFetchRemoteModels(
   baseUrl: string,

@@ -219,6 +219,23 @@ function displayPath(abs: string): string {
   return abs.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~");
 }
 
+/** 供应商的自定义模型列表 → 模型下拉选项（别名 ID 与原始模型 ID 均可选）；未配置时返回空。 */
+function customModelOptionsOf(p: AiProvider | null): string[] {
+  if (!p || p.customModels.length === 0) return [];
+  const seen = new Set<string>();
+  const opts: string[] = [];
+  for (const cm of p.customModels) {
+    const values = cm.aliasId ? [cm.aliasId, cm.model] : [cm.model];
+    for (const v of values) {
+      if (!seen.has(v)) {
+        seen.add(v);
+        opts.push(v);
+      }
+    }
+  }
+  return opts;
+}
+
 function sourceLabel(source: string, isDefault: boolean): string {
   if (isDefault) return "默认";
   if (source === "imported") return "已导入";
@@ -468,6 +485,16 @@ export default function ClaudeEnv() {
     const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
     const setModel = mode === "clone" ? setCloneModel : setEditModel;
 
+    // 优先使用所选供应商的自定义模型列表；未配置时才回退到拉取远端列表。
+    const provider = mode === "clone" ? cloneSelectedProvider : editSelectedProvider;
+    const customOptions = customModelOptionsOf(provider);
+    if (customOptions.length > 0) {
+      setModels(customOptions);
+      setModel(customOptions[0]);
+      setStatusMsg(`已使用供应商自定义模型列表（${customOptions.length} 个）`);
+      return;
+    }
+
     setLoading(true);
     try {
       const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
@@ -483,7 +510,7 @@ export default function ClaudeEnv() {
     } finally {
       setLoading(false);
     }
-  }, [cloneApiKey, cloneBaseUrl, editApiKey, editBaseUrl, setStatusMsg]);
+  }, [cloneApiKey, cloneBaseUrl, editApiKey, editBaseUrl, cloneSelectedProvider, editSelectedProvider, setStatusMsg]);
 
   const handleClone = useCallback(async () => {
     setBusy(true);
@@ -585,9 +612,10 @@ providerId: cloneSelectedProvider?.id || undefined,
     void invokeProviderList().then((rows) => {
       const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
       setEditProviders(eligible);
-      // 预选关联的供应商
+      // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
       const linked = eligible.find((p) => p.id === env.providerId) ?? null;
       setEditSelectedProvider(linked);
+      setEditRemoteModels(customModelOptionsOf(linked));
     }).catch(() => setEditProviders([]));
   }, []);
 
@@ -1287,6 +1315,8 @@ providerId: cloneSelectedProvider?.id || undefined,
                         if (p) {
                           setCloneBaseUrl(p.baseUrl);
                           setCloneModel(p.defaultModel);
+                          // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                          setCloneRemoteModels(customModelOptionsOf(p));
                           // 四档模型：直接用供应商的档位值覆盖
                           if (Object.keys(p.models).length > 0) {
                             setCloneTierModels((prev) => {
@@ -1314,6 +1344,8 @@ providerId: cloneSelectedProvider?.id || undefined,
                           } else {
                             setCloneApiKey("");
                           }
+                        } else {
+                          setCloneRemoteModels([]);
                         }
                       }}
                   disabled={busy}
@@ -1571,6 +1603,8 @@ return (
                     if (p) {
                       setEditBaseUrl(p.baseUrl);
                       setEditModel(p.defaultModel);
+                      // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                      setEditRemoteModels(customModelOptionsOf(p));
                       // 四档模型：直接用供应商的档位值覆盖
                       if (Object.keys(p.models).length > 0) {
                         setEditTierModels((prev) => {
@@ -1598,6 +1632,8 @@ return (
                       } else {
                         setEditApiKey("");
                       }
+                    } else {
+                      setEditRemoteModels([]);
                     }
                   }}
                   disabled={busy}

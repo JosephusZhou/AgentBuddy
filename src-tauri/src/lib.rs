@@ -1050,6 +1050,13 @@ async fn get_ai_provider_secret(id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_ai_provider_secrets(id: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_provider::get_provider_secrets(id))
+        .await
+        .map_err(|e| format!("读取供应商密钥任务失败: {e}"))?
+}
+
+#[tauri::command]
 async fn reorder_ai_providers(ids: Vec<String>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || ai_provider::reorder_providers(ids))
         .await
@@ -1062,6 +1069,10 @@ async fn reorder_ai_providers(ids: Vec<String>) -> Result<(), String> {
 async fn get_route_aggregation_status(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
 ) -> Result<route_aggregation::RouteAggregationStatus, String> {
+    // Refresh pools so newly added/toggled providers show up without restart.
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.refresh_pool(group).await?;
+    }
     Ok(state.get_status().await)
 }
 
@@ -1108,12 +1119,9 @@ async fn update_route_aggregation_config(
         *state.server.write().await = Some(std::sync::Arc::new(server));
     }
 
-    // Refresh provider pools for enabled groups
-    if config.claude_code_enabled {
-        state.provider_router.refresh_pool(route_aggregation::RouteGroup::ClaudeCode).await?;
-    }
-    if config.codex_enabled {
-        state.provider_router.refresh_pool(route_aggregation::RouteGroup::Codex).await?;
+    // Refresh provider pools for both API formats
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.refresh_pool(group).await?;
     }
 
     Ok(state.get_status().await)
@@ -1134,12 +1142,9 @@ async fn start_route_aggregation(
         ));
     }
 
-    // Refresh provider pools
-    if config.claude_code_enabled {
-        state.provider_router.refresh_pool(route_aggregation::RouteGroup::ClaudeCode).await?;
-    }
-    if config.codex_enabled {
-        state.provider_router.refresh_pool(route_aggregation::RouteGroup::Codex).await?;
+    // Refresh provider pools for both API formats
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.refresh_pool(group).await?;
     }
 
     let server = route_aggregation::server::RouteAggregationServer::start(
@@ -1148,6 +1153,14 @@ async fn start_route_aggregation(
     )
     .await?;
     *state.server.write().await = Some(std::sync::Arc::new(server));
+
+    // Remember that the server was running, so it auto-starts next launch.
+    {
+        let mut config = state.config.write().await;
+        config.auto_start = true;
+        route_aggregation::config::save_config(&config)?;
+    }
+
     Ok(state.get_status().await)
 }
 
@@ -1158,51 +1171,27 @@ async fn stop_route_aggregation(
     if let Some(server) = state.server.write().await.take() {
         server.stop().await;
     }
+    let mut config = state.config.write().await;
+    config.auto_start = false;
+    route_aggregation::config::save_config(&config)?;
     Ok(())
-}
-
-#[tauri::command]
-async fn get_provider_route_toggles(
-    group: String,
-) -> Result<Vec<route_aggregation::ProviderRouteToggle>, String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    tauri::async_runtime::spawn_blocking(move || db::load_provider_route_toggles(group))
-        .await
-        .map_err(|e| format!("读取供应商路由开关任务失败: {e}"))?
 }
 
 #[tauri::command]
 async fn toggle_provider_route(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
     provider_id: String,
-    group: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
     tauri::async_runtime::spawn_blocking(move || {
-        db::upsert_provider_route_toggle(&provider_id, group, enabled, 0)
+        db::upsert_provider_route_toggle(&provider_id, enabled, 0)
     })
     .await
     .map_err(|e| format!("切换供应商路由开关任务失败: {e}"))??;
-    // Refresh in-memory provider pool so status reflects the new toggle state
-    state.provider_router.refresh_pool(group).await?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn reorder_provider_routes(
-    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    ids: Vec<String>,
-    group: String,
-) -> Result<(), String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    tauri::async_runtime::spawn_blocking(move || db::reorder_provider_route_toggles(&ids, group))
-        .await
-        .map_err(|e| format!("供应商路由排序任务失败: {e}"))??;
-    state.provider_router.refresh_pool(group).await?;
+    // Refresh in-memory provider pools so status reflects the new toggle state
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.refresh_pool(group).await?;
+    }
     Ok(())
 }
 
@@ -1210,153 +1199,107 @@ async fn reorder_provider_routes(
 async fn reset_circuit_breaker(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
     provider_id: String,
-    group: String,
 ) -> Result<(), String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    state.provider_router.reset_breaker(&provider_id, group).await;
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.reset_breaker(&provider_id, group).await;
+    }
     Ok(())
 }
 
+/// Add a new endpoint API key (generated, appended and persisted).
+/// Returns the newly generated key.
 #[tauri::command]
-async fn get_circuit_breaker_status(
+async fn add_route_aggregation_api_key(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    group: String,
-) -> Result<Vec<route_aggregation::ProviderRouteStatus>, String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    Ok(state.provider_router.get_provider_statuses(group).await)
-}
-
-/// Regenerate the API key for a specific route group.
-/// Generates a random 48-char hex string with `sk-` prefix, saves it
-/// to config, and returns the new key.
-#[tauri::command]
-async fn regenerate_route_aggregation_api_key(
-    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    group: String,
 ) -> Result<String, String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    use rand::RngCore;
-    let mut bytes = [0u8; 24]; // 24 bytes → 48 hex chars
-    rand::thread_rng().fill_bytes(&mut bytes);
-    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-    let api_key = format!("sk-{}", hex);
-
+    let api_key = route_aggregation::config::generate_api_key();
     let mut config = state.config.write().await;
-    match group {
-        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_api_key = api_key.clone(),
-        route_aggregation::RouteGroup::Codex => config.codex_api_key = api_key.clone(),
-    }
+    config.api_keys.push(api_key.clone());
     route_aggregation::config::save_config(&config)?;
     Ok(api_key)
 }
 
-/// Update the model list for a specific route group.
-/// Each entry has an id (model ID) and an optional alias.
+/// Delete an endpoint API key by index.
+/// The primary key (index 0) cannot be deleted — only regenerated.
 #[tauri::command]
-async fn update_route_aggregation_models(
+async fn delete_route_aggregation_api_key(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    group: String,
-    models: Vec<route_aggregation::ModelEntry>,
+    index: usize,
 ) -> Result<(), String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
     let mut config = state.config.write().await;
-    match group {
-        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_models = models,
-        route_aggregation::RouteGroup::Codex => config.codex_models = models,
+    if index == 0 {
+        return Err("主 API Key 不能删除，只能重新生成".to_string());
     }
+    if index >= config.api_keys.len() {
+        return Err(format!("无效的 API Key 索引: {}", index));
+    }
+    config.api_keys.remove(index);
     route_aggregation::config::save_config(&config)?;
     Ok(())
 }
 
-/// Fetch model IDs from all enabled providers' remote /v1/models APIs.
-/// Used by the frontend for the "add model" dropdown.
+/// Regenerate the endpoint API key at the given index.
+/// Returns the newly generated key.
 #[tauri::command]
-async fn get_route_aggregation_models(
+async fn regenerate_route_aggregation_api_key(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    group: String,
-) -> Result<Vec<route_aggregation::ModelSource>, String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    let provider_infos = state.provider_router.get_enabled_provider_infos(group).await;
-
-    tauri::async_runtime::spawn_blocking(move || {
-        // model_id -> names of providers that serve it (a model can come from several providers)
-        let mut model_providers: std::collections::BTreeMap<String, Vec<String>> =
-            std::collections::BTreeMap::new();
-        for (id, name, base_url, api_key) in &provider_infos {
-            let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
-            match claude_env::fetch_remote_models(base_url.clone(), key) {
-                Ok(result) => {
-                    eprintln!("[route-aggregation] fetched {} models from {}", result.model_ids.len(), name);
-                    for model_id in result.model_ids {
-                        model_providers
-                            .entry(model_id)
-                            .or_default()
-                            .push(name.clone());
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[route-aggregation] failed to fetch models from {} ({}): {}", name, id, e);
-                }
-            }
-        }
-        let sources = model_providers
-            .into_iter()
-            .map(|(id, providers)| route_aggregation::ModelSource { id, providers })
-            .collect();
-        Ok(sources)
-    })
-    .await
-    .map_err(|e| format!("获取模型列表任务失败: {e}"))?
+    index: usize,
+) -> Result<String, String> {
+    let api_key = route_aggregation::config::generate_api_key();
+    let mut config = state.config.write().await;
+    if index >= config.api_keys.len() {
+        return Err(format!("无效的 API Key 索引: {}", index));
+    }
+    config.api_keys[index] = api_key.clone();
+    route_aggregation::config::save_config(&config)?;
+    Ok(api_key)
 }
 
-/// Reset the model list for a specific route group by fetching from
-/// all enabled providers' remote /v1/models APIs. Returns the new model list.
+/// Get the effective model list of a provider for the route aggregation UI:
+/// the provider's custom model list if non-empty, otherwise models fetched
+/// from its remote /v1/models API.
 #[tauri::command]
-async fn reset_route_aggregation_models(
-    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
-    group: String,
-) -> Result<Vec<route_aggregation::ModelEntry>, String> {
-    let group = route_aggregation::RouteGroup::from_str(&group)
-        .ok_or_else(|| format!("无效的路由组: {}", group))?;
-    let provider_infos = state.provider_router.get_enabled_provider_infos(group).await;
+async fn get_route_provider_models(
+    provider_id: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rows = db::load_ai_provider_rows()?;
+        let row = rows
+            .iter()
+            .find(|r| r.id == provider_id)
+            .ok_or_else(|| format!("未找到供应商: {}", provider_id))?;
 
-    let model_ids = tauri::async_runtime::spawn_blocking(move || {
-        let mut model_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for (id, name, base_url, api_key) in &provider_infos {
-            let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
-            match claude_env::fetch_remote_models(base_url.clone(), key) {
-                Ok(result) => {
-                    eprintln!("[route-aggregation] fetched {} models from {}", result.model_ids.len(), name);
-                    for model_id in result.model_ids {
-                        model_set.insert(model_id);
+        // Custom model list takes precedence (aliasId > model).
+        let custom: Vec<ai_provider::CustomModel> =
+            serde_json::from_str(&row.custom_models_json).unwrap_or_default();
+        if !custom.is_empty() {
+            return Ok(custom
+                .into_iter()
+                .map(|m| {
+                    if m.alias_id.trim().is_empty() {
+                        m.model
+                    } else {
+                        m.alias_id
                     }
-                }
-                Err(e) => {
-                    eprintln!("[route-aggregation] failed to fetch models from {} ({}): {}", name, id, e);
-                }
-            }
+                })
+                .filter(|id| !id.trim().is_empty())
+                .collect());
         }
-        Ok::<_, String>(model_set.into_iter().collect::<Vec<String>>())
+
+        // Fall back to the remote model list.
+        let base_url = if row.provider_type == ai_provider::TYPE_UNIVERSAL {
+            ai_provider::derive_openai_base_url(&row.provider_type, &row.base_url)
+        } else {
+            row.base_url.clone()
+        };
+        let api_key = ai_provider::get_provider_secrets(provider_id.clone())?
+            .into_iter()
+            .next();
+        let result = claude_env::fetch_remote_models(base_url, api_key)?;
+        Ok(result.model_ids)
     })
     .await
-    .map_err(|e| format!("重置模型列表任务失败: {e}"))??;
-
-    let entries: Vec<route_aggregation::ModelEntry> = model_ids
-        .into_iter()
-        .map(|id| route_aggregation::ModelEntry { id, alias: String::new() })
-        .collect();
-    let mut config = state.config.write().await;
-    match group {
-        route_aggregation::RouteGroup::ClaudeCode => config.claude_code_models = entries.clone(),
-        route_aggregation::RouteGroup::Codex => config.codex_models = entries.clone(),
-    }
-    route_aggregation::config::save_config(&config)?;
-    Ok(entries)
+    .map_err(|e| format!("获取供应商模型列表任务失败: {e}"))?
 }
 
 #[tauri::command]
@@ -1573,21 +1516,19 @@ pub fn run() {
             upsert_ai_provider,
             delete_ai_provider,
             get_ai_provider_secret,
+            get_ai_provider_secrets,
             reorder_ai_providers,
             get_route_aggregation_status,
             get_route_aggregation_config,
             update_route_aggregation_config,
             start_route_aggregation,
             stop_route_aggregation,
-            get_provider_route_toggles,
             toggle_provider_route,
-            reorder_provider_routes,
             reset_circuit_breaker,
-            get_circuit_breaker_status,
+            add_route_aggregation_api_key,
+            delete_route_aggregation_api_key,
             regenerate_route_aggregation_api_key,
-            update_route_aggregation_models,
-            get_route_aggregation_models,
-            reset_route_aggregation_models,
+            get_route_provider_models,
         ])
         .setup(|_app| {
             use tauri::Manager;
@@ -1605,33 +1546,18 @@ pub fn run() {
             // Route aggregation: load config and register global state.
             let mut ra_config = route_aggregation::config::load_config()
                 .unwrap_or_default();
-            // Auto-generate per-group API keys if empty (first time opening route aggregation).
-            {
-                use rand::RngCore;
-                let generate_key = || {
-                    let mut bytes = [0u8; 24];
-                    rand::thread_rng().fill_bytes(&mut bytes);
-                    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-                    format!("sk-{}", hex)
-                };
-                let mut changed = false;
-                if ra_config.claude_code_api_key.is_empty() {
-                    ra_config.claude_code_api_key = generate_key();
-                    changed = true;
-                }
-                if ra_config.codex_api_key.is_empty() {
-                    ra_config.codex_api_key = generate_key();
-                    changed = true;
-                }
-                if changed {
-                    let _ = route_aggregation::config::save_config(&ra_config);
-                }
+            // Auto-generate the primary endpoint API key on first use.
+            if ra_config.api_keys.is_empty() {
+                ra_config
+                    .api_keys
+                    .push(route_aggregation::config::generate_api_key());
+                let _ = route_aggregation::config::save_config(&ra_config);
             }
             let ra_state = route_aggregation::RouteAggregationState::new(ra_config.clone());
             _app.manage(ra_state);
 
             // Auto-start server if it was running when the app last exited.
-            if ra_config.claude_code_enabled || ra_config.codex_enabled {
+            if ra_config.auto_start {
                 let app_handle = _app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<route_aggregation::RouteAggregationState>();
@@ -1645,16 +1571,9 @@ pub fn run() {
                         );
                         return;
                     }
-                    // Refresh pools
-                    if config.claude_code_enabled {
-                        let _ = state.provider_router
-                            .refresh_pool(route_aggregation::RouteGroup::ClaudeCode)
-                            .await;
-                    }
-                    if config.codex_enabled {
-                        let _ = state.provider_router
-                            .refresh_pool(route_aggregation::RouteGroup::Codex)
-                            .await;
+                    // Refresh pools for both API formats
+                    for group in route_aggregation::RouteGroup::ALL {
+                        let _ = state.provider_router.refresh_pool(group).await;
                     }
                     match route_aggregation::server::RouteAggregationServer::start(
                         state.config.clone(),

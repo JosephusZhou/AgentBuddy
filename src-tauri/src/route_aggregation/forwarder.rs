@@ -136,8 +136,15 @@ fn build_auth_headers(provider: &RouteProvider, group: RouteGroup) -> Vec<(Strin
 }
 
 /// Build the upstream URL for the given provider and group.
+///
+/// Strips a trailing `/v1` from the base URL (if present) before appending
+/// the API path. This prevents double `/v1/v1/...` paths that occur when:
+/// - Universal providers have `/v1` appended by `derive_openai_base_url`
+/// - OpenAI-type providers already include `/v1` in their configured base URL
 fn build_upstream_url(provider: &RouteProvider, group: RouteGroup) -> String {
     let base = provider.base_url.trim_end_matches('/');
+    // Strip trailing /v1 to avoid double /v1/v1/... paths
+    let base = base.strip_suffix("/v1").unwrap_or(base);
     match group {
         RouteGroup::ClaudeCode => format!("{}/v1/messages", base),
         RouteGroup::Codex => format!("{}/v1/responses", base),

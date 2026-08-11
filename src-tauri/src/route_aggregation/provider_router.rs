@@ -24,17 +24,17 @@ impl ProviderRouter {
         }
     }
 
-    /// Refresh the provider pool for a route group from the database.
-    /// Loads AI providers, filters by type, decrypts API keys, and merges
-    /// with provider_route_toggle settings.
+    /// Refresh the provider pool for an API format from the database.
+    /// Loads AI providers, filters by type compatibility, decrypts API keys,
+    /// and merges with the unified provider toggle settings.
     pub async fn refresh_pool(&self, group: RouteGroup) -> Result<usize, String> {
         let provider_rows = crate::db::load_ai_provider_rows()?;
-        let toggles = crate::db::load_provider_route_toggles(group)?;
+        let toggles = crate::db::load_provider_route_toggles()?;
 
         let mut providers: Vec<RouteProvider> = Vec::new();
 
         for row in &provider_rows {
-            // Filter by provider type for this group
+            // Filter by provider type compatibility for this API format
             let matches = match group {
                 RouteGroup::ClaudeCode => {
                     row.provider_type == crate::ai_provider::TYPE_ANTHROPIC
@@ -87,6 +87,23 @@ impl ProviderRouter {
                 None => (true, row.sort_order as i32), // default enabled
             };
 
+            // Effective model IDs from the provider's custom model list.
+            // Each entry is {model, aliasId}; aliasId takes precedence.
+            let model_ids: Vec<String> = serde_json::from_str::<
+                Vec<crate::ai_provider::CustomModel>,
+            >(&row.custom_models_json)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| {
+                if m.alias_id.trim().is_empty() {
+                    m.model
+                } else {
+                    m.alias_id
+                }
+            })
+            .filter(|id| !id.trim().is_empty())
+            .collect();
+
             // For universal type in Codex group, use the derived OpenAI base URL
             let base_url = if row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
                 && group == RouteGroup::Codex
@@ -102,6 +119,7 @@ impl ProviderRouter {
                 provider_type: row.provider_type.clone(),
                 base_url,
                 api_key,
+                model_ids,
                 enabled,
                 sort_order,
             });
@@ -192,28 +210,33 @@ impl ProviderRouter {
         }
     }
 
-    /// Get (id, name, base_url, api_key) for all enabled providers in a group.
-    /// Used by remote model fetching to call each provider's /v1/models API.
-    pub async fn get_enabled_provider_infos(
+    /// Get merged info for all enabled providers across both API formats:
+    /// (id, name, custom_model_ids, fetch_base_url, api_key).
+    /// Codex-format entries are visited first so universal providers expose
+    /// their OpenAI-style base URL (used for remote /v1/models fetching).
+    pub async fn get_enabled_provider_model_infos(
         &self,
-        group: RouteGroup,
-    ) -> Vec<(String, String, String, String)> {
+    ) -> Vec<(String, String, Vec<String>, String, String)> {
         let pools = self.pools.read().await;
-        let pool = match pools.get(&group) {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-        pool.iter()
-            .filter(|p| p.enabled)
-            .map(|p| {
-                (
-                    p.id.clone(),
-                    p.name.clone(),
-                    p.base_url.clone(),
-                    p.api_key.clone(),
-                )
-            })
-            .collect()
+        let mut result: Vec<(String, String, Vec<String>, String, String)> = Vec::new();
+        for group in [RouteGroup::Codex, RouteGroup::ClaudeCode] {
+            let pool = match pools.get(&group) {
+                Some(p) => p,
+                None => continue,
+            };
+            for p in pool.iter().filter(|p| p.enabled) {
+                if !result.iter().any(|(id, _, _, _, _)| *id == p.id) {
+                    result.push((
+                        p.id.clone(),
+                        p.name.clone(),
+                        p.model_ids.clone(),
+                        p.base_url.clone(),
+                        p.api_key.clone(),
+                    ));
+                }
+            }
+        }
+        result
     }
 
     /// Get status snapshots for all providers in a group.
@@ -256,6 +279,48 @@ impl ProviderRouter {
             });
         }
         result
+    }
+
+    /// Get merged status snapshots across both API formats (for the UI).
+    /// A provider appears once; circuit state is the worst of both formats,
+    /// counters are summed, and the most recent error is kept.
+    pub async fn get_merged_statuses(&self) -> Vec<ProviderRouteStatus> {
+        let cc = self.get_provider_statuses(RouteGroup::ClaudeCode).await;
+        let codex = self.get_provider_statuses(RouteGroup::Codex).await;
+
+        let rank = |state: &str| -> u8 {
+            match state {
+                "open" => 2,
+                "half_open" => 1,
+                _ => 0,
+            }
+        };
+
+        let mut merged: Vec<ProviderRouteStatus> = cc;
+        for item in codex {
+            match merged.iter_mut().find(|m| m.id == item.id) {
+                Some(existing) => {
+                    if rank(&item.circuit_state) > rank(&existing.circuit_state) {
+                        existing.circuit_state = item.circuit_state;
+                    }
+                    existing.consecutive_failures =
+                        existing.consecutive_failures.max(item.consecutive_failures);
+                    existing.request_count += item.request_count;
+                    existing.success_count += item.success_count;
+                    let newer = match (existing.last_error_at, item.last_error_at) {
+                        (_, None) => false,
+                        (None, Some(_)) => true,
+                        (Some(a), Some(b)) => b > a,
+                    };
+                    if newer {
+                        existing.last_error = item.last_error;
+                        existing.last_error_at = item.last_error_at;
+                    }
+                }
+                None => merged.push(item),
+            }
+        }
+        merged
     }
 }
 

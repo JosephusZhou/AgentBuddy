@@ -1,22 +1,8 @@
 // TypeScript types for route aggregation — mirrors Rust DTOs.
 
-export type RouteGroup = "claude_code" | "codex";
-
 export type CloakingMode = "auto" | "always" | "never";
 
-export interface ModelEntry {
-  id: string;
-  alias: string;
-}
-
-export interface ModelSource {
-  id: string;
-  providers: string[];
-}
-
 export interface RouteAggregationConfig {
-  claudeCodeEnabled: boolean;
-  codexEnabled: boolean;
   listenAddress: string;
   listenPort: number;
   autoFailover: boolean;
@@ -27,10 +13,10 @@ export interface RouteAggregationConfig {
   cloakingMode: CloakingMode;
   claudeCodeVersion: string;
   codexVersion: string;
-  claudeCodeApiKey: string;
-  codexApiKey: string;
-  claudeCodeModels: ModelEntry[];
-  codexModels: ModelEntry[];
+  /** 端点 API Key 列表；第一个为主 Key（只能重新生成，不能删除）。 */
+  apiKeys: string[];
+  /** 应用启动时是否自动拉起代理服务器（由启动/停止动作维护）。 */
+  autoStart: boolean;
 }
 
 export interface ProviderRouteStatus {
@@ -46,30 +32,15 @@ export interface ProviderRouteStatus {
   successCount: number;
 }
 
-export interface GroupStatus {
-  enabled: boolean;
-  activeProviders: ProviderRouteStatus[];
-  totalProviders: number;
-}
-
 export interface RouteAggregationStatus {
   serverRunning: boolean;
   listenAddress: string;
   listenPort: number;
-  claudeCode: GroupStatus;
-  codex: GroupStatus;
-}
-
-export interface ProviderRouteToggle {
-  providerId: string;
-  group: string;
-  enabled: boolean;
-  sortOrder: number;
+  /** 两种接口格式合并后的供应商状态列表。 */
+  providers: ProviderRouteStatus[];
 }
 
 export const DEFAULT_CONFIG: RouteAggregationConfig = {
-  claudeCodeEnabled: false,
-  codexEnabled: false,
   listenAddress: "127.0.0.1",
   listenPort: 16888,
   autoFailover: true,
@@ -80,8 +51,6 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
   cloakingMode: "auto",
   claudeCodeVersion: "2.1.63",
   codexVersion: "0.146.0",
-  claudeCodeApiKey: "",
-  codexApiKey: "",
-  claudeCodeModels: [],
-  codexModels: [],
+  apiKeys: [],
+  autoStart: false,
 };

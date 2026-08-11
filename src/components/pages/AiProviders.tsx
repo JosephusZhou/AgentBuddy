@@ -3,12 +3,12 @@ import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { ModelComboBox } from "../ModelComboBox";
 import { useOverlayDismiss } from "../ui";
-import { Copy, Pencil, Plus, Trash2, X, Boxes, KeyRound, Download, Eye, EyeOff, Search, GripVertical } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2, X, Boxes, Download, Eye, EyeOff, Search, GripVertical, CheckSquare, Square } from "lucide-react";
 import {
   invokeList,
   invokeUpsert,
   invokeDelete,
-  invokeGetSecret,
+  invokeGetSecrets,
   invokeFetchRemoteModels,
   invokeReorder,
 } from "./ai-providers/api";
@@ -17,6 +17,7 @@ import {
   PROVIDER_TYPE_OPTIONS,
   type AiProvider,
   type ProviderType,
+  type CustomModel,
 } from "./ai-providers/types";
 
 /* ===== Icons ===== */
@@ -27,12 +28,13 @@ const IconTrashConfirm = () => <Trash2 size={20} strokeWidth={2} />;
 const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
 const IconCopy = () => <Copy size={16} strokeWidth={1.8} />;
 const IconEmpty = () => <Boxes size={40} strokeWidth={1.5} />;
-const IconKey = () => <KeyRound size={14} strokeWidth={1.8} />;
 const IconDownload = () => <Download size={14} strokeWidth={1.8} />;
 const IconSearch = () => <Search size={16} strokeWidth={1.8} />;
 const IconEye = () => <Eye size={16} strokeWidth={1.8} />;
 const IconEyeOff = () => <EyeOff size={16} strokeWidth={1.8} />;
 const IconGrip = () => <GripVertical size={16} strokeWidth={1.8} />;
+const IconCheckSquare = () => <CheckSquare size={16} strokeWidth={1.8} />;
+const IconSquare = () => <Square size={16} strokeWidth={1.8} />;
 const IconChevron = ({ open }: { open?: boolean }) => (
   <svg
     width="16"
@@ -172,7 +174,6 @@ export default function AiProviders() {
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isLoadingKey, setIsLoadingKey] = useState(false);
 
   const formDismiss = useOverlayDismiss(() => setShowForm(false), !isSaving);
   const deleteDismiss = useOverlayDismiss(() => setDeleteTarget(null), !isDeleting);
@@ -180,16 +181,26 @@ export default function AiProviders() {
   const [formName, setFormName] = useState("");
   const [formType, setFormType] = useState<ProviderType>("anthropic");
   const [formBaseUrl, setFormBaseUrl] = useState("");
-  const [formApiKey, setFormApiKey] = useState("");
+  /** 多 API Key 列表（编辑时自动载入）。 */
+  const [formApiKeys, setFormApiKeys] = useState<string[]>([""]);
+  const [formApiKeyVisibles, setFormApiKeyVisibles] = useState<Record<number, boolean>>({});
   const [formDefaultModel, setFormDefaultModel] = useState("");
   const [formOpenaiDefaultModel, setFormOpenaiDefaultModel] = useState("");
   const [formTierModels, setFormTierModels] = useState<Record<string, string>>({});
   const [formNotes, setFormNotes] = useState("");
   const [editingHasKey, setEditingHasKey] = useState(false);
-  const [formApiKeyVisible, setFormApiKeyVisible] = useState(false);
-  // 远端模型列表：拉取成功后默认模型与档位模型输入框切换为下拉选择
-  const [remoteModels, setRemoteModels] = useState<string[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
+  /** 自定义模型列表（从端点拉取后筛选保留）。 */
+  const [formCustomModels, setFormCustomModels] = useState<CustomModel[]>([]);
+  /** 模型选择面板是否展开。 */
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  /** 从端点拉取的原始模型列表（用于选择面板）。 */
+  const [pickerModels, setPickerModels] = useState<string[]>([]);
+  /** 选择面板中已勾选的模型。 */
+  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
+  const [pickerLoading, setPickerLoading] = useState(false);
+  /** 手动添加模型的输入值（部分供应商不支持拉取列表时使用）。 */
+  const [manualModelInput, setManualModelInput] = useState("");
+  // 远端模型列表：保留用于兼容（默认模型下拉仍可输入手动值）
 
   const idCounter = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -302,14 +313,18 @@ export default function AiProviders() {
     setFormName("");
     setFormType("anthropic");
     setFormBaseUrl("");
-    setFormApiKey("");
+    setFormApiKeys([""]);
+    setFormApiKeyVisibles({});
     setFormDefaultModel("");
     setFormOpenaiDefaultModel("");
     setFormTierModels({});
     setFormNotes("");
     setEditingHasKey(false);
-    setFormApiKeyVisible(false);
-    setRemoteModels([]);
+    setFormCustomModels([]);
+    setShowModelPicker(false);
+    setPickerModels([]);
+    setPickerSelected(new Set());
+    setManualModelInput("");
     setFormError("");
   }, []);
 
@@ -324,95 +339,137 @@ export default function AiProviders() {
     setFormName(p.name);
     setFormType(p.providerType);
     setFormBaseUrl(p.baseUrl);
-    setFormApiKey("");
+    setFormApiKeys([""]);
+    setFormApiKeyVisibles({});
     setFormDefaultModel(p.defaultModel);
     setFormOpenaiDefaultModel(p.openaiDefaultModel);
     setFormTierModels({ ...p.models });
     setFormNotes(p.notes);
     setEditingHasKey(p.hasApiKey);
-    setFormApiKeyVisible(false);
-    setRemoteModels([]);
+    setFormCustomModels(p.customModels ? [...p.customModels] : []);
+    setShowModelPicker(false);
+    setPickerModels([]);
+    setPickerSelected(new Set());
+    setManualModelInput("");
     setFormError("");
     setShowForm(true);
+    // 自动载入已保存的 API Key
+    if (p.hasApiKey) {
+      invokeGetSecrets(p.id)
+        .then((secrets) => {
+          if (secrets.length > 0) {
+            setFormApiKeys(secrets);
+          }
+        })
+        .catch(() => setFormError("读取密钥失败，请手动填写 API Key"));
+    }
   }, []);
 
-  // 复制：以新建弹窗打开并回填原供应商数据；API Key 经 get_ai_provider_secret 取回一并回填
+  // 复制：以新建弹窗打开并回填原供应商数据；API Key 自动载入
   const openClone = useCallback((p: AiProvider) => {
     setEditingId(null);
     setFormName(`${p.name} 副本`);
     setFormType(p.providerType);
     setFormBaseUrl(p.baseUrl);
-    setFormApiKey("");
+    setFormApiKeys([""]);
+    setFormApiKeyVisibles({});
     setFormDefaultModel(p.defaultModel);
     setFormOpenaiDefaultModel(p.openaiDefaultModel);
     setFormTierModels({ ...p.models });
     setFormNotes(p.notes);
     setEditingHasKey(false);
-    setFormApiKeyVisible(false);
-    setRemoteModels([]);
+    setFormCustomModels(p.customModels ? [...p.customModels] : []);
+    setShowModelPicker(false);
+    setPickerModels([]);
+    setPickerSelected(new Set());
+    setManualModelInput("");
     setFormError("");
     setShowForm(true);
     if (p.hasApiKey) {
-      setIsLoadingKey(true);
-      invokeGetSecret(p.id)
-        .then((secret) => setFormApiKey(secret))
-        .catch(() => setFormError("原供应商密钥读取失败，请手动填写 API Key"))
-        .finally(() => setIsLoadingKey(false));
+      invokeGetSecrets(p.id)
+        .then((secrets) => {
+          if (secrets.length > 0) {
+            setFormApiKeys(secrets);
+          }
+        })
+        .catch(() => setFormError("原供应商密钥读取失败，请手动填写 API Key"));
     }
   }, []);
 
-  // 拉取远端模型列表：优先用表单中的 Key；编辑时表单留空则取已保存的密钥
-  const fetchModels = useCallback(async () => {
+  // 拉取远端模型列表：用于模型选择面板
+  const fetchModelsForPicker = useCallback(async () => {
     const baseUrl = formBaseUrl.trim();
     if (!baseUrl) {
       setStatusMsg("请先填写 Base URL");
       return;
     }
-    setModelsLoading(true);
+    setPickerLoading(true);
     try {
-      let apiKey = formApiKey.trim();
+      // 优先使用表单中的第一个 Key；编辑时表单为空则取已保存的密钥
+      let apiKey = formApiKeys[0]?.trim() || "";
       if (!apiKey && editingId && editingHasKey) {
-        apiKey = (await invokeGetSecret(editingId)).trim();
+        const secrets = await invokeGetSecrets(editingId);
+        apiKey = secrets[0]?.trim() || "";
       }
       const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
       if (models.length === 0) {
-        setStatusMsg("远端未返回可用模型，仍可手动输入");
+        setStatusMsg("远端未返回可用模型");
         return;
       }
-      setRemoteModels(models);
-      // 已有值时保留（编辑场景不被覆盖），仅在为空时预填第一个
-      if (!formDefaultModel.trim()) {
-        setFormDefaultModel(models[0]);
-      }
-      if (formType === "universal" && !formOpenaiDefaultModel.trim()) {
-        setFormOpenaiDefaultModel(models[0]);
-      }
+      setPickerModels(models);
+      // 预选已存在于自定义列表中的模型
+      const existingSet = new Set(formCustomModels.map((cm) => cm.model));
+      setPickerSelected(existingSet);
+      setShowModelPicker(true);
       setStatusMsg(`已拉取 ${models.length} 个远端模型`);
     } catch (err) {
       setStatusMsg(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setModelsLoading(false);
+      setPickerLoading(false);
     }
-  }, [formBaseUrl, formApiKey, formDefaultModel, formOpenaiDefaultModel, formType, editingId, editingHasKey, setStatusMsg]);
+  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, setStatusMsg]);
 
-  const handleLoadSecret = useCallback(async () => {
-    if (!editingId) return;
-    setIsLoadingKey(true);
-    setFormError("");
-    try {
-      const secret = await invokeGetSecret(editingId);
-      setFormApiKey(secret);
-    } catch (err) {
-      setFormError(`读取密钥失败：${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsLoadingKey(false);
+  // 应用选择面板中的选择到自定义模型列表
+  const applyPickerSelection = useCallback(() => {
+    const existingMap = new Map(formCustomModels.map((cm) => [cm.model, cm.aliasId]));
+    const newModels: CustomModel[] = [];
+    pickerSelected.forEach((model) => {
+      newModels.push({
+        model,
+        aliasId: existingMap.get(model) || "",
+      });
+    });
+    setFormCustomModels(newModels);
+    setShowModelPicker(false);
+  }, [pickerSelected, formCustomModels]);
+
+  // 手动添加模型：部分供应商不支持拉取列表，需手动指定模型 ID
+  const addManualModel = useCallback(() => {
+    const model = manualModelInput.trim();
+    if (!model) return;
+    if (formCustomModels.some((cm) => cm.model === model)) {
+      setFormError(`模型「${model}」已在自定义列表中`);
+      return;
     }
-  }, [editingId]);
+    setFormCustomModels((prev) => [...prev, { model, aliasId: "" }]);
+    setManualModelInput("");
+    setFormError("");
+  }, [manualModelInput, formCustomModels]);
+
+  // 自定义模型列表中的模型 ID 列表（用于档位模型下拉）
+  const customModelOptions = useMemo(
+    () =>
+      formCustomModels.flatMap((cm) =>
+        cm.aliasId ? [cm.aliasId, cm.model] : [cm.model],
+      ),
+    [formCustomModels],
+  );
 
   const handleSave = useCallback(async () => {
     const name = formName.trim();
     const baseUrl = formBaseUrl.trim();
-    const apiKey = formApiKey.trim();
+    // 过滤空 Key
+    const apiKeys = formApiKeys.map((k) => k.trim()).filter((k) => k);
     const defaultModel = formDefaultModel.trim();
 
     if (!name || !baseUrl) {
@@ -423,7 +480,7 @@ export default function AiProviders() {
       setFormError("Base URL 必须以 http:// 或 https:// 开头");
       return;
     }
-    if (!editingId && !apiKey) {
+    if (!editingId && apiKeys.length === 0) {
       setFormError("新建供应商时 API Key 不能为空");
       return;
     }
@@ -446,12 +503,13 @@ export default function AiProviders() {
         name,
         providerType: formType,
         baseUrl,
-        ...(apiKey ? { apiKey } : {}),
+        ...(apiKeys.length > 0 ? { apiKeys } : {}),
         defaultModel,
         ...(formType === "universal"
           ? { openaiDefaultModel: formOpenaiDefaultModel.trim() }
           : {}),
         models,
+        customModels: formCustomModels,
         notes: formNotes.trim(),
       });
       const saved = result.provider;
@@ -471,7 +529,7 @@ export default function AiProviders() {
     } finally {
       setIsSaving(false);
     }
-  }, [formName, formType, formBaseUrl, formApiKey, formDefaultModel, formOpenaiDefaultModel, formTierModels, formNotes, editingId, nextId]);
+  }, [formName, formType, formBaseUrl, formApiKeys, formDefaultModel, formOpenaiDefaultModel, formTierModels, formCustomModels, formNotes, editingId, nextId]);
 
   const handleDelete = useCallback(async () => {
     if (deleteTarget === null) return;
@@ -840,7 +898,6 @@ export default function AiProviders() {
                 value={formBaseUrl}
                 onChange={(e) => {
                   setFormBaseUrl(e.target.value);
-                  setRemoteModels([]);
                 }}
                 disabled={isSaving}
               />
@@ -860,112 +917,255 @@ export default function AiProviders() {
               )}
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="ai-provider-api-key">API Key</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <div className="form-input-with-action">
-                  <input
-                    type={formApiKeyVisible ? "text" : "password"}
-                    className="form-input"
-                    id="ai-provider-api-key"
-                    placeholder={
-                      editingId
-                        ? editingHasKey
-                          ? "留空则保持原密钥"
+              <label className="form-label">API Key</label>
+              {formApiKeys.map((key, index) => (
+                <div key={index} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: index < formApiKeys.length - 1 ? 8 : 0 }}>
+                  <div className="form-input-with-action" style={{ flex: 1 }}>
+                    <input
+                      type={formApiKeyVisibles[index] ? "text" : "password"}
+                      className="form-input"
+                      placeholder={
+                        editingId && editingHasKey && !key
+                          ? "已载入密钥"
                           : "输入 API Key"
-                        : "输入 API Key"
-                    }
-                    value={formApiKey}
-                    onChange={(e) => setFormApiKey(e.target.value)}
-                    disabled={isSaving || isLoadingKey}
-                    autoComplete="new-password"
-                    spellCheck={false}
-                  />
-                  <button
-                    type="button"
-                    className="form-input-action"
-                    data-tooltip={formApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
-                    aria-label={formApiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
-                    aria-pressed={formApiKeyVisible}
-                    onClick={() => setFormApiKeyVisible((v) => !v)}
-                    disabled={isSaving || isLoadingKey}
-                    tabIndex={0}
-                  >
-                    {formApiKeyVisible ? <IconEyeOff /> : <IconEye />}
-                  </button>
+                      }
+                      value={key}
+                      onChange={(e) => {
+                        const next = [...formApiKeys];
+                        next[index] = e.target.value;
+                        setFormApiKeys(next);
+                      }}
+                      disabled={isSaving}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="form-input-action"
+                      data-tooltip={formApiKeyVisibles[index] ? "隐藏" : "显示"}
+                      onClick={() =>
+                        setFormApiKeyVisibles((prev) => ({ ...prev, [index]: !prev[index] }))
+                      }
+                      disabled={isSaving}
+                      tabIndex={0}
+                    >
+                      {formApiKeyVisibles[index] ? <IconEyeOff /> : <IconEye />}
+                    </button>
+                  </div>
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      className="btn-delete"
+                      data-tooltip="删除此 Key"
+                      onClick={() => {
+                        setFormApiKeys((prev) => prev.filter((_, i) => i !== index));
+                      }}
+                      disabled={isSaving}
+                      style={{ opacity: 1 }}
+                    >
+                      <IconTrash />
+                    </button>
+                  )}
                 </div>
-                {editingId && editingHasKey ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => void handleLoadSecret()}
-                    disabled={isSaving || isLoadingKey}
-                    data-tooltip="载入已保存的密钥以查看或修改"
-                  >
-                    <IconKey />
-                    {isLoadingKey ? "载入中…" : "载入密钥"}
-                  </button>
-                ) : null}
+              ))}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ marginTop: 8 }}
+                onClick={() => setFormApiKeys((prev) => [...prev, ""])}
+                disabled={isSaving}
+              >
+                <IconPlus />
+                添加 API Key
+              </button>
+            </div>
+            {/* 自定义模型列表区域 */}
+            <div className="form-group">
+              <div className="claude-env-model-label-row">
+                <label className="form-label">自定义模型列表</label>
+                <button
+                  type="button"
+                  className="claude-env-fetch-models-btn"
+                  data-tooltip="从当前 Base URL 拉取模型列表"
+                  onClick={() => void fetchModelsForPicker()}
+                  disabled={isSaving || pickerLoading}
+                >
+                  <IconDownload />
+                  {pickerLoading ? "拉取中…" : "从端点拉取"}
+                </button>
+              </div>
+              {formCustomModels.length === 0 ? (
+                <div className="ai-provider-custom-models-empty">
+                  暂无自定义模型，可点击“从端点拉取”获取供应商模型列表，或在下方手动添加
+                </div>
+              ) : (
+                <div className="ai-provider-custom-models-list">
+                  {formCustomModels.map((cm, index) => (
+                    <div key={cm.model} className="ai-provider-custom-model-item">
+                      <div className="ai-provider-custom-model-info">
+                        <span className="ai-provider-custom-model-name">{cm.model}</span>
+                        {cm.aliasId && (
+                          <span className="ai-provider-custom-model-alias">别名: {cm.aliasId}</span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="别名 ID"
+                          value={cm.aliasId}
+                          onChange={(e) => {
+                            const next = [...formCustomModels];
+                            next[index] = { ...cm, aliasId: e.target.value };
+                            setFormCustomModels(next);
+                          }}
+                          disabled={isSaving}
+                          style={{ width: 120, fontSize: 12 }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-delete"
+                          data-tooltip="删除此模型"
+                          onClick={() => {
+                            setFormCustomModels((prev) => prev.filter((_, i) => i !== index));
+                          }}
+                          disabled={isSaving}
+                          style={{ opacity: 1 }}
+                        >
+                          <IconTrash />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 手动添加模型（供应商不支持拉取列表时使用） */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="手动输入模型 ID，如 claude-sonnet-4-5"
+                  value={manualModelInput}
+                  onChange={(e) => setManualModelInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addManualModel();
+                    }
+                  }}
+                  disabled={isSaving}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={addManualModel}
+                  disabled={isSaving || !manualModelInput.trim()}
+                >
+                  <IconPlus />
+                  添加
+                </button>
               </div>
             </div>
-            {formType === "universal" && (
-              <div className="form-group">
-                <div className="claude-env-model-label-row">
-                  <label className="form-label" htmlFor="ai-provider-openai-default-model">
-                    OpenAI 默认模型 <span className="form-label-optional">可选</span>
-                  </label>
+            {/* 模型选择面板 */}
+            {showModelPicker && (
+              <div className="ai-provider-model-picker">
+                <div className="ai-provider-model-picker-header">
+                  <span className="form-label">选择模型</span>
                   <button
                     type="button"
-                    className="claude-env-fetch-models-btn"
-                    data-tooltip="从当前 Base URL 拉取模型列表"
-                    onClick={() => void fetchModels()}
-                    disabled={isSaving || modelsLoading}
+                    className="modal-close"
+                    onClick={() => setShowModelPicker(false)}
                   >
-                    <IconDownload />
-                    {modelsLoading ? "拉取中…" : "拉取列表"}
+                    <IconClose />
                   </button>
                 </div>
+                <div className="ai-provider-model-picker-list">
+                  {pickerModels.map((model) => {
+                    const checked = pickerSelected.has(model);
+                    const toggle = () => {
+                      setPickerSelected((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(model)) {
+                          next.delete(model);
+                        } else {
+                          next.add(model);
+                        }
+                        return next;
+                      });
+                    };
+                    return (
+                      <div
+                        key={model}
+                        className="ai-provider-model-picker-item"
+                        role="checkbox"
+                        aria-checked={checked}
+                        tabIndex={0}
+                        onClick={toggle}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggle();
+                          }
+                        }}
+                      >
+                        <span className="ai-provider-model-picker-checkbox">
+                          {checked ? <IconCheckSquare /> : <IconSquare />}
+                        </span>
+                        <span>{model}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="ai-provider-model-picker-footer">
+                  <span className="ai-provider-model-picker-count">
+                    已选 {pickerSelected.size} / {pickerModels.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={applyPickerSelection}
+                    disabled={pickerSelected.size === 0}
+                  >
+                    应用
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* 默认模型选择（从自定义模型列表筛选） */}
+            {formType === "universal" && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ai-provider-openai-default-model">
+                  OpenAI 默认模型 <span className="form-label-optional">可选</span>
+                </label>
                 <ModelComboBox
                   id="ai-provider-openai-default-model"
                   value={formOpenaiDefaultModel}
                   onChange={setFormOpenaiDefaultModel}
                   disabled={isSaving}
-                  options={remoteModels}
+                  options={customModelOptions}
                   placeholder="gpt-5"
                 />
               </div>
             )}
             <div className="form-group">
-              <div className="claude-env-model-label-row">
-                <label className="form-label" htmlFor="ai-provider-default-model">
-                  {formType === "universal" ? "Anthropic 默认模型" : "默认模型"}{" "}
-                  <span className="form-label-optional">可选</span>
-                </label>
-                {formType !== "universal" && (
-                  <button
-                    type="button"
-                    className="claude-env-fetch-models-btn"
-                    data-tooltip="从当前 Base URL 拉取模型列表"
-                    onClick={() => void fetchModels()}
-                    disabled={isSaving || modelsLoading}
-                  >
-                    <IconDownload />
-                    {modelsLoading ? "拉取中…" : "拉取列表"}
-                  </button>
-                )}
-              </div>
+              <label className="form-label" htmlFor="ai-provider-default-model">
+                {formType === "universal" ? "Anthropic 默认模型" : "默认模型"}{" "}
+                <span className="form-label-optional">可选</span>
+              </label>
               <ModelComboBox
                 id="ai-provider-default-model"
                 value={formDefaultModel}
                 onChange={setFormDefaultModel}
                 disabled={isSaving}
-                options={remoteModels}
+                options={customModelOptions}
                 placeholder={formType === "openai" ? "gpt-5" : "claude-sonnet-4-5"}
               />
             </div>
             {formType !== "openai" ? (
               <div className="form-group">
                 <label className="form-label">
-                  档位模型 <span className="form-label-optional">可选</span>
+                  档位模型 <span className="form-label-optional">可选，从自定义模型列表选择</span>
                 </label>
                 {MODEL_TIERS.map((tier) => (
                   <div key={tier.key} style={{ marginBottom: 8 }}>
@@ -976,7 +1176,7 @@ export default function AiProviders() {
                         setFormTierModels((prev) => ({ ...prev, [tier.key]: v }))
                       }
                       disabled={isSaving}
-                      options={remoteModels}
+                      options={customModelOptions}
                       placeholder="留空跟随默认模型"
                     />
                   </div>
@@ -1010,7 +1210,7 @@ export default function AiProviders() {
             <button
               className="btn btn-primary"
               onClick={() => void handleSave()}
-              disabled={isSaving || isLoadingKey}
+              disabled={isSaving}
             >
               {isSaving ? "保存中…" : "保存"}
             </button>

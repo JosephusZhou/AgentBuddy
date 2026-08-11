@@ -128,8 +128,23 @@ fn get_connection() -> Result<Connection, String> {
     ensure_column(&conn, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "ai_providers", "openai_default_model", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "ai_providers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "ai_providers", "api_keys_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensure_column(&conn, "ai_providers", "custom_models_json", "TEXT NOT NULL DEFAULT '[]'");
     ensure_column(&conn, "claude_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "codex_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
+
+    // Migration: provider route toggles are now unified (no per-route-group
+    // switch). Fold legacy 'claude_code'/'codex' rows into a single 'unified'
+    // row per provider. Idempotent and cheap; runs on every open.
+    if let Err(e) = conn.execute_batch(
+        "DELETE FROM provider_route_toggle
+            WHERE route_group <> 'unified'
+              AND provider_id IN (SELECT provider_id FROM provider_route_toggle WHERE route_group = 'unified');
+         UPDATE OR IGNORE provider_route_toggle SET route_group = 'unified' WHERE route_group <> 'unified';
+         DELETE FROM provider_route_toggle WHERE route_group <> 'unified';",
+    ) {
+        eprintln!("[agent-buddy] unify provider_route_toggle failed: {}", e);
+    }
 
     Ok(conn)
 }
@@ -1006,6 +1021,8 @@ fn row_to_ai_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiProviderRow
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
         sort_order: row.get(13)?,
+        api_keys_json: row.get(14)?,
+        custom_models_json: row.get(15)?,
     })
 }
 
@@ -1015,7 +1032,7 @@ pub fn load_ai_provider_rows() -> Result<Vec<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at, sort_order
+                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json
              FROM ai_providers
              ORDER BY sort_order ASC, created_at ASC",
         )
@@ -1036,7 +1053,7 @@ pub fn get_ai_provider_row(id: &str) -> Result<Option<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at, sort_order
+                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json
              FROM ai_providers
              WHERE id = ?1",
         )
@@ -1053,8 +1070,8 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
         "INSERT INTO ai_providers
             (id, name, provider_type, base_url, api_key_salt, api_key_nonce,
              api_key_cipher, default_model, openai_default_model, models_json,
-             notes, created_at, updated_at, sort_order)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             provider_type = excluded.provider_type,
@@ -1068,7 +1085,9 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             notes = excluded.notes,
             created_at = ai_providers.created_at,
             updated_at = excluded.updated_at,
-            sort_order = excluded.sort_order",
+            sort_order = excluded.sort_order,
+            api_keys_json = excluded.api_keys_json,
+            custom_models_json = excluded.custom_models_json",
         params![
             row.id,
             row.name,
@@ -1084,6 +1103,8 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             row.created_at,
             row.updated_at,
             row.sort_order,
+            row.api_keys_json,
+            row.custom_models_json,
         ],
     )
     .map_err(|e| format!("Failed to upsert ai_provider {}: {}", row.id, e))?;
@@ -1117,25 +1138,23 @@ pub fn reorder_ai_provider_rows(orders: &[(String, i64)]) -> Result<(), String> 
 
 /* ===== Provider route toggles (route aggregation) ===== */
 
-/// Load all toggle rows for a given route group.
-pub fn load_provider_route_toggles(group: crate::route_aggregation::RouteGroup) -> Result<Vec<crate::route_aggregation::ProviderRouteToggle>, String> {
+/// Load all unified provider toggle rows.
+pub fn load_provider_route_toggles() -> Result<Vec<crate::route_aggregation::ProviderRouteToggle>, String> {
     let conn = get_connection()?;
     let mut stmt = conn
         .prepare(
-            "SELECT provider_id, route_group, enabled, sort_order
+            "SELECT provider_id, enabled, sort_order
              FROM provider_route_toggle
-             WHERE route_group = ?1
              ORDER BY sort_order ASC",
         )
         .map_err(|e| format!("Failed to prepare route_toggle query: {}", e))?;
 
     let rows = stmt
-        .query_map(params![group.as_str()], |row| {
+        .query_map([], |row| {
             Ok(crate::route_aggregation::ProviderRouteToggle {
                 provider_id: row.get(0)?,
-                group: row.get(1)?,
-                enabled: row.get::<_, i32>(2)? != 0,
-                sort_order: row.get(3)?,
+                enabled: row.get::<_, i32>(1)? != 0,
+                sort_order: row.get(2)?,
             })
         })
         .map_err(|e| format!("Failed to query route_toggle: {}", e))?
@@ -1145,21 +1164,20 @@ pub fn load_provider_route_toggles(group: crate::route_aggregation::RouteGroup) 
     Ok(rows)
 }
 
-/// Upsert a provider's toggle for a route group.
+/// Upsert a provider's unified toggle.
 pub fn upsert_provider_route_toggle(
     provider_id: &str,
-    group: crate::route_aggregation::RouteGroup,
     enabled: bool,
     sort_order: i32,
 ) -> Result<(), String> {
     let conn = get_connection()?;
     conn.execute(
         "INSERT INTO provider_route_toggle (provider_id, route_group, enabled, sort_order)
-         VALUES (?1, ?2, ?3, ?4)
+         VALUES (?1, 'unified', ?2, ?3)
          ON CONFLICT(provider_id, route_group) DO UPDATE SET
             enabled = excluded.enabled,
             sort_order = excluded.sort_order",
-        params![provider_id, group.as_str(), enabled as i32, sort_order],
+        params![provider_id, enabled as i32, sort_order],
     )
     .map_err(|e| format!("Failed to upsert route_toggle for {}: {}", provider_id, e))?;
     Ok(())
@@ -1174,27 +1192,6 @@ pub fn delete_provider_route_toggles(provider_id: &str) -> Result<(), String> {
         params![provider_id],
     )
     .map_err(|e| format!("Failed to delete route_toggle for {}: {}", provider_id, e))?;
-    Ok(())
-}
-
-/// Batch-update sort_order for a route group.
-pub fn reorder_provider_route_toggles(
-    ids: &[String],
-    group: crate::route_aggregation::RouteGroup,
-) -> Result<(), String> {
-    let conn = get_connection()?;
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    for (i, id) in ids.iter().enumerate() {
-        tx.execute(
-            "UPDATE provider_route_toggle SET sort_order = ?1 WHERE provider_id = ?2 AND route_group = ?3",
-            params![i as i32, id, group.as_str()],
-        )
-        .map_err(|e| format!("Failed to reorder route_toggle {}: {}", id, e))?;
-    }
-    tx.commit()
-        .map_err(|e| format!("Failed to commit reorder: {}", e))?;
     Ok(())
 }
 

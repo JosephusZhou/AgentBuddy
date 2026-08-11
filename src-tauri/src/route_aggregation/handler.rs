@@ -1,7 +1,9 @@
 //! Request handlers — entry points for Axum routes.
 //!
-//! Each handler authenticates the request against the per-group API key,
-//! then delegates to the forwarder and returns the upstream response
+//! The aggregated endpoint always serves both API formats (Claude messages
+//! and Codex responses) while the server is running. Each handler
+//! authenticates the request against the configured API key list, then
+//! delegates to the forwarder and returns the upstream response
 //! (with SSE passthrough for streaming).
 
 use axum::body::Body;
@@ -26,16 +28,16 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     }
 }
 
-/// Authenticate a request against the given group's API key.
-/// Returns Ok(()) if the key matches or no key is configured (no-auth mode).
-/// Returns Err(Response) with 401 if authentication fails.
-fn authenticate(headers: &HeaderMap, expected_key: &str) -> Result<(), Response> {
-    if expected_key.is_empty() {
-        // No API key configured for this group — open access
+/// Authenticate a request against the configured API key list.
+/// Returns Ok(()) if the token matches any key, or if no key is configured
+/// (no-auth mode). Returns Err(Response) with 401 otherwise.
+fn authenticate(headers: &HeaderMap, api_keys: &[String]) -> Result<(), Response> {
+    if api_keys.is_empty() {
+        // No API key configured — open access
         return Ok(());
     }
     match extract_bearer_token(headers) {
-        Some(token) if token == expected_key => Ok(()),
+        Some(token) if api_keys.iter().any(|k| *k == token) => Ok(()),
         _ => Err(error_response(
             StatusCode::UNAUTHORIZED,
             "无效或缺失的 API Key",
@@ -51,11 +53,7 @@ pub async fn handle_claude_messages(
 ) -> Response {
     let config = state.config.read().await.clone();
 
-    if !config.claude_code_enabled {
-        return error_response(StatusCode::SERVICE_UNAVAILABLE, "Claude Code 路由未启用");
-    }
-
-    if let Err(resp) = authenticate(&headers, &config.claude_code_api_key) {
+    if let Err(resp) = authenticate(&headers, &config.api_keys) {
         return resp;
     }
 
@@ -85,11 +83,7 @@ pub async fn handle_codex_responses(
 ) -> Response {
     let config = state.config.read().await.clone();
 
-    if !config.codex_enabled {
-        return error_response(StatusCode::SERVICE_UNAVAILABLE, "Codex 路由未启用");
-    }
-
-    if let Err(resp) = authenticate(&headers, &config.codex_api_key) {
+    if let Err(resp) = authenticate(&headers, &config.api_keys) {
         return resp;
     }
 
@@ -112,127 +106,58 @@ pub async fn handle_codex_responses(
 
 /// Handler for listing models: GET /v1/models
 ///
-/// Authenticates the request against either group's API key and returns
-/// the stored model list for the matching group. If the stored list is
-/// empty, falls back to auto-collecting from enabled providers.
+/// Authenticates against the API key list and returns the union of all
+/// checked providers' models. A provider with a custom model list uses it
+/// directly; otherwise models are fetched from its remote /v1/models API.
 pub async fn handle_list_models(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
     let config = state.config.read().await.clone();
 
-    let cc_key_set = !config.claude_code_api_key.is_empty();
-    let codex_key_set = !config.codex_api_key.is_empty();
-
-    // Determine which group's models to return based on the API key
-    let group = if cc_key_set || codex_key_set {
-        // Auth mode: identify the group from the provided API key
-        match extract_bearer_token(&headers).as_deref() {
-            Some(key) if cc_key_set && key == config.claude_code_api_key => Some(RouteGroup::ClaudeCode),
-            Some(key) if codex_key_set && key == config.codex_api_key => Some(RouteGroup::Codex),
-            _ => {
-                return error_response(StatusCode::UNAUTHORIZED, "无效或缺失的 API Key");
-            }
-        }
-    } else {
-        // No-auth mode: return union of all enabled groups
-        None
-    };
-
-    // Get the stored model list for the identified group(s)
-    // Each entry is (model_id, alias) — both owned to avoid lifetime issues
-    // with the auto-collect fallback path.
-    let mut entries: Vec<(String, String)> = Vec::new();
-    let need_fallback;
-
-    match group {
-        Some(RouteGroup::ClaudeCode) => {
-            need_fallback = config.claude_code_models.is_empty();
-            if !need_fallback {
-                entries = config.claude_code_models.iter()
-                    .map(|e| (e.id.clone(), e.alias.clone()))
-                    .collect();
-            }
-        }
-        Some(RouteGroup::Codex) => {
-            need_fallback = config.codex_models.is_empty();
-            if !need_fallback {
-                entries = config.codex_models.iter()
-                    .map(|e| (e.id.clone(), e.alias.clone()))
-                    .collect();
-            }
-        }
-        None => {
-            // No-auth: merge both groups
-            let cc_empty = config.claude_code_models.is_empty();
-            let codex_empty = config.codex_models.is_empty();
-            if cc_empty && codex_empty {
-                need_fallback = true;
-            } else {
-                need_fallback = false;
-                for e in &config.claude_code_models {
-                    entries.push((e.id.clone(), e.alias.clone()));
-                }
-                for e in &config.codex_models {
-                    entries.push((e.id.clone(), e.alias.clone()));
-                }
-            }
-        }
+    if let Err(resp) = authenticate(&headers, &config.api_keys) {
+        return resp;
     }
 
-    // Fallback: fetch from providers' remote /v1/models APIs if stored list is empty
-    if need_fallback {
-        let groups_to_fetch: Vec<RouteGroup> = match group {
-            Some(g) => vec![g],
-            None => {
-                let mut gs = Vec::new();
-                if config.claude_code_enabled {
-                    gs.push(RouteGroup::ClaudeCode);
-                }
-                if config.codex_enabled {
-                    gs.push(RouteGroup::Codex);
-                }
-                gs
-            }
-        };
+    let infos = state.provider_router.get_enabled_provider_model_infos().await;
 
-        let mut ids: Vec<String> = Vec::new();
-        for g in &groups_to_fetch {
-            let provider_infos = state.provider_router.get_enabled_provider_infos(*g).await;
-            // Move to blocking thread for network calls
-            let infos = provider_infos.clone();
-            if let Ok(remote_ids) = tauri::async_runtime::spawn_blocking(move || {
-                let mut model_set = std::collections::BTreeSet::new();
-                for (_id, _name, base_url, api_key) in &infos {
-                    let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
-                    match crate::claude_env::fetch_remote_models(base_url.clone(), key) {
-                        Ok(result) => {
-                            for mid in result.model_ids {
-                                model_set.insert(mid);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[route-aggregation] /v1/models fallback fetch failed: {}", e);
+    // Collect model IDs on a blocking thread (remote fetches are blocking).
+    let ids: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
+        let mut model_set = std::collections::BTreeSet::new();
+        for (_id, name, model_ids, base_url, api_key) in &infos {
+            if !model_ids.is_empty() {
+                // Custom model list takes precedence over remote fetching.
+                for mid in model_ids {
+                    model_set.insert(mid.clone());
+                }
+            } else {
+                let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
+                match crate::claude_env::fetch_remote_models(base_url.clone(), key) {
+                    Ok(result) => {
+                        for mid in result.model_ids {
+                            model_set.insert(mid);
                         }
                     }
+                    Err(e) => {
+                        eprintln!(
+                            "[route-aggregation] /v1/models fetch from {} failed: {}",
+                            name, e
+                        );
+                    }
                 }
-                model_set.into_iter().collect::<Vec<String>>()
-            }).await {
-                ids.extend(remote_ids);
             }
         }
-        ids.sort();
-        ids.dedup();
-        entries = ids.into_iter().map(|id| (id, String::new())).collect();
-    }
+        model_set.into_iter().collect::<Vec<String>>()
+    })
+    .await
+    .unwrap_or_default();
 
     // Build the response
-    let data: Vec<serde_json::Value> = entries
+    let data: Vec<serde_json::Value> = ids
         .iter()
-        .map(|(id, alias)| {
-            let display = if alias.is_empty() { id.as_str() } else { alias.as_str() };
+        .map(|id| {
             serde_json::json!({
-                "id": display,
+                "id": id,
                 "object": "model",
                 "owned_by": "route-aggregation",
             })

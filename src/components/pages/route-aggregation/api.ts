@@ -3,11 +3,6 @@
 import type {
   RouteAggregationConfig,
   RouteAggregationStatus,
-  ProviderRouteToggle,
-  ProviderRouteStatus,
-  RouteGroup,
-  ModelEntry,
-  ModelSource,
 } from "./types";
 
 export async function getStatus(): Promise<RouteAggregationStatus> {
@@ -37,64 +32,41 @@ export async function stopServer(): Promise<void> {
   return invoke("stop_route_aggregation");
 }
 
-export async function getProviderToggles(
-  group: RouteGroup,
-): Promise<ProviderRouteToggle[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("get_provider_route_toggles", { group });
-}
-
 export async function toggleProviderRoute(
   providerId: string,
-  group: RouteGroup,
   enabled: boolean,
 ): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("toggle_provider_route", { providerId, group, enabled });
+  return invoke("toggle_provider_route", { providerId, enabled });
 }
 
-export async function reorderProviderRoutes(
-  ids: string[],
-  group: RouteGroup,
-): Promise<void> {
+export async function resetCircuitBreaker(providerId: string): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("reorder_provider_routes", { ids, group });
+  return invoke("reset_circuit_breaker", { providerId });
 }
 
-export async function resetCircuitBreaker(
+/** 新增一个端点 API Key（后端随机生成），返回新 Key。 */
+export async function addApiKey(): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("add_route_aggregation_api_key");
+}
+
+/** 删除指定索引的 API Key；索引 0（主 Key）不允许删除。 */
+export async function deleteApiKey(index: number): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("delete_route_aggregation_api_key", { index });
+}
+
+/** 重新生成指定索引的 API Key，返回新 Key。 */
+export async function regenerateApiKey(index: number): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("regenerate_route_aggregation_api_key", { index });
+}
+
+/** 获取供应商的有效模型列表（自定义模型优先，否则远程拉取）。 */
+export async function getRouteProviderModels(
   providerId: string,
-  group: RouteGroup,
-): Promise<void> {
+): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("reset_circuit_breaker", { providerId, group });
-}
-
-export async function getCircuitBreakerStatus(
-  group: RouteGroup,
-): Promise<ProviderRouteStatus[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("get_circuit_breaker_status", { group });
-}
-
-export async function regenerateApiKey(group: RouteGroup): Promise<string> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("regenerate_route_aggregation_api_key", { group });
-}
-
-export async function updateModels(
-  group: RouteGroup,
-  models: ModelEntry[],
-): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("update_route_aggregation_models", { group, models });
-}
-
-export async function getRouteModels(group: RouteGroup): Promise<ModelSource[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("get_route_aggregation_models", { group });
-}
-
-export async function resetModels(group: RouteGroup): Promise<ModelEntry[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("reset_route_aggregation_models", { group });
+  return invoke("get_route_provider_models", { providerId });
 }

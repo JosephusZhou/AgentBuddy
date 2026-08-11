@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Route group type — determines which API paths and cloaking strategy to use.
+/// API format — determines which API paths and cloaking strategy to use.
+/// Internal only: the aggregated endpoint always serves both formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RouteGroup {
@@ -11,20 +12,7 @@ pub enum RouteGroup {
 }
 
 impl RouteGroup {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RouteGroup::ClaudeCode => "claude_code",
-            RouteGroup::Codex => "codex",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "claude_code" => Some(RouteGroup::ClaudeCode),
-            "codex" => Some(RouteGroup::Codex),
-            _ => None,
-        }
-    }
+    pub const ALL: [RouteGroup; 2] = [RouteGroup::ClaudeCode, RouteGroup::Codex];
 }
 
 /// Cloaking mode for Claude Code rectifier.
@@ -34,25 +22,6 @@ pub enum CloakingMode {
     Auto,
     Always,
     Never,
-}
-
-/// A model entry in a route group's model list.
-/// `id` is the actual model ID; `alias` is the display name (empty = use id).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelEntry {
-    pub id: String,
-    pub alias: String,
-}
-
-/// A model ID together with the names of all providers that serve it.
-/// Returned by get_route_aggregation_models so the UI can show which
-/// provider(s) each model comes from.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelSource {
-    pub id: String,
-    pub providers: Vec<String>,
 }
 
 impl Default for CloakingMode {
@@ -68,16 +37,8 @@ pub struct RouteAggregationStatus {
     pub server_running: bool,
     pub listen_address: String,
     pub listen_port: u16,
-    pub claude_code: GroupStatus,
-    pub codex: GroupStatus,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GroupStatus {
-    pub enabled: bool,
-    pub active_providers: Vec<ProviderRouteStatus>,
-    pub total_providers: usize,
+    /// Merged provider statuses across both API formats.
+    pub providers: Vec<ProviderRouteStatus>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,12 +56,11 @@ pub struct ProviderRouteStatus {
     pub success_count: u64,
 }
 
-/// Provider toggle in a route group (persisted in SQLite).
+/// Provider toggle (persisted in SQLite, unified across both API formats).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderRouteToggle {
     pub provider_id: String,
-    pub group: String, // "claude_code" | "codex"
     pub enabled: bool,
     pub sort_order: i32,
 }
@@ -114,7 +74,10 @@ pub struct RouteProvider {
     pub base_url: String,
     /// Decrypted API key (never exposed via Tauri commands).
     pub api_key: String,
-    /// Whether this provider is enabled in this route group.
+    /// Effective model IDs of this provider (custom models' alias/ID, if any).
+    /// Empty means the provider has no custom model list.
+    pub model_ids: Vec<String>,
+    /// Whether this provider is enabled.
     pub enabled: bool,
     pub sort_order: i32,
 }

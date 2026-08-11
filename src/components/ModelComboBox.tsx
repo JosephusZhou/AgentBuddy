@@ -36,8 +36,8 @@ export interface ModelComboBoxProps {
  * 行为：
  *  - 始终渲染为输入框；`options` 为空时退化为纯文本输入。
  *  - 点击 / 聚焦时弹出下拉列表。
- *  - 输入时实时筛选列表（大小写不敏感包含匹配）。
- *  - 可从筛选后的列表点选回填，也可手动输入列表外的值。
+ *  - 下拉始终展示完整模型列表，不随输入内容过滤。
+ *  - 可从列表点选回填，也可手动输入列表外的值。
  *  - 离焦后固定输入内容，再次点击回到输入状态并重新弹出下拉框。
  *  - Escape 关闭下拉但不关闭外层弹窗（capture 阶段拦截）。
  *  - `clearLabel` 提供时，下拉顶部显示一个清空选项（如"跟随默认模型"）。
@@ -113,10 +113,6 @@ export function ModelComboBox({
     );
   }
 
-  /* Filter options based on current input value (case-insensitive contains) */
-  const q = value.trim().toLowerCase();
-  const filtered = q ? options.filter((m) => m.toLowerCase().includes(q)) : options;
-
   const handleFocus = () => {
     if (blurTimer.current) {
       clearTimeout(blurTimer.current);
@@ -177,25 +173,21 @@ export function ModelComboBox({
               <span className="app-select-option-title">{clearLabel}</span>
             </button>
           )}
-          {filtered.length === 0 ? (
-            <div className="app-select-empty">无匹配结果</div>
-          ) : (
-            filtered.map((model) => (
-              <button
-                key={model}
-                type="button"
-                role="option"
-                aria-selected={model === value}
-                className={`app-select-option ${model === value ? "selected" : ""}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  selectOption(model);
-                }}
-              >
-                <span className="app-select-option-title">{model}</span>
-              </button>
-            ))
-          )}
+          {options.map((model) => (
+            <button
+              key={model}
+              type="button"
+              role="option"
+              aria-selected={model === value}
+              className={`app-select-option ${model === value ? "selected" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                selectOption(model);
+              }}
+            >
+              <span className="app-select-option-title">{model}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

@@ -55,29 +55,13 @@ impl RouteAggregationState {
     pub async fn get_status(&self) -> RouteAggregationStatus {
         let config = self.config.read().await;
         let server_running = self.server.read().await.is_some();
-        let claude_providers = self
-            .provider_router
-            .get_provider_statuses(RouteGroup::ClaudeCode)
-            .await;
-        let codex_providers = self
-            .provider_router
-            .get_provider_statuses(RouteGroup::Codex)
-            .await;
+        let providers = self.provider_router.get_merged_statuses().await;
 
         RouteAggregationStatus {
             server_running,
             listen_address: config.listen_address.clone(),
             listen_port: config.listen_port,
-            claude_code: GroupStatus {
-                enabled: config.claude_code_enabled,
-                active_providers: claude_providers,
-                total_providers: 0,
-            },
-            codex: GroupStatus {
-                enabled: config.codex_enabled,
-                active_providers: codex_providers,
-                total_providers: 0,
-            },
+            providers,
         }
     }
 }

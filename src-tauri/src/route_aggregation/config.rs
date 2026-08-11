@@ -6,10 +6,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteAggregationConfig {
-    #[serde(default)]
-    pub claude_code_enabled: bool,
-    #[serde(default)]
-    pub codex_enabled: bool,
     #[serde(default = "default_listen_address")]
     pub listen_address: String,
     #[serde(default = "default_listen_port")]
@@ -30,21 +26,15 @@ pub struct RouteAggregationConfig {
     pub claude_code_version: String,
     #[serde(default = "default_codex_version")]
     pub codex_version: String,
-    /// API key for the Claude Code route group endpoint authentication.
-    /// Empty string = no authentication required for Claude Code routes.
+    /// Endpoint API keys. The first key (index 0) is the primary key and can
+    /// only be regenerated, never deleted; additional keys can be deleted.
+    /// Empty list = no authentication required.
     #[serde(default)]
-    pub claude_code_api_key: String,
-    /// API key for the Codex route group endpoint authentication.
-    /// Empty string = no authentication required for Codex routes.
+    pub api_keys: Vec<String>,
+    /// Whether the proxy server should auto-start when the app launches.
+    /// Kept in sync with the server's start/stop actions.
     #[serde(default)]
-    pub codex_api_key: String,
-    /// Editable model list for Claude Code route group.
-    /// Controls which models appear in /v1/models and their display aliases.
-    #[serde(default)]
-    pub claude_code_models: Vec<super::ModelEntry>,
-    /// Editable model list for Codex route group.
-    #[serde(default)]
-    pub codex_models: Vec<super::ModelEntry>,
+    pub auto_start: bool,
 }
 
 fn default_listen_address() -> String {
@@ -86,8 +76,6 @@ fn default_codex_version() -> String {
 impl Default for RouteAggregationConfig {
     fn default() -> Self {
         Self {
-            claude_code_enabled: false,
-            codex_enabled: false,
             listen_address: default_listen_address(),
             listen_port: default_listen_port(),
             auto_failover: true,
@@ -98,12 +86,19 @@ impl Default for RouteAggregationConfig {
             cloaking_mode: super::CloakingMode::Auto,
             claude_code_version: default_claude_code_version(),
             codex_version: default_codex_version(),
-            claude_code_api_key: String::new(),
-            codex_api_key: String::new(),
-            claude_code_models: Vec::new(),
-            codex_models: Vec::new(),
+            api_keys: Vec::new(),
+            auto_start: false,
         }
     }
+}
+
+/// Generate a random endpoint API key: `sk-` + 48 hex chars.
+pub fn generate_api_key() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 24]; // 24 bytes → 48 hex chars
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    format!("sk-{}", hex)
 }
 
 /// Load route aggregation config from config.json.

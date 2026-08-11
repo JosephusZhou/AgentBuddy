@@ -2,6 +2,12 @@
 
 export type ProviderType = "anthropic" | "openai" | "universal";
 
+/** 自定义模型条目：从供应商端点拉取后用户筛选保留的模型，可自定义别名 ID。 */
+export interface CustomModel {
+  model: string;
+  aliasId: string;
+}
+
 export interface AiProvider {
   id: string;
   name: string;
@@ -16,6 +22,10 @@ export interface AiProvider {
   models: Record<string, string>;
   /** 列表接口不回传明文密钥，仅有此标志。 */
   hasApiKey: boolean;
+  /** 已存储的 API Key 数量。 */
+  apiKeyCount: number;
+  /** 自定义模型列表。 */
+  customModels: CustomModel[];
   notes: string;
   createdAt: number;
   updatedAt: number;
@@ -27,12 +37,16 @@ export interface AiProviderUpsertPayload {
   name: string;
   providerType: ProviderType;
   baseUrl: string;
-  /** 新建必填；编辑留空=保留旧密钥。 */
+  /** 单个 API Key（旧字段，兼容）；新建必填；编辑留空=保留旧密钥。 */
   apiKey?: string;
+  /** 多 API Key（明文数组）；Some 时替换全部密钥，None 时保持旧密钥。 */
+  apiKeys?: string[];
   defaultModel?: string;
   /** 通用类型的 OpenAI 默认模型；其他类型忽略。 */
   openaiDefaultModel?: string;
   models?: Record<string, string>;
+  /** 自定义模型列表；Some 时替换，None 时保持旧列表。 */
+  customModels?: CustomModel[];
   notes?: string;
 }
 

@@ -21,6 +21,22 @@ pub const TYPE_UNIVERSAL: &str = "universal";
 /// ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL 概念对齐）。
 pub const MODEL_TIERS: [&str; 4] = ["haiku", "sonnet", "opus", "fable"];
 
+/// 一条已加密的 API Key（salt + nonce + cipher 三元组）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedKey {
+    pub salt: String,
+    pub nonce: String,
+    pub cipher: String,
+}
+
+/// 自定义模型条目：从供应商端点拉取后用户筛选保留的模型，可自定义别名 ID。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomModel {
+    pub model: String,
+    pub alias_id: String,
+}
+
 /// Public list item — never includes API key material.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +53,10 @@ pub struct AiProvider {
     /// Anthropic 档位模型覆盖；OpenAI 类型恒为空 map。
     pub models: HashMap<String, String>,
     pub has_api_key: bool,
+    /// 已存储的 API Key 数量（支持多 Key）。
+    pub api_key_count: usize,
+    /// 自定义模型列表（从端点拉取后筛选保留，可自定义别名 ID）。
+    pub custom_models: Vec<CustomModel>,
     pub notes: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -60,6 +80,11 @@ pub struct AiProviderRow {
     pub created_at: i64,
     pub updated_at: i64,
     pub sort_order: i64,
+    /// 多 API Key 的加密存储（JSON 数组，每项为 {salt,nonce,cipher}）。
+    /// 为空数组时回退到旧的单 Key 列。
+    pub api_keys_json: String,
+    /// 自定义模型列表（JSON 数组，每项为 {model,aliasId}）。
+    pub custom_models_json: String,
 }
 
 /// 通用类型下由 Anthropic Base URL 派生 OpenAI 形式 Base URL（追加 /v1）。
@@ -75,6 +100,18 @@ impl From<AiProviderRow> for AiProvider {
         let models: HashMap<String, String> =
             serde_json::from_str(&row.models_json).unwrap_or_default();
         let openai_base_url = derive_openai_base_url(&row.provider_type, &row.base_url);
+        // 解析多 Key JSON；为空时回退到旧的单 Key 列。
+        let enc_keys: Vec<EncryptedKey> =
+            serde_json::from_str(&row.api_keys_json).unwrap_or_default();
+        let api_key_count = if !enc_keys.is_empty() {
+            enc_keys.len()
+        } else if !row.api_key_cipher.is_empty() {
+            1
+        } else {
+            0
+        };
+        let custom_models: Vec<CustomModel> =
+            serde_json::from_str(&row.custom_models_json).unwrap_or_default();
         Self {
             id: row.id,
             name: row.name,
@@ -84,7 +121,9 @@ impl From<AiProviderRow> for AiProvider {
             default_model: row.default_model,
             openai_default_model: row.openai_default_model,
             models,
-            has_api_key: !row.api_key_cipher.is_empty(),
+            has_api_key: api_key_count > 0,
+            api_key_count,
+            custom_models,
             notes: row.notes,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -101,12 +140,17 @@ pub struct AiProviderUpsertPayload {
     pub provider_type: String,
     pub base_url: String,
     /// Required on create; empty/omitted on edit keeps existing ciphertext.
+    /// （旧字段，仅单个 Key；优先使用 `api_keys`。）
     pub api_key: Option<String>,
+    /// 多 API Key（明文数组）；Some 时替换全部密钥，None 时保持旧密钥。
+    pub api_keys: Option<Vec<String>>,
     pub default_model: Option<String>,
     /// 通用类型的 OpenAI 默认模型；其他类型忽略并清空。
     pub openai_default_model: Option<String>,
     /// Anthropic 档位模型覆盖（haiku/sonnet/opus/fable）；anthropic/universal 有效。
     pub models: Option<HashMap<String, String>>,
+    /// 自定义模型列表（含别名 ID）；None 时保持旧列表，Some 时替换。
+    pub custom_models: Option<Vec<CustomModel>>,
     pub notes: Option<String>,
 }
 
@@ -187,11 +231,6 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         String::new()
     };
     let notes = payload.notes.unwrap_or_default().trim().to_string();
-    let api_key = payload
-        .api_key
-        .as_ref()
-        .map(|k| k.as_str().trim())
-        .filter(|k| !k.is_empty());
 
     if id.is_empty() {
         return Err("供应商 ID 不能为空".to_string());
@@ -209,20 +248,68 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
     let now = now_secs();
     let master = config::load_secrets_key()?;
 
-    let (api_key_salt, api_key_nonce, api_key_cipher) = match api_key {
-        Some(plain) => {
-            let enc = crypto::encrypt_secret(&master, plain)?;
-            (enc.salt, enc.nonce, enc.cipher)
+    // 自定义模型列表：None 时保持旧列表，Some 时替换。
+    let custom_models_json = match payload.custom_models.as_ref() {
+        Some(list) => {
+            let cleaned: Vec<CustomModel> = list
+                .iter()
+                .map(|cm| CustomModel {
+                    model: cm.model.trim().to_string(),
+                    alias_id: cm.alias_id.trim().to_string(),
+                })
+                .filter(|cm| !cm.model.is_empty())
+                .collect();
+            serde_json::to_string(&cleaned).unwrap_or_else(|_| "[]".into())
         }
-        None => {
-            let row = existing
-                .as_ref()
-                .ok_or_else(|| "新建供应商时 API Key 不能为空".to_string())?;
-            (
-                row.api_key_salt.clone(),
-                row.api_key_nonce.clone(),
-                row.api_key_cipher.clone(),
-            )
+        None => existing
+            .as_ref()
+            .map(|r| r.custom_models_json.clone())
+            .unwrap_or_else(|| "[]".to_string()),
+    };
+
+    // 确定明文 API Key 列表：优先使用 api_keys（数组），回退到 api_key（单个）
+    let keep_existing_keys = payload.api_keys.is_none() && payload.api_key.is_none();
+    let plain_keys: Vec<String> = if let Some(keys) = payload.api_keys.as_ref() {
+        keys.iter()
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect()
+    } else if let Some(single) = payload.api_key.as_ref() {
+        let s = single.trim().to_string();
+        if s.is_empty() { Vec::new() } else { vec![s] }
+    } else {
+        Vec::new()
+    };
+
+    let (api_key_salt, api_key_nonce, api_key_cipher, api_keys_json) = if keep_existing_keys {
+        let row = existing
+            .as_ref()
+            .ok_or_else(|| "新建供应商时至少需要一个 API Key".to_string())?;
+        (
+            row.api_key_salt.clone(),
+            row.api_key_nonce.clone(),
+            row.api_key_cipher.clone(),
+            row.api_keys_json.clone(),
+        )
+    } else {
+        if plain_keys.is_empty() && existing.is_none() {
+            return Err("新建供应商时至少需要一个 API Key".to_string());
+        }
+        let encrypted: Vec<EncryptedKey> = plain_keys
+            .iter()
+            .map(|k| {
+                crypto::encrypt_secret(&master, k).map(|es| EncryptedKey {
+                    salt: es.salt,
+                    nonce: es.nonce,
+                    cipher: es.cipher,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let json = serde_json::to_string(&encrypted).unwrap_or_else(|_| "[]".into());
+        if let Some(first) = encrypted.first() {
+            (first.salt.clone(), first.nonce.clone(), first.cipher.clone(), json)
+        } else {
+            (String::new(), String::new(), String::new(), json)
         }
     };
 
@@ -244,6 +331,8 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         created_at,
         updated_at: now,
         sort_order: existing.as_ref().map(|r| r.sort_order).unwrap_or(0),
+        api_keys_json,
+        custom_models_json,
     };
 
     db::upsert_ai_provider_row(&row)?;
@@ -375,19 +464,38 @@ pub fn delete_provider(id: String) -> Result<AiProviderActionResult, String> {
 }
 
 /// 按需读取明文 API Key（编辑表单用）。列表接口永不调用此函数。
+/// 返回第一个（主）Key，向后兼容。
 pub fn get_provider_secret(id: String) -> Result<String, String> {
+    let secrets = get_provider_secrets(id)?;
+    Ok(secrets.into_iter().next().unwrap_or_default())
+}
+
+/// 按需读取全部明文 API Key（编辑表单用）。
+/// 优先返回多 Key JSON 中的所有密钥；为空时回退到旧的单 Key 列。
+pub fn get_provider_secrets(id: String) -> Result<Vec<String>, String> {
     let row = db::get_ai_provider_row(id.trim())?
         .ok_or_else(|| "供应商不存在".to_string())?;
-    if row.api_key_cipher.is_empty() {
-        return Ok(String::new());
-    }
     let master = config::load_secrets_key()?;
-    crypto::decrypt_secret(
+    // 优先解析多 Key JSON
+    let enc_keys: Vec<EncryptedKey> =
+        serde_json::from_str(&row.api_keys_json).unwrap_or_default();
+    if !enc_keys.is_empty() {
+        return enc_keys
+            .iter()
+            .map(|ek| crypto::decrypt_secret(&master, &ek.salt, &ek.nonce, &ek.cipher))
+            .collect();
+    }
+    // 回退到旧的单 Key 列
+    if row.api_key_cipher.is_empty() {
+        return Ok(Vec::new());
+    }
+    let plain = crypto::decrypt_secret(
         &master,
         &row.api_key_salt,
         &row.api_key_nonce,
         &row.api_key_cipher,
-    )
+    )?;
+    Ok(vec![plain])
 }
 
 /// 批量更新供应商排序。`ids` 按目标顺序排列，索引即为新 sort_order。
@@ -426,9 +534,11 @@ mod tests {
             provider_type: "anthropic".to_string(),
             base_url: "https://api.example.com".to_string(),
             api_key: api_key.map(|s| s.to_string()),
+            api_keys: None,
             default_model: Some("claude-sonnet-x".to_string()),
             openai_default_model: None,
             models: Some(models),
+            custom_models: None,
             notes: Some("note".to_string()),
         }
     }

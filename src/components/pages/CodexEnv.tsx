@@ -218,6 +218,23 @@ const CodexProviderSelect = ({
 
 /* ===== Helpers ===== */
 
+/** 供应商的自定义模型列表 → 模型下拉选项（别名 ID 与原始模型 ID 均可选）；未配置时返回空。 */
+function customModelOptionsOf(p: AiProvider | null): string[] {
+  if (!p || p.customModels.length === 0) return [];
+  const seen = new Set<string>();
+  const opts: string[] = [];
+  for (const cm of p.customModels) {
+    const values = cm.aliasId ? [cm.aliasId, cm.model] : [cm.model];
+    for (const v of values) {
+      if (!seen.has(v)) {
+        seen.add(v);
+        opts.push(v);
+      }
+    }
+  }
+  return opts;
+}
+
 function displayPath(abs: string): string {
   return abs.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~");
 }
@@ -469,6 +486,16 @@ export default function CodexEnv() {
     const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
     const setModel = mode === "clone" ? setCloneModel : setEditModel;
 
+    // 优先使用所选供应商的自定义模型列表；未配置时才回退到拉取远端列表。
+    const provider = mode === "clone" ? cloneSelectedProvider : editSelectedProvider;
+    const customOptions = customModelOptionsOf(provider);
+    if (customOptions.length > 0) {
+      setModels(customOptions);
+      setModel(customOptions[0]);
+      setStatusMsg(`已使用供应商自定义模型列表（${customOptions.length} 个）`);
+      return;
+    }
+
     setLoading(true);
     try {
       const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
@@ -484,7 +511,7 @@ export default function CodexEnv() {
     } finally {
       setLoading(false);
     }
-  }, [cloneApiKey, cloneBaseUrl, editApiKey, editBaseUrl, setStatusMsg]);
+  }, [cloneApiKey, cloneBaseUrl, editApiKey, editBaseUrl, cloneSelectedProvider, editSelectedProvider, setStatusMsg]);
 
   const handleClone = useCallback(async () => {
     setBusy(true);
@@ -575,9 +602,10 @@ providerId: cloneSelectedProvider?.id || undefined,
     void invokeProviderList().then((rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
       setEditProviders(eligible);
-      // 预选关联的供应商
+      // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
       const linked = eligible.find((p) => p.id === env.providerId) ?? null;
       setEditSelectedProvider(linked);
+      setEditRemoteModels(customModelOptionsOf(linked));
     }).catch(() => setEditProviders([]));
   }, []);
 
@@ -1276,6 +1304,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setCloneBaseUrl(baseUrl);
                       setCloneModel(defaultModel);
+                      // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                      setCloneRemoteModels(customModelOptionsOf(p));
                       if (p.hasApiKey) {
                         try {
                           const secret = await invokeProviderGetSecret(p.id);
@@ -1286,6 +1316,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       } else {
                         setCloneApiKey("");
                       }
+                    } else {
+                      setCloneRemoteModels([]);
                     }
                   }}
                   disabled={busy}
@@ -1530,6 +1562,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setEditBaseUrl(baseUrl);
                       setEditModel(defaultModel);
+                      // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                      setEditRemoteModels(customModelOptionsOf(p));
                       if (p.hasApiKey) {
                         try {
                           const secret = await invokeProviderGetSecret(p.id);
@@ -1540,6 +1574,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                       } else {
                         setEditApiKey("");
                       }
+                    } else {
+                      setEditRemoteModels([]);
                     }
                   }}
                   disabled={busy}
