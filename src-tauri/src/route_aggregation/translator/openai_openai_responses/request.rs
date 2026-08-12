@@ -4,8 +4,10 @@
 //! - 934da23 - fix(openai): preserve structured and stringified custom tool outputs
 //! - ecc9aa7 - fix(openai): preserve assistant content when converting Responses
 //!             tool-call turns
-//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
-//!         https://github.com/router-for-me/CLIProxyAPI/commit/ecc9aa72b32f34b680d03b0724b531a21ae74472
+//! - 7c61e98  - perf(translator): optimize array allocation
+//! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/ecc9aa72b32f34b680d03b0724b531a21ae74472
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/7c61e982e490f028d295d69e22e372b29cd2db8c
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/openai/openai/responses/`。
@@ -137,7 +139,11 @@ fn build_contents(
     params: &mut StreamParams,
 ) -> Result<Vec<Value>, TranslateError> {
     let Some(input) = src.get("input") else { return Ok(Vec::new()) };
-    let mut out: Vec<Value> = Vec::new();
+    // CLIProxyAPI 7c61e98 perf: Array input 预分配容量（镜像 Go 的 `NewRawArrayItems`）。
+    let mut out: Vec<Value> = match input.as_array() {
+        Some(arr) => Vec::with_capacity(arr.len()),
+        None => Vec::new(),
+    };
 
     match input {
         Value::String(s) => {

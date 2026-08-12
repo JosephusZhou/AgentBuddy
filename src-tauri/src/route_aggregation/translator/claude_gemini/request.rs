@@ -190,6 +190,8 @@ fn build_contents(
         return Ok(Vec::new());
     };
 
+    // CLIProxyAPI 7c61e98 perf: 预分配容量避免 realloc（镜像 Go 的 `NewRawArrayItems`）。
+    // 不过这里 messages 已通过 ClaudeMessageAccumulator 处理，最终 len 与 message count 无关。
     let mut acc = ClaudeMessageAccumulator::new();
     for msg in messages {
         let Some(obj) = msg.as_object() else {

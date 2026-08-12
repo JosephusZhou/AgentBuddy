@@ -1,8 +1,12 @@
 //! Translator: OpenAI Chat Completions → Gemini generateContent
 //!
-//! CLIProxyAPI aligned: c13dbcc2 - feat(translator): add test and logic to ensure
-//!                        object schemas include properties field
-//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/c13dbcc24e1373e353338d90bdb38b8e4722e22b
+//! CLIProxyAPI aligned:
+//! - c13dbcc2 - feat(translator): add test and logic to ensure object schemas
+//!             include properties field
+//! - 7c61e98  - perf(translator): optimize array allocation (Vec::with_capacity
+//!             mirrors Go's NewRawArrayItems)
+//! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/c13dbcc24e1373e353338d90bdb38b8e4722e22b
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/7c61e982e490f028d295d69e22e372b29cd2db8c
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/openai/gemini/openai_gemini_request.go`。
@@ -193,7 +197,8 @@ fn build_contents(src: &Map<String, Value>) -> Result<Vec<Value>, TranslateError
         return Ok(Vec::new());
     };
 
-    let mut out = Vec::new();
+    // CLIProxyAPI 7c61e98 perf: 预分配容量避免 realloc（镜像 Go 的 `NewRawArrayItems`）。
+    let mut out: Vec<Value> = Vec::with_capacity(messages.len());
     for msg in messages {
         let Some(obj) = msg.as_object() else { continue };
         let role = obj.get("role").and_then(|v| v.as_str()).unwrap_or("");
@@ -210,7 +215,7 @@ fn build_contents(src: &Map<String, Value>) -> Result<Vec<Value>, TranslateError
                 ])));
             }
             "assistant" => {
-                let mut parts: Vec<Value> = Vec::new();
+                let mut parts: Vec<Value> = Vec::with_capacity(4);
                 if let Some(content) = obj.get("content") {
                     if let Some(text) = content.as_str() {
                         if !text.is_empty() {
