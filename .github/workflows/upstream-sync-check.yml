@@ -1,0 +1,38 @@
+name: upstream-sync-check
+
+on:
+  schedule:
+    # 每周一 9:00 UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/check_upstream_sync.py"
+      - "docs/cli_proxy_api_sync_state.json"
+      - "src-tauri/src/route_aggregation/translator/**"
+      - ".github/workflows/upstream-sync-check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run upstream sync check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check_upstream_sync.py
+
+      - name: Upload sync state report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-state-report
+          path: docs/cli_proxy_api_sync_state.json.new
+          if-no-source-found: ignore
+          retention-days: 30

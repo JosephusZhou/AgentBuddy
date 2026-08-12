@@ -16,6 +16,30 @@ pub const TYPE_OPENAI: &str = "openai";
 /// 通用类型：同时配置 Anthropic 与 OpenAI 两种接入；OpenAI Base URL 由
 /// Anthropic Base URL 自动派生（追加 /v1），并同时持有两套默认模型。
 pub const TYPE_UNIVERSAL: &str = "universal";
+/// Google Generative AI（Gemini API）：独立的鉴权与端点格式（`x-goog-api-key`
+/// header、`/models` 列表返回 `models[]` 而非 `data[]`），目前不向 Claude /
+/// Codex 环境反向同步（两种 SDK 协议不兼容），仅作为供应商库统一管理。
+pub const TYPE_GOOGLE_GENERATIVE_AI: &str = "google-generative-ai";
+
+/// Google Generative AI 默认 Base URL（含 v1beta 段）。
+/// 前端 placeholder 与后端校验均参考此值，但允许用户改写为代理或私有网关。
+#[allow(dead_code)] // 仅供前端 placeholder 引用与单元测试对齐使用
+pub const GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL: &str =
+    "https://generativelanguage.googleapis.com/v1beta";
+
+/// 仅在测试中确保默认 Base URL 与前端 placeholder 一致（避免常量漂移）。
+#[cfg(test)]
+mod type_constants_sanity {
+    use super::GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL;
+
+    #[test]
+    fn google_default_base_url_matches_official_endpoint() {
+        assert_eq!(
+            GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL,
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
+    }
+}
 
 /// Anthropic 档位模型覆盖允许使用的键（与 Claude 环境的
 /// ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL 概念对齐）。
@@ -182,13 +206,16 @@ fn normalize_provider_type(raw: &str) -> Result<String, String> {
         TYPE_ANTHROPIC => Ok(TYPE_ANTHROPIC.to_string()),
         TYPE_OPENAI => Ok(TYPE_OPENAI.to_string()),
         TYPE_UNIVERSAL => Ok(TYPE_UNIVERSAL.to_string()),
-        _ => Err("供应商类型仅支持 anthropic、openai 或 universal".to_string()),
+        TYPE_GOOGLE_GENERATIVE_AI => Ok(TYPE_GOOGLE_GENERATIVE_AI.to_string()),
+        _ => Err("供应商类型仅支持 anthropic、openai、universal 或 google-generative-ai".to_string()),
     }
 }
 
 /// 过滤档位模型映射：仅保留允许的档位键、去除空值；仅 anthropic/universal 保留。
+/// Google Generative AI 没有 `haiku`/`sonnet`/`opus`/`fable` 这类档位概念，
+/// 无论前端是否误传都强制清空，避免在 Claude/Codex 环境回写时混入无效档位。
 fn normalize_models(provider_type: &str, models: &HashMap<String, String>) -> HashMap<String, String> {
-    if provider_type == TYPE_OPENAI {
+    if provider_type == TYPE_OPENAI || provider_type == TYPE_GOOGLE_GENERATIVE_AI {
         return HashMap::new();
     }
     models
@@ -640,5 +667,50 @@ mod tests {
         let mut bad_type = payload(&id, Some("sk-x"));
         bad_type.provider_type = "gemini".to_string();
         assert!(upsert_provider(bad_type).is_err());
+    }
+
+    #[test]
+    fn google_generative_ai_type_roundtrip_and_no_openai_url_or_tiers() {
+        let _home_guard = crate::config::lock_home_for_test();
+        let id = unique_id("google");
+        let mut pl = payload(&id, Some("goog-key"));
+        pl.provider_type = TYPE_GOOGLE_GENERATIVE_AI.to_string();
+        pl.base_url = GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL.to_string();
+        pl.default_model = Some("gemini-2.5-pro".to_string());
+
+        let created = upsert_provider(pl).expect("create google");
+        let p = created.provider.expect("provider");
+        assert_eq!(p.provider_type, TYPE_GOOGLE_GENERATIVE_AI);
+        // 通用类型才派生 OpenAI URL；Google 应为空
+        assert_eq!(p.openai_base_url, "");
+        assert_eq!(p.openai_default_model, "");
+        // 档位模型对 Google 无意义，应被 normalize_models 清空
+        assert!(p.models.is_empty());
+
+        // 编辑：只改名称，Google 类型不写入 Claude/Codex 环境（保持无同步副作用）
+        let mut edit = payload(&id, None);
+        edit.provider_type = TYPE_GOOGLE_GENERATIVE_AI.to_string();
+        edit.base_url = GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL.to_string();
+        edit.default_model = Some("gemini-2.5-flash".to_string());
+        edit.name = "改名".to_string();
+        let updated = upsert_provider(edit).expect("update");
+        let p2 = updated.provider.expect("provider2");
+        assert_eq!(p2.name, "改名");
+        assert_eq!(p2.default_model, "gemini-2.5-flash");
+        // 模型 secret 保留
+        assert_eq!(get_provider_secret(id.clone()).expect("secret"), "goog-key");
+
+        delete_provider(id).expect("cleanup");
+    }
+
+    #[test]
+    fn derive_openai_base_url_returns_empty_for_google() {
+        assert_eq!(
+            derive_openai_base_url(
+                TYPE_GOOGLE_GENERATIVE_AI,
+                GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL,
+            ),
+            ""
+        );
     }
 }

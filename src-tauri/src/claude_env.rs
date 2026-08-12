@@ -2633,11 +2633,87 @@ fn parse_remote_model_ids(value: &Value) -> Vec<String> {
     ids.into_iter().collect()
 }
 
+/// 解析 Google Generative AI `/v1beta/models` 响应：返回 `{"models":[{"name":"models/..."}]}`，
+/// `name` 形如 `models/{model-id}`，剥掉 `models/` 前缀作为用户可用的模型 ID。
+fn parse_google_model_ids(value: &Value) -> Vec<String> {
+    let mut ids = BTreeSet::new();
+    if let Some(items) = value.get("models").and_then(Value::as_array) {
+        for item in items {
+            // 优先取 `name`（完整资源名）；缺失时回退 `id`/`model`。
+            let raw = item
+                .get("name")
+                .and_then(Value::as_str)
+                .or_else(|| item.get("id").and_then(Value::as_str))
+                .or_else(|| item.get("model").and_then(Value::as_str));
+            if let Some(raw) = raw {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                // 只支持 `generateContent` 类生成模型；`embedContent`、`predict` 等不暴露给用户。
+                let supported = item
+                    .get("supportedGenerationMethods")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter().any(|v| {
+                            v.as_str()
+                                .map(|s| s.eq_ignore_ascii_case("generateContent"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(true);
+                if !supported {
+                    continue;
+                }
+                let id = trimmed
+                    .strip_prefix("models/")
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string();
+                if !id.is_empty() {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+/// 从 Google Generative AI 端点拉取模型列表。鉴权使用 `x-goog-api-key` header；
+/// 端点为 `{base}/models`，base_url 通常为 `https://generativelanguage.googleapis.com/v1beta`。
+fn fetch_google_models(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<ClaudeEnvRemoteModelsResult, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("请先填写 Base URL".into());
+    }
+    let url = format!("{base}/models");
+    let mut request = client.get(&url);
+    if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+        request = request.header("x-goog-api-key", key);
+    }
+    match request.send() {
+        Ok(response) if response.status().is_success() => {
+            let value: Value = response
+                .json()
+                .map_err(|e| format!("解析 Google 模型列表响应失败: {e}"))?;
+            Ok(ClaudeEnvRemoteModelsResult {
+                model_ids: parse_google_model_ids(&value),
+            })
+        }
+        Ok(response) => Err(format!("拉取 Google 模型列表失败: {url}: HTTP {}", response.status())),
+        Err(err) => Err(format!("拉取 Google 模型列表失败: {url}: {err}")),
+    }
+}
+
 pub fn fetch_remote_models(
     base_url: String,
     api_key: Option<String>,
+    provider_type: Option<String>,
 ) -> Result<ClaudeEnvRemoteModelsResult, String> {
-    let urls = models_endpoint_urls(&base_url)?;
     let client = crate::http_client::apply_proxy(
         reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)),
     )?
@@ -2646,6 +2722,14 @@ pub fn fetch_remote_models(
     let api_key = api_key
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty());
+
+    // Google Generative AI 走专用分支：端点格式、鉴权 header 与响应结构均与
+    // OpenAI/Anthropic 不兼容，单开一条路径以避免污染通用解析逻辑。
+    if provider_type.as_deref() == Some(crate::ai_provider::TYPE_GOOGLE_GENERATIVE_AI) {
+        return fetch_google_models(&client, &base_url, api_key.as_deref());
+    }
+
+    let urls = models_endpoint_urls(&base_url)?;
     let mut failures = Vec::new();
 
     for url in urls {
@@ -2795,6 +2879,44 @@ mod tests {
 
         let array = serde_json::json!([{"id": "model-2"}, {"id": "model-1"}]);
         assert_eq!(parse_remote_model_ids(&array), vec!["model-1", "model-2"]);
+    }
+
+    #[test]
+    fn parse_google_models_strips_prefix_and_filters_unsupported() {
+        // 标准 Gemini 响应：`name` 为 `models/{id}`，`supportedGenerationMethods`
+        // 只包含 `embedContent` 的模型应被排除。
+        let payload = serde_json::json!({
+            "models": [
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent", "countTokens"]},
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                // embedding-only 模型：被过滤
+                {"name": "models/text-embedding-005", "supportedGenerationMethods": ["embedContent"]},
+                // 空 name：忽略
+                {"name": "", "supportedGenerationMethods": ["generateContent"]},
+                // 缺失 supportedGenerationMethods：默认视为生成模型，保留
+                {"name": "models/gemini-2.0-flash"}
+            ]
+        });
+        let ids = parse_google_model_ids(&payload);
+        assert_eq!(
+            ids,
+            vec![
+                "gemini-2.0-flash".to_string(),
+                "gemini-2.5-flash".to_string(),
+                "gemini-2.5-pro".to_string()
+            ]
+        );
+
+        // 容错：`id`/`model` 字段也能解析
+        let alt = serde_json::json!({
+            "models": [
+                {"id": "models/gemini-1.5-pro", "supportedGenerationMethods": ["generateContent"]}
+            ]
+        });
+        assert_eq!(parse_google_model_ids(&alt), vec!["gemini-1.5-pro"]);
+
+        // 无 `models` 字段：返回空
+        assert!(parse_google_model_ids(&serde_json::json!({})).is_empty());
     }
 
     #[test]

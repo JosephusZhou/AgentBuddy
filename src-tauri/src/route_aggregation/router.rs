@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 use super::config::RouteAggregationConfig;
 use super::handler;
 use super::provider_router::ProviderRouter;
+use super::translator::TranslatorRegistry;
 
 /// Shared state passed to all Axum handlers.
 ///
@@ -23,6 +24,7 @@ use super::provider_router::ProviderRouter;
 pub struct AppState {
     pub config: Arc<RwLock<RouteAggregationConfig>>,
     pub provider_router: Arc<ProviderRouter>,
+    pub translator_registry: Arc<TranslatorRegistry>,
 }
 
 /// Build the Axum router.
@@ -33,10 +35,12 @@ pub struct AppState {
 pub fn build_router(
     config: Arc<RwLock<RouteAggregationConfig>>,
     provider_router: Arc<ProviderRouter>,
+    translator_registry: Arc<TranslatorRegistry>,
 ) -> Router {
     let state = AppState {
         config,
         provider_router,
+        translator_registry,
     };
 
     Router::new()

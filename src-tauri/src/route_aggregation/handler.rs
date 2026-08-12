@@ -57,7 +57,16 @@ pub async fn handle_claude_messages(
         return resp;
     }
 
-    match forwarder::forward(RouteGroup::ClaudeCode, body, &headers, &config, &state.provider_router).await {
+    match forwarder::forward(
+        RouteGroup::ClaudeCode,
+        body,
+        &headers,
+        &config,
+        &state.provider_router,
+        &state.translator_registry,
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(forwarder::ForwardError::NoAvailableProvider) => {
             error_response(StatusCode::SERVICE_UNAVAILABLE, "没有可用的供应商")
@@ -70,6 +79,9 @@ pub async fn handle_claude_messages(
         }
         Err(forwarder::ForwardError::RequestError(msg)) => {
             error_response(StatusCode::BAD_GATEWAY, &msg)
+        }
+        Err(forwarder::ForwardError::UnsupportedTranslation(msg)) => {
+            error_response(StatusCode::NOT_IMPLEMENTED, &msg)
         }
     }
 }
@@ -87,7 +99,16 @@ pub async fn handle_codex_responses(
         return resp;
     }
 
-    match forwarder::forward(RouteGroup::Codex, body, &headers, &config, &state.provider_router).await {
+    match forwarder::forward(
+        RouteGroup::Codex,
+        body,
+        &headers,
+        &config,
+        &state.provider_router,
+        &state.translator_registry,
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(forwarder::ForwardError::NoAvailableProvider) => {
             error_response(StatusCode::SERVICE_UNAVAILABLE, "没有可用的供应商")
@@ -100,6 +121,9 @@ pub async fn handle_codex_responses(
         }
         Err(forwarder::ForwardError::RequestError(msg)) => {
             error_response(StatusCode::BAD_GATEWAY, &msg)
+        }
+        Err(forwarder::ForwardError::UnsupportedTranslation(msg)) => {
+            error_response(StatusCode::NOT_IMPLEMENTED, &msg)
         }
     }
 }
@@ -132,7 +156,7 @@ pub async fn handle_list_models(
                 }
             } else {
                 let key = if api_key.is_empty() { None } else { Some(api_key.clone()) };
-                match crate::claude_env::fetch_remote_models(base_url.clone(), key) {
+                match crate::claude_env::fetch_remote_models(base_url.clone(), key, None) {
                     Ok(result) => {
                         for mid in result.model_ids {
                             model_set.insert(mid);

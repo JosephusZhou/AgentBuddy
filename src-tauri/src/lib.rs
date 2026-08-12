@@ -752,10 +752,13 @@ async fn get_claude_env_mcp_status() -> Result<claude_env::ClaudeEnvMcpStatusRes
 async fn fetch_claude_env_remote_models(
     base_url: String,
     api_key: Option<String>,
+    provider_type: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
-    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
-        .await
-        .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        claude_env::fetch_remote_models(base_url, api_key, provider_type)
+    })
+    .await
+    .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
 }
 
 /* ===== Agent 通用模型配置（OpenCode / Pi / Oh-My-Pi）===== */
@@ -1012,12 +1015,35 @@ async fn fetch_codex_env_remote_models(
     base_url: String,
     api_key: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
-    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
-        .await
-        .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        claude_env::fetch_remote_models(base_url, api_key, None)
+    })
+    .await
+    .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
 }
 
 /* ===== AI providers (上游模型供应商库) ===== */
+
+/// 写操作后异步触发路由聚合内存池刷新，避免「刚加/改了供应商 → 下游
+/// `/v1/models` 或模型配置页的虚拟供应商看到的还是旧 pool」这种隐性脏数据。
+///
+/// 用后台 spawn 而不是 inline await：
+/// - 不阻塞 AI 供应商主命令的返回（用户操作的 UX 优先）；
+/// - 即使刷新失败也不影响供应商写入的最终一致性，下次任一相关命令会兜底刷一次。
+fn spawn_route_aggregation_pool_refresh(
+    router: std::sync::Arc<route_aggregation::provider_router::ProviderRouter>,
+) {
+    tauri::async_runtime::spawn(async move {
+        for group in route_aggregation::RouteGroup::ALL {
+            if let Err(e) = router.refresh_pool(group).await {
+                eprintln!(
+                    "[ai-provider] 刷新路由聚合 {:?} pool 失败: {}",
+                    group, e
+                );
+            }
+        }
+    });
+}
 
 #[tauri::command]
 async fn list_ai_providers() -> Result<Vec<ai_provider::AiProvider>, String> {
@@ -1028,18 +1054,26 @@ async fn list_ai_providers() -> Result<Vec<ai_provider::AiProvider>, String> {
 
 #[tauri::command]
 async fn upsert_ai_provider(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
     payload: ai_provider::AiProviderUpsertPayload,
 ) -> Result<ai_provider::AiProviderActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
+    let result = tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
         .await
-        .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))?
+        .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))??;
+    spawn_route_aggregation_pool_refresh(state.provider_router.clone());
+    Ok(result)
 }
 
 #[tauri::command]
-async fn delete_ai_provider(id: String) -> Result<ai_provider::AiProviderActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || ai_provider::delete_provider(id))
+async fn delete_ai_provider(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    id: String,
+) -> Result<ai_provider::AiProviderActionResult, String> {
+    let result = tauri::async_runtime::spawn_blocking(move || ai_provider::delete_provider(id))
         .await
-        .map_err(|e| format!("删除 AI 供应商任务失败: {e}"))?
+        .map_err(|e| format!("删除 AI 供应商任务失败: {e}"))??;
+    spawn_route_aggregation_pool_refresh(state.provider_router.clone());
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1057,10 +1091,15 @@ async fn get_ai_provider_secrets(id: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn reorder_ai_providers(ids: Vec<String>) -> Result<(), String> {
+async fn reorder_ai_providers(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+    ids: Vec<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || ai_provider::reorder_providers(ids))
         .await
-        .map_err(|e| format!("供应商排序任务失败: {e}"))?
+        .map_err(|e| format!("供应商排序任务失败: {e}"))??;
+    spawn_route_aggregation_pool_refresh(state.provider_router.clone());
+    Ok(())
 }
 
 /* ===== Route aggregation (local proxy server) ===== */
@@ -1114,6 +1153,7 @@ async fn update_route_aggregation_config(
         let server = route_aggregation::server::RouteAggregationServer::start(
             state.config.clone(),
             state.provider_router.clone(),
+            state.translator_registry.clone(),
         )
         .await?;
         *state.server.write().await = Some(std::sync::Arc::new(server));
@@ -1150,6 +1190,7 @@ async fn start_route_aggregation(
     let server = route_aggregation::server::RouteAggregationServer::start(
         state.config.clone(),
         state.provider_router.clone(),
+        state.translator_registry.clone(),
     )
     .await?;
     *state.server.write().await = Some(std::sync::Arc::new(server));
@@ -1295,7 +1336,7 @@ async fn get_route_provider_models(
         let api_key = ai_provider::get_provider_secrets(provider_id.clone())?
             .into_iter()
             .next();
-        let result = claude_env::fetch_remote_models(base_url, api_key)?;
+        let result = claude_env::fetch_remote_models(base_url, api_key, Some(row.provider_type.clone()))?;
         Ok(result.model_ids)
     })
     .await
@@ -1554,6 +1595,8 @@ pub fn run() {
                 let _ = route_aggregation::config::save_config(&ra_config);
             }
             let ra_state = route_aggregation::RouteAggregationState::new(ra_config.clone());
+            // 注册默认 pair 翻译器（Phase 1：仅 Anthropic → Gemini；后续 Phase 在此追加）
+            ra_state.populate_default_translators();
             _app.manage(ra_state);
 
             // Auto-start server if it was running when the app last exited.
@@ -1578,6 +1621,7 @@ pub fn run() {
                     match route_aggregation::server::RouteAggregationServer::start(
                         state.config.clone(),
                         state.provider_router.clone(),
+                        state.translator_registry.clone(),
                     )
                     .await
                     {

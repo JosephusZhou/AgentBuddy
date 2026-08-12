@@ -16,12 +16,14 @@ import {
   Zap,
 } from "lucide-react";
 import * as api from "./route-aggregation/api";
-import type {
-  ProviderRouteStatus,
-  RouteAggregationConfig,
-  RouteAggregationStatus,
+import {
+  DEFAULT_CONFIG,
+  UNSUPPORTED_ROUTE_PROVIDER_HINT,
+  isRouteableProviderType,
+  type ProviderRouteStatus,
+  type RouteAggregationConfig,
+  type RouteAggregationStatus,
 } from "./route-aggregation/types";
-import { DEFAULT_CONFIG } from "./route-aggregation/types";
 import { invokeList } from "./ai-providers/api";
 import type { AiProvider } from "./ai-providers/types";
 
@@ -639,6 +641,9 @@ function ProviderSelectRow({
   const [modelsLoading, setModelsLoading] = useState(true);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
 
+  // 协议不兼容的类型（如 google-generative-ai）不会进路由聚合 pool，强制禁用勾选并隐藏
+  // 下游相关 UI（模型列表/熔断器状态等），避免 "DB toggle 写了但状态永远不更新" 的隐性错乱。
+  const isRouteable = isRouteableProviderType(provider.providerType);
   // 无状态记录时视为默认勾选（与后端默认 enabled=true 对齐）
   const checked = routeStatus ? routeStatus.enabled : true;
 
@@ -657,8 +662,10 @@ function ProviderSelectRow({
   }, [provider.id]);
 
   useEffect(() => {
+    // 不支持路由聚合的供应商不需要拉取模型列表（根本不会进 pool）。
+    if (!isRouteable) return;
     loadModels();
-  }, [loadModels, provider.customModels, provider.updatedAt]);
+  }, [loadModels, provider.customModels, provider.updatedAt, isRouteable]);
 
   const circuitClass =
     !routeStatus || routeStatus.circuitState === "closed"
@@ -681,18 +688,24 @@ function ProviderSelectRow({
         background: "var(--seed-surface)",
         border: "1px solid var(--seed-border)",
         borderRadius: "var(--seed-radius-lg)",
-        opacity: checked ? 1 : 0.6,
+        opacity: !isRouteable ? 0.55 : checked ? 1 : 0.6,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        {/* Enable checkbox */}
-        <label className="ui-check">
+        {/* Enable checkbox — 协议不兼容的类型强制禁用，避免 toggle 落 DB 但 UI 永远显示勾选 */}
+        <label
+          className="ui-check"
+          data-tooltip={!isRouteable ? UNSUPPORTED_ROUTE_PROVIDER_HINT : undefined}
+        >
           <input
             className="ui-check-input"
             type="checkbox"
             checked={checked}
-            onChange={(e) => onToggle(e.target.checked)}
-            disabled={actionLoading}
+            onChange={(e) => {
+              if (!isRouteable) return; // 防御：协议不兼容直接吞掉点击，不下发 toggle
+              onToggle(e.target.checked);
+            }}
+            disabled={actionLoading || !isRouteable}
           />
           <span className="ui-check-box">
             <Check size={12} />
@@ -701,7 +714,7 @@ function ProviderSelectRow({
 
         {/* Provider info */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "var(--text-base)", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ fontSize: "var(--text-base)", fontWeight: 500, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             {provider.name}
             <span
               style={{
@@ -717,8 +730,30 @@ function ProviderSelectRow({
             >
               {provider.providerType}
             </span>
+            {!isRouteable && (
+              <span
+                data-tooltip={UNSUPPORTED_ROUTE_PROVIDER_HINT}
+                style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 500,
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: "color-mix(in srgb, var(--seed-danger) 10%, transparent)",
+                  color: "var(--seed-danger)",
+                  border: "1px solid color-mix(in srgb, var(--seed-danger) 30%, transparent)",
+                  cursor: "help",
+                }}
+              >
+                不支持路由聚合
+              </span>
+            )}
           </div>
-          {routeStatus && (
+          {!isRouteable && (
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)", marginTop: 2 }}>
+              {UNSUPPORTED_ROUTE_PROVIDER_HINT}
+            </div>
+          )}
+          {isRouteable && routeStatus && (
             <div style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)", display: "flex", gap: 12, marginTop: 2 }}>
               <span>请求 {routeStatus.requestCount}</span>
               <span>成功 {routeStatus.successCount}</span>
@@ -734,14 +769,16 @@ function ProviderSelectRow({
           )}
         </div>
 
-        {/* Circuit breaker status */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span className={`status-dot ${circuitClass}`} />
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)" }}>{circuitLabel}</span>
-        </div>
+        {/* Circuit breaker status — 仅对支持路由的供应商展示 */}
+        {isRouteable && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span className={`status-dot ${circuitClass}`} />
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)" }}>{circuitLabel}</span>
+          </div>
+        )}
 
         {/* Actions */}
-        {routeStatus && (routeStatus.circuitState === "open" || routeStatus.circuitState === "half_open") && (
+        {isRouteable && routeStatus && (routeStatus.circuitState === "open" || routeStatus.circuitState === "half_open") && (
           <button
             className="btn btn-secondary"
             onClick={onResetCircuitBreaker}
@@ -751,21 +788,24 @@ function ProviderSelectRow({
             <RefreshCw size={12} /> 重置
           </button>
         )}
-        <button
-          className="btn-icon-action"
-          onClick={loadModels}
-          data-tooltip="刷新模型列表"
-          disabled={modelsLoading}
-        >
-          {modelsLoading ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <RefreshCw size={14} />
-          )}
-        </button>
+        {isRouteable && (
+          <button
+            className="btn-icon-action"
+            onClick={loadModels}
+            data-tooltip="刷新模型列表"
+            disabled={modelsLoading}
+          >
+            {modelsLoading ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+          </button>
+        )}
       </div>
 
-      {/* Model chips — horizontal layout with wrapping */}
+      {/* Model chips — horizontal layout with wrapping; 仅对支持路由的供应商展示 */}
+      {isRouteable && (
       <div style={{ marginTop: 10, paddingLeft: 30 }}>
         {modelsLoading ? (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", display: "flex", alignItems: "center", gap: 6 }}>
@@ -810,6 +850,7 @@ function ProviderSelectRow({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

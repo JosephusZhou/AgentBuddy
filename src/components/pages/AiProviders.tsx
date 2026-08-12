@@ -15,6 +15,7 @@ import {
 import {
   MODEL_TIERS,
   PROVIDER_TYPE_OPTIONS,
+  GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL,
   type AiProvider,
   type ProviderType,
   type CustomModel,
@@ -54,23 +55,33 @@ const IconChevron = ({ open }: { open?: boolean }) => (
 
 /* RemoteModelField 已由共享组件 ModelComboBox 替代。 */
 
-/** 类型徽标：Anthropic / OpenAI 用不同色调区分。 */
+/** 类型徽标：Anthropic / OpenAI / Google / 通用 用不同色调区分。 */
 function TypeBadge({ type }: { type: ProviderType }) {
-  const label =
-    type === "anthropic" ? "Anthropic" : type === "openai" ? "OpenAI" : "通用";
+  let label: string;
+  if (type === "anthropic") label = "Anthropic";
+  else if (type === "openai") label = "OpenAI";
+  else if (type === "google-generative-ai") label = "Google";
+  else label = "通用";
+
+  // Google 文字色由各主题 `--seed-google-fg` 提供（浅主题深蓝 / 深主题亮蓝），
+  // 背景与边框用 color-mix 与文字色联动，确保在 22 套主题下都保持足够对比度。
+  const accentStyle =
+    type === "openai"
+      ? undefined
+      : type === "google-generative-ai"
+      ? {
+          background: "color-mix(in srgb, var(--seed-google-fg) 14%, transparent)",
+          color: "var(--seed-google-fg)",
+          borderColor: "color-mix(in srgb, var(--seed-google-fg) 40%, transparent)",
+        }
+      : {
+          background: "color-mix(in srgb, var(--seed-primary) 12%, transparent)",
+          color: "var(--seed-active-fg)",
+          borderColor: "color-mix(in srgb, var(--seed-primary) 25%, transparent)",
+        };
+
   return (
-    <span
-      className="ai-provider-badge"
-      style={
-        type !== "openai"
-          ? {
-              background: "color-mix(in srgb, var(--seed-primary) 12%, transparent)",
-              color: "var(--seed-active-fg)",
-              borderColor: "color-mix(in srgb, var(--seed-primary) 25%, transparent)",
-            }
-          : undefined
-      }
-    >
+    <span className="ai-provider-badge" style={accentStyle}>
       {label}
     </span>
   );
@@ -264,7 +275,11 @@ export default function AiProviders() {
     () => providers.filter((p) => p.providerType === "openai").length,
     [providers],
   );
-  const universalCount = providers.length - anthropicCount - openaiCount;
+  const googleCount = useMemo(
+    () => providers.filter((p) => p.providerType === "google-generative-ai").length,
+    [providers],
+  );
+  const universalCount = providers.length - anthropicCount - openaiCount - googleCount;
 
   // 类型与关键词为「与」筛选；关键词覆盖名称、Base URL、模型与备注
   const filteredProviders = useMemo(
@@ -297,6 +312,17 @@ export default function AiProviders() {
       setTimeout(() => nameInputRef.current?.focus(), 100);
     }
   }, [showForm]);
+
+  // 类型切到 google-generative-ai 且 Base URL 为空时，自动填入官方默认端点。
+  // 已填值的场景不覆盖，避免误清用户已写的代理或私有网关。
+  useEffect(() => {
+    if (
+      formType === "google-generative-ai" &&
+      formBaseUrl.trim() === ""
+    ) {
+      setFormBaseUrl(GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL);
+    }
+  }, [formType, formBaseUrl]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -411,7 +437,12 @@ export default function AiProviders() {
         const secrets = await invokeGetSecrets(editingId);
         apiKey = secrets[0]?.trim() || "";
       }
-      const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
+      // 透传 provider type：Google 类型走专用解析路径。
+      const models = await invokeFetchRemoteModels(
+        baseUrl,
+        apiKey || undefined,
+        formType,
+      );
       if (models.length === 0) {
         setStatusMsg("远端未返回可用模型");
         return;
@@ -427,7 +458,7 @@ export default function AiProviders() {
     } finally {
       setPickerLoading(false);
     }
-  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, setStatusMsg]);
+  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, formType, setStatusMsg]);
 
   // 应用选择面板中的选择到自定义模型列表
   const applyPickerSelection = useCallback(() => {
@@ -489,9 +520,9 @@ export default function AiProviders() {
     setFormError("");
     try {
       const id = editingId ?? nextId();
-      // 仅 Anthropic 类型提交档位模型；过滤空值
+      // 仅 Anthropic 类型提交档位模型；OpenAI / Google Generative AI 不支持档位覆盖
       const models: Record<string, string> = {};
-      if (formType !== "openai") {
+      if (formType !== "openai" && formType !== "google-generative-ai") {
         for (const tier of MODEL_TIERS) {
           const v = (formTierModels[tier.key] ?? "").trim();
           if (v) models[tier.key] = v;
@@ -739,6 +770,7 @@ export default function AiProviders() {
                   { key: "anthropic", label: "Anthropic", count: anthropicCount, inheritFont: false },
                   { key: "openai", label: "OpenAI", count: openaiCount, inheritFont: false },
                   { key: "universal", label: "通用", count: universalCount, inheritFont: true },
+                  { key: "google-generative-ai", label: "Google", count: googleCount, inheritFont: false },
                 ] as const
               ).map((opt) => (
                 <button
@@ -893,6 +925,8 @@ export default function AiProviders() {
                 placeholder={
                   formType === "openai"
                     ? "https://api.openai.com/v1"
+                    : formType === "google-generative-ai"
+                    ? GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL
                     : "https://api.anthropic.com"
                 }
                 value={formBaseUrl}
@@ -1159,10 +1193,16 @@ export default function AiProviders() {
                 onChange={setFormDefaultModel}
                 disabled={isSaving}
                 options={customModelOptions}
-                placeholder={formType === "openai" ? "gpt-5" : "claude-sonnet-4-5"}
+                placeholder={
+                  formType === "openai"
+                    ? "gpt-5"
+                    : formType === "google-generative-ai"
+                    ? "gemini-2.5-pro"
+                    : "claude-sonnet-4-5"
+                }
               />
             </div>
-            {formType !== "openai" ? (
+            {formType !== "openai" && formType !== "google-generative-ai" ? (
               <div className="form-group">
                 <label className="form-label">
                   档位模型 <span className="form-label-optional">可选，从自定义模型列表选择</span>

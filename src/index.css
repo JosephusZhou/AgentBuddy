@@ -63,6 +63,7 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-10: 40px;
+  --seed-google-fg: #1a73e8;
 }
 [data-theme="qoder-dark"] {
   --seed-bg: #080807;
@@ -101,6 +102,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Claude（暖米色 + 珊瑚色，浅色） ---- */
@@ -141,6 +143,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Atom One Light ---- */
@@ -181,6 +184,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- GitHub Light ---- */
@@ -221,6 +225,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Solarized Light ---- */
@@ -261,6 +266,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Gruvbox Light ---- */
@@ -301,6 +307,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Ayu Light ---- */
@@ -342,6 +349,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Catppuccin Latte ---- */
@@ -382,6 +390,7 @@
   --seed-fill-hover: rgba(0,0,0,0.03);
   --seed-fill-active: rgba(0,0,0,0.06);
   --seed-border-subtle: rgba(0,0,0,0.06);
+  --seed-google-fg: #1a73e8;
 }
 
 /* ---- Dracula ---- */
@@ -422,6 +431,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Atom One Dark ---- */
@@ -462,6 +472,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Monokai ---- */
@@ -502,6 +513,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Solarized Dark ---- */
@@ -542,6 +554,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Nord ---- */
@@ -582,6 +595,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Gruvbox Dark ---- */
@@ -622,6 +636,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Tokyo Night ---- */
@@ -662,6 +677,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Night Owl ---- */
@@ -702,6 +718,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- GitHub Dark ---- */
@@ -742,6 +759,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Material Palenight ---- */
@@ -782,6 +800,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Cobalt2 ---- */
@@ -823,6 +842,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Ayu Dark ---- */
@@ -864,6 +884,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- SynthWave '84 ---- */
@@ -904,6 +925,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ---- Catppuccin Mocha ---- */
@@ -945,6 +967,7 @@
   --seed-fill-hover: rgba(255,255,255,0.04);
   --seed-fill-active: rgba(255,255,255,0.08);
   --seed-border-subtle: rgba(255,255,255,0.06);
+  --seed-google-fg: #8ab4f8;
 }
 
 /* ===== RESET & BASE ===== */

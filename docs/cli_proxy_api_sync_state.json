@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "last_checked_at": "2026-08-12T00:00:00Z",
+  "sla_days": 14,
+  "upstream_repo": "router-for-me/CLIProxyAPI",
+  "pairs": [
+    {
+      "source": "Anthropic",
+      "target": "Gemini",
+      "source_dir": "internal/translator/claude/gemini",
+      "target_dir": "internal/translator/gemini/claude",
+      "last_verified_short_sha": "934da23",
+      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+      "last_verified_date": "2026-08-12",
+      "last_verified_note": "Phase 1 初始实现：system / messages / tools / tool_choice / thinking / image 字段映射。流式 + 非流式响应翻译。tool_name sanitize（基础版本，无冲突检测）。"
+    },
+    {
+      "source": "OpenAiChat",
+      "target": "Gemini",
+      "source_dir": "internal/translator/openai/gemini",
+      "target_dir": "internal/translator/gemini/openai/chat-completions",
+      "last_verified_short_sha": "934da23",
+      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+      "last_verified_date": "2026-08-12",
+      "last_verified_note": "Phase 2 初始实现：OpenAI Chat → Gemini 请求（含 system 字段、tool_calls、tool_choice、image_url data URL、input_audio）；Gemini → OpenAI Chat 响应（流式 + 非流式）。"
+    },
+    {
+      "source": "Gemini",
+      "target": "OpenAiChat",
+      "source_dir": "internal/translator/gemini/openai/chat-completions",
+      "target_dir": "internal/translator/openai/gemini",
+      "last_verified_short_sha": "934da23",
+      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+      "last_verified_date": "2026-08-12",
+      "last_verified_note": "Phase 2: response 方向；与上一对同 commit。passthrough 优先（Google OpenAI 兼容端点）由 forwarder 探测。"
+    },
+    {
+      "source": "OpenAiResponses",
+      "target": "Gemini",
+      "source_dir": "internal/translator/openai/openai/responses",
+      "target_dir": "internal/translator/gemini/openai/responses",
+      "last_verified_short_sha": "934da23",
+      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+      "last_verified_date": "2026-08-12",
+      "last_verified_note": "Phase 4 初始实现：Responses input items → Gemini contents（含 message / function_call / function_call_output / reasoning item）。并行 tool_call=false → NONE mode。"
+    },
+    {
+      "source": "Gemini",
+      "target": "OpenAiResponses",
+      "source_dir": "internal/translator/gemini/openai/responses",
+      "target_dir": "internal/translator/openai/openai/responses",
+      "last_verified_short_sha": "934da23",
+      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+      "last_verified_date": "2026-08-12",
+      "last_verified_note": "Phase 4: response 方向；与上一对同 commit。Codex CLI 主路径。"
+    }
+  ]
+}
