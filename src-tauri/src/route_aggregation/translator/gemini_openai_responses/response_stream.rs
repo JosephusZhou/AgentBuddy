@@ -1,8 +1,17 @@
 //! Translator: Gemini streaming → OpenAI Responses API SSE
 //!
-//! CLIProxyAPI aligned: 934da237 - fix(openai): preserve structured and stringified
-//!                        custom tool outputs during Responses conversion
-//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//! CLIProxyAPI aligned:
+//! - 934da23 - fix(openai): preserve structured and stringified custom tool outputs
+//! - 8720702 - fix(translator): emit `response.completed` on stream end when
+//!             `finish_reason` is missing
+//! - 9b8d974 - fix(responses): preserve original request model on
+//!             response.created/response.in_progress payloads
+//! - 4d9bf91 - fix(translator): handle `[DONE]` and completion states for OpenAI
+//!             responses
+//! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/872070259ef66a8d3c66d1901d397c7459e98d97
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/9b8d97441e8692eccd4ea4b010547abeaf352992
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/4d9bf9160a876423a72fda9eb3bac7d84da8a1ef
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/gemini/openai/responses/gemini_openai_responses_response.go`。
@@ -26,6 +35,7 @@
 
 use serde_json::{Map, Value};
 
+use super::super::common::request::request_model_name;
 use super::super::params::{ResponseType, StreamParams};
 
 /// 流式翻译：每个 Gemini chunk → 一组 OpenAI Responses SSE 字节片段。
@@ -44,8 +54,24 @@ pub fn translate_response_stream(
         None => return Ok(Vec::new()),
     };
 
-    if line.is_empty() || line == b"[DONE]" {
+    // CLIProxyAPI 4d9bf91: 已完成后所有输入都 no-op（包括迟到的 [DONE] 和 stray chunks）。
+    if params.completed {
         return Ok(Vec::new());
+    }
+
+    // CLIProxyAPI 4d9bf91: `[DONE]` 处理。
+    // - 之前没发出 `response.created`（即上游 buggy server 协议层直接 [DONE]）→ no-op
+    // - 已发出 `response.created` 但未完成 → 模拟 finishReason=STOP 触发完成路径
+    // - 已完成 → no-op（不会重复）
+    if line == b"[DONE]" {
+        if !params.has_content {
+            return Ok(Vec::new());
+        }
+        // 模拟 finishReason=STOP 走完成路径
+        let chunk = serde_json::json!({
+            "candidates": [{"content": {"role": "model", "parts": []}, "finishReason": "STOP"}]
+        });
+        return finish_response(model, original_request, params, &chunk, /* saw_tool_call= */ false);
     }
 
     let chunk: Value = match serde_json::from_slice(line) {
@@ -63,11 +89,15 @@ pub fn translate_response_stream(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    // 1. 首帧：response.created
+    // 1. 首帧：response.created（CLIProxyAPI 9b8d974：写入原始请求 model）
     if !params.has_content
         && params.response_index == 0
         && params.response_type == ResponseType::None
     {
+        let model_in_response = {
+            let from_req = request_model_name(original_request, &Value::Null);
+            if from_req.is_empty() { model.to_string() } else { from_req }
+        };
         let frame = serde_json::json!({
             "type": "response.created",
             "response": {
@@ -75,7 +105,8 @@ pub fn translate_response_stream(
                 "object": "response",
                 "created_at": created,
                 "status": "in_progress",
-                "model": model
+                "model": model_in_response,
+                "output": []
             }
         });
         out.push(format_sse_event("response.created", &frame).into_bytes());
@@ -121,6 +152,10 @@ pub fn translate_response_stream(
             "SAFETY" => "failed",
             _ => "completed",
         };
+        let model_in_response = {
+            let from_req = request_model_name(original_request, &Value::Null);
+            if from_req.is_empty() { model.to_string() } else { from_req }
+        };
         let output = build_output(params, saw_tool_call);
         let usage = build_usage(&chunk);
         let mut response_obj = Map::new();
@@ -128,7 +163,7 @@ pub fn translate_response_stream(
         response_obj.insert("object".into(), Value::String("response".into()));
         response_obj.insert("created_at".into(), Value::from(created));
         response_obj.insert("status".into(), Value::String(status.to_string()));
-        response_obj.insert("model".into(), Value::String(model.to_string()));
+        response_obj.insert("model".into(), Value::String(model_in_response));
         response_obj.insert("output".into(), output);
         if let Some(u) = usage {
             response_obj.insert("usage".into(), u);
@@ -139,9 +174,59 @@ pub fn translate_response_stream(
         });
         out.push(format_sse_event("response.completed", &frame).into_bytes());
         out.push(b"data: [DONE]\n\n".to_vec());
+        params.completed = true;
         params.response_index = u32::MAX;
     }
 
+    Ok(out)
+}
+
+/// 完成响应路径（CLIProxyAPI 8720702 + 4d9bf91 复用点）。
+///
+/// 模拟一次 `finishReason=STOP` 走完结路径；用于 [DONE] 到达但上游未发 finishReason 时
+/// 兜底 emit `response.completed`。
+fn finish_response(
+    model: &str,
+    original_request: &Value,
+    params: &mut StreamParams,
+    chunk: &Value,
+    saw_tool_call: bool,
+) -> Result<Vec<Vec<u8>>, String> {
+    if params.completed {
+        return Ok(Vec::new());
+    }
+    let response_id = format!(
+        "resp_{:x}",
+        xxhash_rust::xxh64::xxh64(format!("{}:{}", model, original_request.to_string()).as_bytes(), 0)
+    );
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let model_in_response = {
+        let from_req = request_model_name(original_request, &Value::Null);
+        if from_req.is_empty() { model.to_string() } else { from_req }
+    };
+    let output = build_output(params, saw_tool_call);
+    let usage = build_usage(chunk);
+    let mut response_obj = Map::new();
+    response_obj.insert("id".into(), Value::String(response_id.clone()));
+    response_obj.insert("object".into(), Value::String("response".into()));
+    response_obj.insert("created_at".into(), Value::from(created));
+    response_obj.insert("status".into(), Value::String("completed".into()));
+    response_obj.insert("model".into(), Value::String(model_in_response));
+    response_obj.insert("output".into(), output);
+    if let Some(u) = usage {
+        response_obj.insert("usage".into(), u);
+    }
+    let frame = serde_json::json!({
+        "type": "response.completed",
+        "response": Value::Object(response_obj)
+    });
+    let mut out = vec![format_sse_event("response.completed", &frame).into_bytes()];
+    out.push(b"data: [DONE]\n\n".to_vec());
+    params.completed = true;
+    params.response_index = u32::MAX;
     Ok(out)
 }
 
@@ -479,5 +564,119 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(s.contains("\"type\":\"reasoning\""));
+    }
+
+    // ====== CLIProxyAPI 9b8d974 (preserve original request model) ======
+
+    /// `response.created` / `response.completed` 帧里的 `response.model` 来自原始请求
+    /// 而不是 backend 内部使用的 model 字符串。
+    #[test]
+    fn response_events_use_original_request_model() {
+        use serde_json::json;
+        let original = json!({"model": "gpt-5-original"});
+        let mut p = fresh();
+        // 起始 text 触发 response.created
+        let chunk1 = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"finishReason":null}]}"#;
+        let _ = translate_response_stream("m", &original, chunk1, &mut p).unwrap();
+        // finishReason 触发 response.completed
+        let chunk2 = br#"data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP"}]}"#;
+        let out = translate_response_stream("m", &original, chunk2, &mut p).unwrap();
+        let s: String = out
+            .iter()
+            .map(|v| String::from_utf8_lossy(v).to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("\"model\":\"gpt-5-original\""));
+    }
+
+    /// 没有 original_request 时 fallback 到 model 参数。
+    #[test]
+    fn response_model_falls_back_to_model_param() {
+        let mut p = fresh();
+        let chunk = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}"#;
+        let out = translate_response_stream("fallback-model", &Value::Null, chunk, &mut p).unwrap();
+        let s: String = out
+            .iter()
+            .map(|v| String::from_utf8_lossy(v).to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("\"model\":\"fallback-model\""));
+    }
+
+    // ====== CLIProxyAPI 8720702 (emit completion on [DONE] when finish_reason missing) ======
+
+    /// 上游 buggy OpenAI 兼容 server 只发 text 而不发 finishReason，
+    /// 只发 `[DONE]`。我们应兜底 emit `response.completed`。
+    #[test]
+    fn done_emits_completion_when_finish_reason_missing() {
+        let mut p = fresh();
+        // 起始 text 触发 response.created
+        let chunk1 = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":null}]}"#;
+        let _ = translate_response_stream("m", &Value::Null, chunk1, &mut p).unwrap();
+        // [DONE] 触发完成
+        let out = translate_response_stream("m", &Value::Null, b"data: [DONE]", &mut p).unwrap();
+        let s: String = out
+            .iter()
+            .map(|v| String::from_utf8_lossy(v).to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("response.completed"));
+        assert!(s.contains("data: [DONE]"));
+        assert!(p.completed);
+    }
+
+    // ====== CLIProxyAPI 4d9bf91 (handle [DONE] and completion idempotency) ======
+
+    /// 第一次 [DONE] 没有 finishReason 时 emit completion；
+    /// 后续 [DONE] 重复发送时 no-op（幂等）。
+    #[test]
+    fn duplicate_done_is_idempotent() {
+        let mut p = fresh();
+        let chunk1 = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":null}]}"#;
+        let _ = translate_response_stream("m", &Value::Null, chunk1, &mut p).unwrap();
+        let _ = translate_response_stream("m", &Value::Null, b"data: [DONE]", &mut p).unwrap();
+        assert!(p.completed);
+        // 第二次 [DONE]
+        let out = translate_response_stream("m", &Value::Null, b"data: [DONE]", &mut p).unwrap();
+        assert!(out.is_empty());
+    }
+
+    /// finishReason 之后来的 [DONE] → no-op，避免重复 emit。
+    #[test]
+    fn done_after_finish_reason_is_no_op() {
+        let mut p = fresh();
+        let chunk = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"answer"}]},"finishReason":"STOP"}]}"#;
+        let out = translate_response_stream("m", &Value::Null, chunk, &mut p).unwrap();
+        let completion_count = out
+            .iter()
+            .filter(|v| String::from_utf8_lossy(v).contains("response.completed"))
+            .count();
+        assert_eq!(completion_count, 1, "should emit completion exactly once");
+        assert!(p.completed);
+        // 后续 [DONE] no-op
+        let out2 = translate_response_stream("m", &Value::Null, b"data: [DONE]", &mut p).unwrap();
+        assert!(out2.is_empty());
+    }
+
+    /// 上游还没发任何 chunk 就直接 [DONE]（极端 buggy server）→ no-op。
+    #[test]
+    fn bare_done_before_start_is_no_op() {
+        let mut p = fresh();
+        let out = translate_response_stream("m", &Value::Null, b"data: [DONE]", &mut p).unwrap();
+        assert!(out.is_empty());
+        assert!(!p.has_content);
+        assert!(!p.completed);
+    }
+
+    /// 完成之后迟到的 chunk → no-op。
+    #[test]
+    fn late_chunk_after_completion_is_no_op() {
+        let mut p = fresh();
+        let chunk = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}]}"#;
+        let _ = translate_response_stream("m", &Value::Null, chunk, &mut p).unwrap();
+        // 模拟迟到 chunk
+        let late = br#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"late"}]},"finishReason":null}]}"#;
+        let out = translate_response_stream("m", &Value::Null, late, &mut p).unwrap();
+        assert!(out.is_empty());
     }
 }

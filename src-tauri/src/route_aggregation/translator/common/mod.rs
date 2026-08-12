@@ -10,6 +10,7 @@ pub mod claude_messages;
 pub mod http;
 pub mod id_map;
 pub mod multimodal;
+pub mod request;
 pub mod schema;
 pub mod sse;
 pub mod thinking;

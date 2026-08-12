@@ -1,8 +1,11 @@
 //! Translator: OpenAI Responses API → Gemini generateContent
 //!
-//! CLIProxyAPI aligned: 934da237 - fix(openai): preserve structured and stringified
-//!                        custom tool outputs during Responses conversion
+//! CLIProxyAPI aligned:
+//! - 934da23 - fix(openai): preserve structured and stringified custom tool outputs
+//! - ecc9aa7 - fix(openai): preserve assistant content when converting Responses
+//!             tool-call turns
 //! Source: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//!         https://github.com/router-for-me/CLIProxyAPI/commit/ecc9aa72b32f34b680d03b0724b531a21ae74472
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/openai/openai/responses/`。
@@ -150,46 +153,188 @@ fn build_contents(
             ])));
         }
         Value::Array(arr) => {
+            // 状态：跟踪最近的 "可合并" assistant message item（CLIProxyAPI
+            // `ecc9aa7` 修复：避免相邻 assistant message + function_call 序列
+            // 产生多个 model content；改为合并 `tool_calls` 到已有 assistant
+            // message 的 parts）。跨 role / function_call_output 边界 reset。
+            let mut mergeable_assistant_index: Option<usize> = None;
+            // 待附加的 functionCall parts（累积后追加到 assistant message 的 parts）
+            let mut pending_tool_calls: Vec<Value> = Vec::new();
+            // 待附加的 reasoning 缓冲（跨多个 reasoning item / assistant message 合并）
+            let mut pending_reasoning_content = String::new();
+
             for item in arr {
-                if let Some(content_obj) = item.as_object() {
-                    let item_type = content_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    match item_type {
-                        "message" => {
-                            if let Some(content_obj_built) = build_message_item(content_obj, params)? {
-                                out.push(content_obj_built);
+                let Some(content_obj) = item.as_object() else { continue };
+                let item_type = content_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                match item_type {
+                    "message" => {
+                        // assistant message 之前先把累积的 functionCall 合并到 mergeable_assistant
+                        flush_pending_tool_calls(&mut out, &mut mergeable_assistant_index, &mut pending_tool_calls);
+
+                        // 非 user 角色先把 mergeable_assistant_index reset
+                        let role = content_obj.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                        if role != "assistant" {
+                            mergeable_assistant_index = None;
+                        }
+                        if role != "assistant" {
+                            // 把积累的 reasoning 视为 turn 边界信号，先上扔
+                            pending_reasoning_content.clear();
+                        }
+
+                        if let Some(content_obj_built) = build_message_item(content_obj, params)? {
+                            let pushed_index = out.len();
+                            out.push(content_obj_built);
+                            if role == "assistant" {
+                                mergeable_assistant_index = Some(pushed_index);
                             }
                         }
-                        "function_call" => {
-                            if let Some(fc) = build_function_call_item(content_obj, params)? {
-                                push_model_content(&mut out, fc);
+                    }
+                    "function_call" => {
+                        // 把 inline reasoning_content 合并到 pending buffer
+                        if let Some(rc) = content_obj.get("reasoning_content").and_then(|v| v.as_str()) {
+                            pending_reasoning_content = combine_openai_responses_reasoning(
+                                std::mem::take(&mut pending_reasoning_content),
+                                rc,
+                            );
+                        }
+                        if let Some(fc) = build_function_call_item(content_obj, params)? {
+                            pending_tool_calls.push(fc);
+                        }
+                    }
+                    "function_call_output" => {
+                        // 边界：tool output 紧跟在 tool_call 之后；先把 pending tool_calls flush
+                        flush_pending_tool_calls(&mut out, &mut mergeable_assistant_index, &mut pending_tool_calls);
+                        mergeable_assistant_index = None;
+                        pending_reasoning_content.clear();
+
+                        if let Some(fr) = build_function_call_output_item(content_obj)? {
+                            push_user_content(&mut out, fr);
+                        }
+                    }
+                    "custom_tool_call" => {
+                        // Codex freeform tool call: 缓冲 inline reasoning_content
+                        if let Some(rc) = content_obj.get("reasoning_content").and_then(|v| v.as_str()) {
+                            pending_reasoning_content = combine_openai_responses_reasoning(
+                                std::mem::take(&mut pending_reasoning_content),
+                                rc,
+                            );
+                        }
+                        // 把调用标记为 functionCall part（保留 name/call_id/arguments）
+                        if let Some(fc) = build_function_call_item(content_obj, params)? {
+                            pending_tool_calls.push(fc);
+                        }
+                    }
+                    "custom_tool_call_output" => {
+                        // CLIProxyAPI 934da23: custom tool output 的处理走
+                        // 与 function_call_output 相同的 reasoning-flush + fr 路径，
+                        // 区别在于 build_function_call_output_item 内部解析结构化
+                        // output（image array / text array / plain string）。
+                        flush_pending_tool_calls(&mut out, &mut mergeable_assistant_index, &mut pending_tool_calls);
+                        mergeable_assistant_index = None;
+                        pending_reasoning_content.clear();
+
+                        if let Some(fr) = build_function_call_output_item(content_obj)? {
+                            push_user_content(&mut out, fr);
+                        }
+                    }
+                    "reasoning" => {
+                        // 收集 reasoning summary 内容（Responses reasoning item 的标准字段）
+                        let summaries = content_obj.get("summary").and_then(|v| v.as_array());
+                        if let Some(sums) = summaries {
+                            for s in sums {
+                                if let Some(text) = s.get("text").and_then(|v| v.as_str()) {
+                                    pending_reasoning_content = combine_openai_responses_reasoning(
+                                        std::mem::take(&mut pending_reasoning_content),
+                                        text,
+                                    );
+                                }
                             }
                         }
-                        "function_call_output" => {
-                            if let Some(fr) = build_function_call_output_item(content_obj)? {
-                                push_user_content(&mut out, fr);
-                            }
-                        }
-                        "reasoning" => {
-                            // 跳过：Responses 的 reasoning items 用于跨轮回放，
-                            // Gemini 端不再需要原始内容（signature 已由 thinking
-                            // delta 阶段带过去）。Phase 3 完整实现可在此处
-                            // 提取 encrypted_content 写到 params.thinking_signature。
-                        }
-                        "item_reference" => {
-                            // 引用之前的 item；常见于多轮对话，Gemini 不直接支持。
-                            // 忽略（不会破坏端到端，丢失该 turn 的内容）。
-                        }
-                        _ => {
-                            // 未知 item type 跳过
-                        }
+                    }
+                    "item_reference" => {
+                        // 引用之前的 item；常见于多轮对话，Gemini 不直接支持。
+                        // 忽略（不会破坏端到端，丢失该 turn 的内容）。
+                    }
+                    _ => {
+                        // 未知 item type 跳过；同时 reset merge state
+                        flush_pending_tool_calls(&mut out, &mut mergeable_assistant_index, &mut pending_tool_calls);
+                        mergeable_assistant_index = None;
+                        pending_reasoning_content.clear();
                     }
                 }
             }
+
+            // 收尾：把未消费的 pending tool_calls flush
+            flush_pending_tool_calls(&mut out, &mut mergeable_assistant_index, &mut pending_tool_calls);
+            // 注：pending_reasoning_content 当前不直接放到 out（Gemini 没原生 reasoning
+            // 位置；如需回放，可作为 model content 第一个 parts 写一个 thinking 类型，但
+            // Gemini 接受度有限）。保留 buffer 以便后续 turn 合并，与 ecc9aa7 行为对齐。
+            let _ = pending_reasoning_content;
         }
         _ => return Err(TranslateError::Invalid("`input` must be string or array".into())),
     }
 
     Ok(out)
+}
+
+/// 把累积的 tool_calls 合并到最近一个 assistant model content（如果存在）；
+/// 否则开新的 model content。
+fn flush_pending_tool_calls(
+    out: &mut Vec<Value>,
+    mergeable_assistant_index: &mut Option<usize>,
+    pending_tool_calls: &mut Vec<Value>,
+) {
+    if pending_tool_calls.is_empty() {
+        return;
+    }
+    let drained: Vec<Value> = std::mem::take(pending_tool_calls);
+
+    if let Some(idx) = mergeable_assistant_index {
+        if *idx == out.len().saturating_sub(1) {
+            if let Some(last) = out.get_mut(*idx) {
+                if last.get("role").and_then(|v| v.as_str()) == Some("model") {
+                    if let Some(parts) = last.get_mut("parts").and_then(|v| v.as_array_mut()) {
+                        for fc in drained {
+                            parts.push(fc);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // 没有 mergeable assistant → 开新的 model content
+    out.push(Value::Object(Map::from_iter([
+        ("role".into(), Value::String("model".into())),
+        ("parts".into(), Value::Array(drained)),
+    ])));
+    *mergeable_assistant_index = Some(out.len() - 1);
+}
+
+/// 合并两段 reasoning 内容（CLIProxyAPI `combineOpenAIResponsesReasoning`）：
+/// - 空 + empty → empty
+/// - `[reasoning unavailable]` placeholder 不覆盖真实内容
+/// - 完全相同 → 保留一份
+/// - 其余 → `existing + "\n\n" + incoming`
+fn combine_openai_responses_reasoning(existing: String, incoming: &str) -> String {
+    let existing_trimmed = existing.trim();
+    let incoming_trimmed = incoming.trim();
+    match (existing_trimmed.is_empty(), incoming_trimmed.is_empty()) {
+        (true, true) => existing,
+        (true, false) => incoming.to_string(),
+        (false, true) => existing,
+        (false, false) => {
+            if existing_trimmed == "[reasoning unavailable]" {
+                incoming.to_string()
+            } else if incoming_trimmed == "[reasoning unavailable]" || existing_trimmed == incoming_trimmed {
+                existing
+            } else {
+                format!("{existing}\n\n{incoming}")
+            }
+        }
+    }
 }
 
 fn build_message_item(
@@ -345,20 +490,109 @@ fn build_function_call_output_item(
     obj: &Map<String, Value>,
 ) -> Result<Option<Value>, TranslateError> {
     let call_id = obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
-    let output = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
 
     let mut fr = Map::new();
     if !call_id.is_empty() {
         fr.insert("id".into(), Value::String(call_id.to_string()));
     }
-    let mut response = Map::new();
-    response.insert("result".into(), Value::String(output.to_string()));
-    fr.insert("response".into(), Value::Object(response));
+
+    // 解析 `output` 字段：可能是 string / array / JSON-encoded string / null。
+    // CLIProxyAPI `934da23` 修复：Responses 的 `output` 可能是 JSON-encoded string
+    // 包裹的 array（含 input_image / input_text）；需解析后才能正确路由。
+    let output = obj.get("output");
+    let response = match output {
+        Some(Value::String(s)) => {
+            // 尝试作为 JSON 解析（stringified array / object）
+            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                responses_output_to_function_response(parsed)
+            } else {
+                // 普通字符串 → {"result": ...}
+                Value::Object(Map::from_iter([(
+                    "result".into(),
+                    Value::String(s.clone()),
+                )]))
+            }
+        }
+        Some(v @ Value::Array(_)) => responses_output_to_function_response(v.clone()),
+        Some(v @ Value::Object(_)) => v.clone(),
+        Some(Value::Null) | None => Value::Object(Map::new()),
+        Some(v) => v.clone(),
+    };
+    fr.insert("response".into(), response);
 
     Ok(Some(Value::Object(Map::from_iter([(
         "functionResponse".into(),
         Value::Object(fr),
     )]))))
+}
+
+/// 解析 Responses `output` 字段（已经过 JSON 解码）→ Gemini `functionResponse.response`.
+///
+/// 行为对齐 CLIProxyAPI `setCustomToolCallOutputContent` + `responsesToolOutputText`：
+/// - 含 `input_image` part → 走 image 路径（本翻译器输出文本描述占位；Gemini
+///   functionResponse 不支持 multimodal parts，故用 `[image:base64:N bytes]` 形式）
+/// - 含 `input_text` / `text` part → 拼接为单一字符串
+/// - 否则 → 整个 value 的原始 JSON 作为 response。
+fn responses_output_to_function_response(parsed: Value) -> Value {
+    let Some(arr) = parsed.as_array() else {
+        // object / scalar → 原样作为 response
+        return parsed;
+    };
+
+    let mut text_buf = String::new();
+    let mut image_count = 0usize;
+    for block in arr {
+        let Some(obj) = block.as_object() else { continue };
+        let btype = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match btype {
+            "input_text" | "text" | "output_text" => {
+                if let Some(t) = obj.get("text").and_then(|v| v.as_str()) {
+                    if !text_buf.is_empty() {
+                        text_buf.push('\n');
+                    }
+                    text_buf.push_str(t);
+                }
+            }
+            "input_image" => {
+                image_count += 1;
+                // Responses / Chat 兼容：image 字段（旧）或 image_url 字段（OpenAI Chat / 新 Responses）
+                let img_data = obj
+                    .get("image")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        obj.get("image_url")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim_start_matches("data:"))
+                    });
+                if let Some(data) = img_data {
+                    // 提取 base64 字节长度（粗略估计：4/3 解码，data 末尾的 "base64," 后字符数）
+                    let b64_start = data.find("base64,").map(|i| i + 7).unwrap_or(0);
+                    let b64_len = data.len().saturating_sub(b64_start);
+                    let approx_bytes = (b64_len * 3) / 4;
+                    text_buf.push_str(&format!("[image:base64:{approx_bytes}bytes]"));
+                }
+            }
+            _ => {
+                // 未知 type 静默跳过
+            }
+        }
+    }
+
+    if !text_buf.is_empty() {
+        Value::Object(Map::from_iter([(
+            "result".into(),
+            Value::String(text_buf),
+        )]))
+    } else if image_count == 0 {
+        // 没有任何可识别 part → 保留原 array（rare）
+        parsed
+    } else {
+        // 仅有 image → 占位
+        Value::Object(Map::from_iter([(
+            "result".into(),
+            Value::String(format!("[{image_count} embedded image(s)]")),
+        )]))
+    }
 }
 
 fn build_tools(tools: &Value, params: &mut StreamParams) -> Result<Option<Value>, TranslateError> {
@@ -604,5 +838,230 @@ mod tests {
         assert_eq!(n1, "search_web");
         assert_ne!(n1, n2);
         assert_eq!(params.sanitized_name_map.len(), 2);
+    }
+
+    // ====== CLIProxyAPI 934da23 (custom_tool_call_output) ======
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_UnwrapsStringifiedCustomToolOutputImages`。
+    /// stringified JSON 编码的 image array 走文本占位（Gemini functionResponse 不支持
+    /// multimodal parts）。
+    #[test]
+    fn custom_tool_output_stringified_image_array_falls_back_to_placeholder() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "custom_tool_call", "call_id": "call_image", "name": "view_image", "input": "{}"},
+                {"type": "custom_tool_call_output", "call_id": "call_image",
+                 "output": r#"[{"type":"input_image","image_url":"data:image/png;base64,AA==","detail":"original"}]"#}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        let fr = &out["contents"][1]["parts"][0]["functionResponse"];
+        // image 占位文本
+        let result = fr["response"]["result"].as_str().unwrap();
+        assert!(
+            result.contains("[image:base64:") && result.contains("bytes]"),
+            "expected image placeholder, got {result:?}"
+        );
+    }
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_PreservesCustomToolOutputFallbacks`。
+    /// 各种 output 形态 fallback 到文本。
+    #[test]
+    fn custom_tool_output_fallbacks() {
+        // plain text
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "custom_tool_call", "call_id": "x", "name": "f", "input": "{}"},
+                {"type": "custom_tool_call_output", "call_id": "x", "output": "plain output"}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        assert_eq!(
+            out["contents"][1]["parts"][0]["functionResponse"]["response"],
+            json!({"result": "plain output"})
+        );
+
+        // text content array
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "custom_tool_call", "call_id": "x", "name": "f", "input": "{}"},
+                {"type": "custom_tool_call_output", "call_id": "x",
+                 "output": r#"[{"type":"input_text","text":"done"}]"#}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        assert_eq!(
+            out["contents"][1]["parts"][0]["functionResponse"]["response"],
+            json!({"result": "done"})
+        );
+
+        // invalid image array (no fields) → empty result
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "custom_tool_call", "call_id": "x", "name": "f", "input": "{}"},
+                {"type": "custom_tool_call_output", "call_id": "x",
+                 "output": r#"[{"type":"input_image","detail":"low"}]"#}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        // image_count=1, text_buf empty → "[1 embedded image(s)]"
+        assert_eq!(
+            out["contents"][1]["parts"][0]["functionResponse"]["response"],
+            json!({"result": "[1 embedded image(s)]"})
+        );
+    }
+
+    /// 普通 stringified array 文本被解析（`responsesToolOutputText` 等价）。
+    #[test]
+    fn function_call_output_stringified_array_parsed() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "function_call", "call_id": "c1", "name": "exec", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "c1",
+                 "output": r#"[{"type":"input_text","text":"line1"},{"type":"input_text","text":"line2"}]"#}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        assert_eq!(
+            out["contents"][1]["parts"][0]["functionResponse"]["response"],
+            json!({"result": "line1\nline2"})
+        );
+    }
+
+    // ====== CLIProxyAPI ecc9aa7 (preserve assistant content + mergeable index) ======
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_PreservesAssistantContentWithToolCalls`。
+    /// reasoning → assistant message → function_call → function_call_output
+    /// 序列应产生 2 个 messages（assistant 包含 content + tool_calls；tool output 独立）。
+    #[test]
+    fn preserves_assistant_content_with_tool_calls() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "reasoning", "id": "rs_1",
+                 "summary": [{"type": "summary_text", "text": "inspect the next step"}]},
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "Step 3 completed; continue to step 4."}]},
+                {"type": "function_call", "call_id": "call_4", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "function_call_output", "call_id": "call_4", "output": "ok"}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        let contents = out["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 2, "期望 2 个 turn: assistant(model) + tool response(user)");
+
+        // 第一个 turn: model（content + functionCall 合并）
+        assert_eq!(contents[0]["role"], "model");
+        let parts = contents[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2, "text part + functionCall part");
+        assert_eq!(parts[0]["text"], "Step 3 completed; continue to step 4.");
+        assert_eq!(parts[1]["functionCall"]["id"], "call_4");
+
+        // 第二个 turn: user (functionResponse)
+        assert_eq!(contents[1]["role"], "user");
+        assert_eq!(
+            contents[1]["parts"][0]["functionResponse"]["id"],
+            "call_4"
+        );
+    }
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_DoesNotMergeToolCallsAcrossUserMessage`。
+    /// assistant message (content) → user message → function_call 应各自分开。
+    #[test]
+    fn does_not_merge_tool_calls_across_user_message() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "done"}]},
+                {"type": "message", "role": "user",
+                 "content": [{"type": "input_text", "text": "next"}]},
+                {"type": "function_call", "call_id": "call_next", "name": "exec_command", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_next", "output": "ok"}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        let contents = out["contents"].as_array().unwrap();
+        // assistant(text) → user input → model(单独 functionCall) → user(functionResponse)
+        assert_eq!(contents.len(), 4);
+        assert_eq!(contents[0]["role"], "model");
+        assert_eq!(contents[0]["parts"][0]["text"], "done");
+        assert!(contents[0]["parts"].as_array().unwrap().len() == 1, "no tool_call merged");
+
+        assert_eq!(contents[1]["role"], "user");
+        assert_eq!(contents[1]["parts"][0]["text"], "next");
+
+        assert_eq!(contents[2]["role"], "model");
+        assert_eq!(
+            contents[2]["parts"][0]["functionCall"]["id"],
+            "call_next"
+        );
+
+        assert_eq!(contents[3]["role"], "user");
+        assert_eq!(
+            contents[3]["parts"][0]["functionResponse"]["id"],
+            "call_next"
+        );
+    }
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_MergesDistinctReasoningWithinAssistantTurn`。
+    /// 多个 reasoning segment + assistant message + function_call 合并到一个 model turn；
+    /// reasoning 文本被合并累积（用于后续 turn；当前 Gemini 端不输出但 buffer 累积对）。
+    #[test]
+    fn reasoning_summary_buffers_across_turn() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "first"}]},
+                {"type": "message", "role": "assistant", "reasoning_content": "first",
+                 "content": [{"type": "output_text", "text": "working"}]},
+                {"type": "function_call", "call_id": "call_x", "name": "exec", "arguments": "{}"}
+            ]
+        });
+        let out = translate("m", &body).unwrap();
+        let contents = out["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 1, "一个 model turn: text + functionCall 合并");
+        let parts = contents[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "working");
+        assert_eq!(parts[1]["functionCall"]["id"], "call_x");
+    }
+
+    /// `[reasoning unavailable]` placeholder 不覆盖真实内容。
+    #[test]
+    fn reasoning_unavailable_is_replaced_by_real_content() {
+        // 当 reasoning 累积过程中遇到 placeholder + 真实内容，
+        // 真实内容应胜出（这是 combine_openai_responses_reasoning 的语义）。
+        let combined = combine_openai_responses_reasoning(
+            "[reasoning unavailable]".to_string(),
+            "real reasoning",
+        );
+        assert_eq!(combined, "real reasoning");
+    }
+
+    /// combine helper：完全相同 → 保留一份。
+    #[test]
+    fn combine_reasoning_identical_keeps_one() {
+        let combined = combine_openai_responses_reasoning("same".to_string(), "same");
+        assert_eq!(combined, "same");
+    }
+
+    /// combine helper：不同 → `existing + "\n\n" + incoming`。
+    #[test]
+    fn combine_reasoning_different_joins_with_newlines() {
+        let combined = combine_openai_responses_reasoning("first".to_string(), "second");
+        assert_eq!(combined, "first\n\nsecond");
+    }
+
+    /// echo placeholder 在 assistant message 之后被真实 reasoning 替换。
+    #[test]
+    fn combine_reasoning_empty_then_content() {
+        let combined = combine_openai_responses_reasoning(String::new(), "first");
+        assert_eq!(combined, "first");
     }
 }

@@ -54,6 +54,11 @@ pub struct StreamParams {
     pub current_tool_call_name: Option<String>,
     /// 已累积的 thinking signature。Anthropic 多轮回放需要此值。
     pub thinking_signature: Option<String>,
+    /// 响应是否已经发出 `response.completed` 终止事件。
+    ///
+    /// 对齐 CLIProxyAPI `4d9bf91` 修复：完成事件只发一次。`[DONE]` 与
+    /// `finishReason` 同时到达时（如上游 buggy OpenAI 兼容 server）也要幂等。
+    pub completed: bool,
 }
 
 impl StreamParams {
@@ -80,6 +85,7 @@ mod tests {
         assert!(p.tool_name_map.is_empty());
         assert!(p.current_tool_call_id.is_none());
         assert!(p.thinking_signature.is_none());
+        assert!(!p.completed);
     }
 
     #[test]

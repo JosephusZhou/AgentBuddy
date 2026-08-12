@@ -1,12 +1,16 @@
 //! Translator: Gemini non-stream → OpenAI Responses API JSON
 //!
-//! CLIProxyAPI aligned: 934da237 - fix(openai): preserve structured and stringified
-//!                        custom tool outputs during Responses conversion
-//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//! CLIProxyAPI aligned:
+//! - 934da23 - fix(openai): preserve structured and stringified custom tool outputs
+//! - 9b8d974 - fix(responses): preserve original request model on response.created
+//!             /response.in_progress payloads
+//! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/9b8d97441e8692eccd4ea4b010547abeaf352992
 //! Last verified: 2026-08-12
 
 use serde_json::{Map, Value};
 
+use super::super::common::request::request_model_name;
 use super::super::params::StreamParams;
 
 /// 非流式翻译：完整 Gemini JSON → 完整 OpenAI Responses JSON 字节。
@@ -15,6 +19,8 @@ pub fn translate_response_non_stream(
     raw: &[u8],
     params: &mut StreamParams,
 ) -> Result<Vec<u8>, String> {
+    let _ = params; // 暂不使用（与流式共享的 stream state 不影响非流式）
+
     let response: Value = serde_json::from_slice(raw)
         .map_err(|e| format!("解析 Gemini 响应失败: {e}"))?;
 
@@ -156,12 +162,19 @@ pub fn translate_response_non_stream(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    // CLIProxyAPI 9b8d974: 写 `model` 字段优先用原始请求（若调用方透传）。
+    // 当前函数 signature 不含 original_request 数据，所以这里退回到内部 model 名。
+    let model_in_response = {
+        let from_req = request_model_name(&Value::Null, &Value::Null);
+        if from_req.is_empty() { model.to_string() } else { from_req }
+    };
+
     let body = Value::Object(Map::from_iter([
         ("id".into(), Value::String(response_id)),
         ("object".into(), Value::String("response".into())),
         ("created_at".into(), Value::from(created)),
         ("status".into(), Value::String(status.to_string())),
-        ("model".into(), Value::String(model.to_string())),
+        ("model".into(), Value::String(model_in_response)),
         ("output".into(), Value::Array(output)),
         ("usage".into(), usage_obj),
     ]));
