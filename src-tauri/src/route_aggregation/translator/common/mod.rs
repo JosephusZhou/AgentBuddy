@@ -6,6 +6,7 @@
 //! Source: https://github.com/router-for-me/CLIProxyAPI/commit/ac8fb9706fb84bedfbd1f813738680fdc6767115
 //! Last verified: 2026-08-12
 
+pub mod claude_messages;
 pub mod http;
 pub mod id_map;
 pub mod multimodal;

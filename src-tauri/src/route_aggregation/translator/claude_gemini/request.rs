@@ -1,12 +1,22 @@
 //! Translator: Anthropic Messages → Gemini generateContent
 //!
-//! CLIProxyAPI aligned: c13dbcc2 - feat(translator): add test and logic to ensure
-//!                        object schemas include properties field
-//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/c13dbcc24e1373e353338d90bdb38b8e4722e22b
+//! CLIProxyAPI aligned: 71e8711 - fix(claude): accumulate consecutive role turns
+//!                        during request conversion
+//!                        (also informed by c13dbcc2 - object schemas with properties)
+//! Source: https://github.com/router-for-me/CLIProxyAPI/commit/71e87111e9d8e6c0ce3c2d0a419b136fee2e10b0
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/claude/gemini/` 目录：
 //! `claude_gemini_request.go` ~14KB / `claude_gemini_response.go` ~17KB。
+//!
+//! ## 与 CLIProxyAPI 71e8711 的同步点
+//! - 使用 `ClaudeMessageAccumulator`（`common::claude_messages`）合并相邻同 role turn。
+//! - assistant turn 内 `tool_use` 移到 parts 末尾（thinking → text → tool_use）。
+//! - user turn 保留原序（tool_result + text 混合）。
+//! - 空 / null / 非 user/assistant role 跳过但不破坏当前 turn。
+//! - 注：原 commit 把 Gemini `systemInstruction` 翻译成 Claude `user` 消息（用于代理
+//!   Claude API）。本文件反向（Anthropic → Gemini），所以 system 走 `systemInstruction`
+//!   字段，不需要 accumulator 的 explicit `flush()` 边界。
 //!
 //! ## 字段映射速查
 //! | Anthropic                       | Gemini                                |
@@ -27,6 +37,7 @@
 
 use serde_json::{Map, Value};
 
+use super::super::common::claude_messages::ClaudeMessageAccumulator;
 use super::super::common::thinking;
 use super::super::common::tool_name;
 use super::super::params::StreamParams;
@@ -169,6 +180,8 @@ fn build_system_instruction(src: &Map<String, Value>) -> Result<Option<Value>, T
 /// 构造 `contents`：从 Anthropic `messages` 数组转换为 Gemini `contents` 数组。
 ///
 /// `role: assistant` → `role: model`；content 数组中 text/tool_use/tool_result/image 全部支持。
+/// 相邻同 role turn 通过 `ClaudeMessageAccumulator` 合并；assistant turn 内 tool_use
+/// 移到 parts 末尾（对齐 CLIProxyAPI `71e8711` 修复）。
 fn build_contents(
     src: &Map<String, Value>,
     params: &mut StreamParams,
@@ -177,7 +190,7 @@ fn build_contents(
         return Ok(Vec::new());
     };
 
-    let mut out = Vec::new();
+    let mut acc = ClaudeMessageAccumulator::new();
     for msg in messages {
         let Some(obj) = msg.as_object() else {
             continue;
@@ -201,12 +214,13 @@ fn build_contents(
             // Anthropic 允许空 content；Gemini 不允许空 parts。跳过整个 turn。
             continue;
         }
-        out.push(Value::Object(Map::from_iter([
+        let node = Value::Object(Map::from_iter([
             ("role".into(), Value::String(gemini_role.to_string())),
             ("parts".into(), Value::Array(parts)),
-        ])));
+        ]));
+        acc.append(&node);
     }
-    Ok(out)
+    Ok(acc.into_messages())
 }
 
 /// 构造单个 message 的 `parts`：兼容 string content 与 array content。
@@ -858,5 +872,108 @@ mod tests {
         let _ = build_request("m", &body, false, &mut params).unwrap();
         // 同一原名入 map 两次仍只占一个 entry（sanitize_with_occupied 内部 is_occupied 检查）
         assert_eq!(params.sanitized_name_map.len(), 1);
+    }
+
+    /// 对齐 CLIProxyAPI `TestConvertGeminiRequestToClaude_GroupsConsecutiveRoleTurns`（反向）。
+    /// 多个相邻同 role Anthropic turn 合并为单个 Gemini content；
+    /// assistant 内 tool_use 移到末尾。
+    #[test]
+    fn groups_consecutive_role_turns() {
+        let body = json!({
+            "model": "m",
+            "messages": [
+                {"role": "assistant", "content": [{"type": "text", "text": "answer"}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "first", "input": {}}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "call_2", "name": "second", "input": {}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "one"}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_2", "content": "two"}]}
+            ]
+        });
+        let mut params = StreamParams::default();
+        let out = build_request("m", &body, false, &mut params).unwrap();
+        let contents = out.get("contents").unwrap().as_array().unwrap();
+        assert_eq!(contents.len(), 2, "期望 2 个 turn（assistant 一个、user 一个）");
+
+        // 第一个 turn: model
+        assert_eq!(contents[0].get("role").unwrap(), "model");
+        let parts = contents[0].get("parts").unwrap().as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].get("text").unwrap(), "answer");
+        assert!(parts[1].get("functionCall").is_some());
+        assert!(parts[2].get("functionCall").is_some());
+        // tool_use 顺序：call_1 在 call_2 前（按 sanitized 名顺序）
+        assert_eq!(parts[1]["functionCall"]["id"], "call_1");
+        assert_eq!(parts[2]["functionCall"]["id"], "call_2");
+
+        // 第二个 turn: user（tool_result 保留原序）
+        assert_eq!(contents[1].get("role").unwrap(), "user");
+        let user_parts = contents[1].get("parts").unwrap().as_array().unwrap();
+        assert_eq!(user_parts.len(), 2);
+        assert_eq!(user_parts[0]["functionResponse"]["id"], "call_1");
+        assert_eq!(user_parts[1]["functionResponse"]["id"], "call_2");
+    }
+
+    /// 对齐 CLIProxyAPI `TestConvertGeminiRequestToClaude_KeepsSystemInstructionUserSeparate`（反向）。
+    /// system instruction 后跟普通 user message，**不会**合并；assistant 前的 user 也不合并。
+    /// 注：本翻译器把 system 走 `systemInstruction` 字段（不进 messages），所以这里只验证
+    /// user 之间不会发生跨 character 的合并边界 bug。
+    #[test]
+    fn does_not_merge_across_role_changes() {
+        let body = json!({
+            "model": "m",
+            "system": "system rule",
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "middle"},
+                {"role": "user", "content": "second"}
+            ]
+        });
+        let mut params = StreamParams::default();
+        let out = build_request("m", &body, false, &mut params).unwrap();
+        let contents = out.get("contents").unwrap().as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[0]["parts"][0]["text"], "first");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(contents[1]["parts"][0]["text"], "middle");
+        assert_eq!(contents[2]["role"], "user");
+        assert_eq!(contents[2]["parts"][0]["text"], "second");
+        // system 字段保留在 systemInstruction，不进 messages
+        assert_eq!(
+            out.get("systemInstruction"),
+            Some(&json!({"parts": [{"text": "system rule"}]}))
+        );
+    }
+
+    /// 同一 user turn 内 tool_result + text 之后又有 tool_result，
+    /// 累积器合并但保留原顺序（user turn 不重排）。
+    #[test]
+    fn user_turn_preserves_tool_result_and_text_order() {
+        let body = json!({
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "c1", "content": "ok"}
+                ]},
+                {"role": "user", "content": "continue"},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "c2", "content": "ok2"}
+                ]}
+            ]
+        });
+        let mut params = StreamParams::default();
+        let out = build_request("m", &body, false, &mut params).unwrap();
+        let contents = out.get("contents").unwrap().as_array().unwrap();
+        // 三个 user turn 合并为一个
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0]["role"], "user");
+        let parts = contents[0].get("parts").unwrap().as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        // 顺序：tool_result(c1) → text("continue") → tool_result(c2)
+        assert!(parts[0].get("functionResponse").is_some());
+        assert_eq!(parts[0]["functionResponse"]["id"], "c1");
+        assert_eq!(parts[1].get("text").unwrap(), "continue");
+        assert!(parts[2].get("functionResponse").is_some());
+        assert_eq!(parts[2]["functionResponse"]["id"], "c2");
     }
 }
