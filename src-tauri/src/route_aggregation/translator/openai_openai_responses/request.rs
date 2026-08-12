@@ -5,9 +5,15 @@
 //! - ecc9aa7 - fix(openai): preserve assistant content when converting Responses
 //!             tool-call turns
 //! - 7c61e98  - perf(translator): optimize array allocation
+//! - 2e91e99  - fix(responses): translate `text.format` into Gemini structured
+//!             output settings
+//! - e47ffda  - feat(translator): normalize and extract OpenAI file content
+//!             with MIME type (input_file → inline_data)
 //! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/934da2379d6272a704953a02322b666b2a2efa3e
 //!          https://github.com/router-for-me/CLIProxyAPI/commit/ecc9aa72b32f34b680d03b0724b531a21ae74472
 //!          https://github.com/router-for-me/CLIProxyAPI/commit/7c61e982e490f028d295d69e22e372b29cd2db8c
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/2e91e99e0339f1f2592cb4fa36b1f71ca89bf8dd
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/e47ffda75b6d55ce88462ca6e76f8ffed1c0e88a
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/openai/openai/responses/`。
@@ -26,6 +32,8 @@
 
 use serde_json::{Map, Value};
 
+use super::super::common::file_data::normalize_openai_file_data;
+use super::super::common::response_format::apply_structured_output_to_gemini;
 use super::super::common::tool_name;
 use super::super::params::StreamParams;
 use super::super::translatable::TranslateError;
@@ -121,6 +129,10 @@ pub fn build_request(
             gen_config.insert("thinkingConfig".into(), Value::Object(tc));
         }
     }
+
+    // 7. text.format → Gemini structured output settings
+    // (CLIProxyAPI 2e91e99: OpenAI Responses `text.format` 字段映射)
+    apply_structured_output_to_gemini(&mut gen_config, src.get("text").and_then(|v| v.get("format")));
 
     if !gen_config.is_empty() {
         out.insert("generationConfig".into(), Value::Object(gen_config));
@@ -431,6 +443,23 @@ fn build_content_part(
                 )])));
             }
             None
+        }
+        "input_file" => {
+            // CLIProxyAPI e47ffda: OpenAI Responses `input_file` 内容规范化。
+            let file = obj.get("file")?;
+            let filename = file.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+            let file_data = file.get("file_data").and_then(|v| v.as_str()).unwrap_or("");
+            let (mime, data, ok) = normalize_openai_file_data(filename, "", file_data);
+            if !ok {
+                return None;
+            }
+            let mut inline = Map::new();
+            inline.insert("mime_type".into(), Value::String(mime));
+            inline.insert("data".into(), Value::String(data));
+            Some(Value::Object(Map::from_iter([(
+                "inline_data".into(),
+                Value::Object(inline),
+            )])))
         }
         "function_call" => {
             // 出现在 message content 数组里的 function_call item
@@ -844,6 +873,122 @@ mod tests {
         assert_eq!(n1, "search_web");
         assert_ne!(n1, n2);
         assert_eq!(params.sanitized_name_map.len(), 2);
+    }
+
+    // ====== CLIProxyAPI 2e91e99 (text.format structured output) ======
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_PreservesJSONSchemaTextFormat`。
+    /// `text.format = {type: "json_schema", ..., schema: {...}}` 写到
+    /// `generationConfig.responseMimeType` + `responseJsonSchema`。
+    #[test]
+    fn text_format_json_schema_maps_to_gemini_response_json_schema() {
+        let body = json!({
+            "model": "m",
+            "input": "x",
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "answer",
+                    "description": "Structured answer",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {"ok": {"type": "boolean"}},
+                        "required": ["ok"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        });
+        let out = translate("m", &body).unwrap();
+        assert_eq!(
+            out["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        let schema = &out["generationConfig"]["responseJsonSchema"];
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["ok"]["type"], "boolean");
+        assert_eq!(schema["required"][0], "ok");
+        assert_eq!(schema["additionalProperties"], false);
+    }
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_PreservesJSONObjectTextFormat`。
+    /// `text.format = {type: "json_object"}` 只写 `responseMimeType`。
+    #[test]
+    fn text_format_json_object_only_sets_mime_type() {
+        let body = json!({
+            "model": "m",
+            "input": "x",
+            "text": {"format": {"type": "json_object"}}
+        });
+        let out = translate("m", &body).unwrap();
+        assert_eq!(
+            out["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert!(out["generationConfig"].get("responseJsonSchema").is_none());
+    }
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToOpenAIChatCompletions_OmitsResponseFormatWithoutTextFormat`。
+    /// 没有 `text.format` 时不动 `generationConfig`。
+    #[test]
+    fn text_format_absent_is_no_op() {
+        let body = json!({"model": "m", "input": "x"});
+        let out = translate("m", &body).unwrap();
+        if let Some(gc) = out.get("generationConfig") {
+            assert!(gc.get("responseMimeType").is_none());
+            assert!(gc.get("responseJsonSchema").is_none());
+        }
+    }
+
+    // ====== CLIProxyAPI e47ffda (input_file normalization) ======
+
+    /// 对齐 `TestConvertOpenAIResponsesRequestToGeminiNormalizesFileDataURL`。
+    /// OpenAI Responses `input_file` with data URL → Gemini inline_data。
+    #[test]
+    fn input_file_data_url_maps_to_inline_data() {
+        let body = json!({
+            "model": "m",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Summarize"},
+                    {"type": "input_file", "file": {
+                        "filename": "test.pdf",
+                        "file_data": "data:application/pdf;base64,JVBERi0"
+                    }}
+                ]
+            }]
+        });
+        let out = translate("m", &body).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts[0]["text"], "Summarize");
+        assert_eq!(parts[1]["inline_data"]["mime_type"], "application/pdf");
+        assert_eq!(parts[1]["inline_data"]["data"], "JVBERi0");
+    }
+
+    /// raw base64 + filename 扩展名 → Gemini inline_data.
+    #[test]
+    fn input_file_raw_base64_uses_filename_extension() {
+        let body = json!({
+            "model": "m",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_file", "file": {
+                        "filename": "doc.pdf",
+                        "file_data": "JVBERi0"
+                    }}
+                ]
+            }]
+        });
+        let out = translate("m", &body).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["inline_data"]["mime_type"], "application/pdf");
+        assert_eq!(parts[0]["inline_data"]["data"], "JVBERi0");
     }
 
     // ====== CLIProxyAPI 934da23 (custom_tool_call_output) ======

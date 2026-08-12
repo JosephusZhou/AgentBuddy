@@ -3,10 +3,15 @@
 //! CLIProxyAPI aligned:
 //! - c13dbcc2 - feat(translator): add test and logic to ensure object schemas
 //!             include properties field
-//! - 7c61e98  - perf(translator): optimize array allocation (Vec::with_capacity
-//!             mirrors Go's NewRawArrayItems)
+//! - 7c61e98  - perf(translator): optimize array allocation
+//! - 20f83ca  - feat(translator): map OpenAI response_format to Gemini
+//!             structured output settings
+//! - e47ffda  - feat(translator): normalize and extract OpenAI file content
+//!             with MIME type (file block → inline_data)
 //! Sources: https://github.com/router-for-me/CLIProxyAPI/commit/c13dbcc24e1373e353338d90bdb38b8e4722e22b
 //!          https://github.com/router-for-me/CLIProxyAPI/commit/7c61e982e490f028d295d69e22e372b29cd2db8c
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/20f83cae910b98bc39c45193f3e05072afea81f8
+//!          https://github.com/router-for-me/CLIProxyAPI/commit/e47ffda75b6d55ce88462ca6e76f8ffed1c0e88a
 //! Last verified: 2026-08-12
 //!
 //! 设计参考 CLIProxyAPI `internal/translator/openai/gemini/openai_gemini_request.go`。
@@ -22,6 +27,7 @@
 //! | `content[].type: text`               | `parts[].text`                        |
 //! | `content[].type: image_url`          | `parts[].inline_data` (data URL / url)|
 //! | `content[].type: input_audio`        | `parts[].inline_data` (audio/*)       |
+//! | `content[].type: file`              | `parts[].inline_data` (normalized MIME) |
 //! | `tool_calls[].function`              | `parts[].functionCall`                |
 //! | `tools[].function.parameters`        | `functionDeclarations[].parametersJsonSchema` |
 //! | `tool_choice: auto/none/required`    | `toolConfig.functionCallingConfig.mode` |
@@ -33,6 +39,8 @@
 
 use serde_json::{Map, Value};
 
+use super::super::common::file_data::normalize_openai_file_data;
+use super::super::common::response_format::apply_structured_output_to_gemini;
 use super::super::common::tool_name;
 use super::super::params::StreamParams;
 use super::super::translatable::TranslateError;
@@ -120,17 +128,9 @@ pub fn build_request(
             gen_config.insert("stopSequences".into(), Value::Array(arr));
         }
     }
-    // response_format 透传为 generationConfig.responseSchema
-    if let Some(v) = src.get("response_format") {
-        if let Some(obj) = v.as_object() {
-            if obj.get("type").and_then(|t| t.as_str()) == Some("json_schema") {
-                if let Some(schema) = obj.get("json_schema").and_then(|s| s.get("schema")) {
-                    gen_config.insert("responseSchema".into(), schema.clone());
-                    gen_config.insert("responseMimeType".into(), Value::String("application/json".into()));
-                }
-            }
-        }
-    }
+    // response_format → Gemini structured output settings
+    // (CLIProxyAPI 20f83ca: json_object / json_schema 字段映射)
+    apply_structured_output_to_gemini(&mut gen_config, src.get("response_format"));
 
     if !gen_config.is_empty() {
         out.insert("generationConfig".into(), Value::Object(gen_config));
@@ -367,6 +367,23 @@ fn build_text_block_part(block: &Value) -> Option<Value> {
                 Value::Object(inline),
             )])))
         }
+        "file" => {
+            // CLIProxyAPI e47ffda: OpenAI Chat `type: file` 输入规范化。
+            let file = obj.get("file")?;
+            let filename = file.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+            let file_data = file.get("file_data").and_then(|v| v.as_str()).unwrap_or("");
+            let (mime, data, ok) = normalize_openai_file_data(filename, "", file_data);
+            if !ok {
+                return None;
+            }
+            let mut inline = Map::new();
+            inline.insert("mime_type".into(), Value::String(mime));
+            inline.insert("data".into(), Value::String(data));
+            Some(Value::Object(Map::from_iter([(
+                "inline_data".into(),
+                Value::Object(inline),
+            )])))
+        }
         _ => None,
     }
 }
@@ -589,6 +606,71 @@ fn translate(body: &Value) -> Result<Value, TranslateError> {
         );
     }
 
+    /// 对齐 CLIProxyAPI `e47ffda`: OpenAI Chat `type: file` with data URL → Gemini inline_data.
+    #[test]
+    fn user_file_data_url_maps_to_inline_data() {
+        let body = json!({
+            "model": "m",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Read this"},
+                    {"type": "file", "file": {
+                        "filename": "test.pdf",
+                        "file_data": "data:application/pdf;base64,JVBERi0"
+                    }}
+                ]
+            }]
+        });
+        let out = translate(&body).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts[0]["text"], "Read this");
+        assert_eq!(parts[1]["inline_data"]["mime_type"], "application/pdf");
+        assert_eq!(parts[1]["inline_data"]["data"], "JVBERi0");
+    }
+
+    /// raw base64 + 已知扩展名 → Gemini inline_data.
+    #[test]
+    fn user_file_raw_base64_uses_filename_extension() {
+        let body = json!({
+            "model": "m",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "file", "file": {
+                        "filename": "doc.pdf",
+                        "file_data": "JVBERi0"
+                    }}
+                ]
+            }]
+        });
+        let out = translate(&body).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["inline_data"]["mime_type"], "application/pdf");
+        assert_eq!(parts[0]["inline_data"]["data"], "JVBERi0");
+    }
+
+    /// 无法推断 MIME 的 file 内容被静默跳过（不报错）。
+    #[test]
+    fn user_file_with_unknown_mime_is_skipped() {
+        let body = json!({
+            "model": "m",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hi"},
+                    {"type": "file", "file": {"filename": "mystery", "file_data": "JVBERi0"}}
+                ]
+            }]
+        });
+        let out = translate(&body).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        // file part 被 drop（无 mime），text 保留
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["text"], "Hi");
+    }
+
     #[test]
     fn tool_role_becomes_function_response() {
         let body = json!({
@@ -725,14 +807,41 @@ fn translate(body: &Value) -> Result<Value, TranslateError> {
             }
         });
         let out = translate(&body).unwrap();
+        // CLIProxyAPI 20f83ca: 写到 `responseJsonSchema`（不是 `responseSchema`）。
         assert_eq!(
-            out["generationConfig"]["responseSchema"],
+            out["generationConfig"]["responseJsonSchema"],
             json!({"type": "object", "properties": {"x": {"type": "number"}}})
         );
         assert_eq!(
             out["generationConfig"]["responseMimeType"],
             "application/json"
         );
+    }
+
+    #[test]
+    fn response_format_json_object_only_sets_mime_type() {
+        let body = json!({
+            "model": "m",
+            "messages": [],
+            "response_format": {"type": "json_object"}
+        });
+        let out = translate(&body).unwrap();
+        assert_eq!(
+            out["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert!(out["generationConfig"].get("responseJsonSchema").is_none());
+    }
+
+    #[test]
+    fn response_format_absent_is_no_op() {
+        let body = json!({"model": "m", "messages": []});
+        let out = translate(&body).unwrap();
+        // generationConfig 可能不存在；如果存在则不应有 structured output 字段
+        if let Some(gc) = out.get("generationConfig") {
+            assert!(gc.get("responseMimeType").is_none());
+            assert!(gc.get("responseJsonSchema").is_none());
+        }
     }
 
     #[test]
