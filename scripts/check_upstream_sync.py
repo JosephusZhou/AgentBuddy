@@ -7,8 +7,11 @@ CLIProxyAPI aligned: 每个 AgentBuddy 翻译器文件头注释对应的 commit 
 - 距上次同步 >  14 天：error（CI 报警）
 - 上游无新 commit：silent
 
+每个 pair 内部追踪两个方向（请求方向 = source_dir，响应方向 = target_dir），
+任一方向漂移都会报警。整体 status = max(source, target) 严重度。
+
 数据源：
-- docs/cli_proxy_api_sync_state.json — AgentBuddy 已知的每对 pair 上游 commit
+- docs/cli_proxy_api_sync_state.json — AgentBuddy 已知的每对 pair 两方向上游 commit
 - GitHub API: https://api.github.com/repos/router-for-me/CLIProxyAPI/commits
 
 CI 集成：
@@ -16,7 +19,7 @@ CI 集成：
 - 每周一 9:00 UTC 跑一次 + 手动 `workflow_dispatch`
 
 输出：
-- 打印每个 pair 的同步状态
+- 打印每个 pair 两方向同步状态
 - 退出码：0 = 全部在 SLA 内；1 = 有超期未同步
 """
 
@@ -50,10 +53,11 @@ SOURCE_FORMAT_LABELS = {
 
 
 @dataclass
-class PairStatus:
-    pair: str
-    source: str
-    target: str
+class DirectionStatus:
+    """一对 translator 的单个方向（请求 source_dir 或响应 target_dir）状态。"""
+    direction: str  # "source" | "target"
+    label: str  # "请求方向" | "响应方向"
+    cli_proxy_api_dir: str  # CLIProxyAPI 仓库子目录路径
     last_verified_short_sha: str
     last_verified_full_sha: str
     last_verified_date: str
@@ -61,8 +65,18 @@ class PairStatus:
     upstream_full_sha: str
     upstream_date: str
     drift_days: int
-    status: str  # "ok" | "warning" | "error" | "ahead"
+    status: str  # "ok" | "warning" | "error"
     note: str = ""
+
+
+@dataclass
+class PairStatus:
+    pair: str
+    source: str
+    target: str
+    source_status: DirectionStatus
+    target_status: DirectionStatus
+    overall_status: str  # "ok" | "warning" | "error" = max(severity)
 
 
 def fetch_upstream_commits_for_dir(github_token: str | None, path: str, per_page: int = 20) -> list[dict[str, Any]]:
@@ -86,25 +100,22 @@ def days_since(iso_date: str) -> int:
     return (datetime.now(timezone.utc) - dt).days
 
 
-def check_one_pair(
-    pair: dict[str, Any],
+def check_one_direction(
+    direction: str,
+    label: str,
+    cli_proxy_api_dir: str,
+    last_verified_full: str,
+    last_verified_short: str,
+    last_verified_date: str,
     github_token: str | None,
-) -> PairStatus:
-    source = pair["source"]
-    target = pair["target"]
-    source_dir = pair["source_dir"]
-    target_dir = pair["target_dir"]
-    last_verified_full = pair["last_verified_full_sha"]
-    last_verified_short = pair["last_verified_short_sha"]
-    last_verified_date = pair["last_verified_date"]
-
-    # 上游目录的最近 commit
-    commits = fetch_upstream_commits_for_dir(github_token, target_dir)
+) -> DirectionStatus:
+    """检查单个方向（请求或响应）漂移。"""
+    commits = fetch_upstream_commits_for_dir(github_token, cli_proxy_api_dir)
     if not commits:
-        return PairStatus(
-            pair=f"{SOURCE_FORMAT_LABELS.get(source, source)} → {SOURCE_FORMAT_LABELS.get(target, target)}",
-            source=source,
-            target=target,
+        return DirectionStatus(
+            direction=direction,
+            label=label,
+            cli_proxy_api_dir=cli_proxy_api_dir,
             last_verified_short_sha=last_verified_short,
             last_verified_full_sha=last_verified_full,
             last_verified_date=last_verified_date,
@@ -135,10 +146,10 @@ def check_one_pair(
             status = "error"
             note = f"上游 {drift}d 未同步（超 SLA {SLA_DAYS}d）"
 
-    return PairStatus(
-        pair=f"{SOURCE_FORMAT_LABELS.get(source, source)} → {SOURCE_FORMAT_LABELS.get(target, target)}",
-        source=source,
-        target=target,
+    return DirectionStatus(
+        direction=direction,
+        label=label,
+        cli_proxy_api_dir=cli_proxy_api_dir,
         last_verified_short_sha=last_verified_short,
         last_verified_full_sha=last_verified_full,
         last_verified_date=last_verified_date,
@@ -148,6 +159,52 @@ def check_one_pair(
         drift_days=drift,
         status=status,
         note=note,
+    )
+
+
+def check_one_pair(
+    pair: dict[str, Any],
+    github_token: str | None,
+) -> PairStatus:
+    source = pair["source"]
+    target = pair["target"]
+    source_dir = pair["source_dir"]
+    target_dir = pair["target_dir"]
+    source_block = pair.get("source_state", {})
+    target_block = pair.get("target_state", {})
+
+    # 请求方向（source_dir = 客户端协议 → 下游协议 的代码）
+    source_status = check_one_direction(
+        direction="source",
+        label="请求方向",
+        cli_proxy_api_dir=source_dir,
+        last_verified_full=source_block.get("last_verified_full_sha", pair["last_verified_full_sha"]),
+        last_verified_short=source_block.get("last_verified_short_sha", pair["last_verified_short_sha"]),
+        last_verified_date=source_block.get("last_verified_date", pair["last_verified_date"]),
+        github_token=github_token,
+    )
+    # 响应方向（target_dir = 下游协议 → 客户端协议 的代码）
+    target_status = check_one_direction(
+        direction="target",
+        label="响应方向",
+        cli_proxy_api_dir=target_dir,
+        last_verified_full=target_block.get("last_verified_full_sha", pair["last_verified_full_sha"]),
+        last_verified_short=target_block.get("last_verified_short_sha", pair["last_verified_short_sha"]),
+        last_verified_date=target_block.get("last_verified_date", pair["last_verified_date"]),
+        github_token=github_token,
+    )
+
+    # 整体严重度 = 两个方向中较严的那个
+    severity = {"ok": 0, "warning": 1, "error": 2}
+    overall = max(source_status.status, target_status.status, key=lambda s: severity.get(s, 0))
+
+    return PairStatus(
+        pair=f"{SOURCE_FORMAT_LABELS.get(source, source)} → {SOURCE_FORMAT_LABELS.get(target, target)}",
+        source=source,
+        target=target,
+        source_status=source_status,
+        target_status=target_status,
+        overall_status=overall,
     )
 
 
@@ -174,39 +231,84 @@ def main() -> int:
             continue
         statuses.append(status)
 
-    # 输出表格
+    # 输出表格（每个 pair 两方向各一行）
     print(f"\n=== CLIProxyAPI 上游同步检查 ({len(statuses)} pairs) ===\n")
     for s in statuses:
-        icon = {"ok": "✓", "warning": "⚠", "error": "✗", "ahead": "?"}.get(s.status, "?")
-        print(
-            f"{icon} {s.pair}\n"
-            f"    AgentBuddy: {s.last_verified_short_sha} ({s.last_verified_date})\n"
-            f"    Upstream  : {s.upstream_short_sha} ({s.upstream_date}, {s.drift_days}d 前)\n"
-            f"    Status    : {s.status} — {s.note}\n"
-        )
+        overall_icon = {"ok": "✓", "warning": "⚠", "error": "✗"}.get(s.overall_status, "?")
+        print(f"{overall_icon} {s.pair} (整体: {s.overall_status})")
+        for d in (s.source_status, s.target_status):
+            icon = {"ok": "✓", "warning": "⚠", "error": "✗"}.get(d.status, "?")
+            print(
+                f"    {icon} [{d.label}] {d.cli_proxy_api_dir}\n"
+                f"        AgentBuddy: {d.last_verified_short_sha} ({d.last_verified_date})\n"
+                f"        Upstream  : {d.upstream_short_sha} ({d.upstream_date}, {d.drift_days}d 前)\n"
+                f"        Status    : {d.status} — {d.note}"
+            )
+        print()
 
     # 输出新 sync state（供 review 后落地）
     new_state = {
         "last_checked_at": datetime.now(timezone.utc).isoformat(),
         "sla_days": SLA_DAYS,
+        "upstream_repo": CLIPROXYAPI_REPO,
         "pairs": [
             {
                 **pair,
-                "upstream_short_sha": s.upstream_short_sha,
-                "upstream_full_sha": s.upstream_full_sha,
-                "upstream_date": s.upstream_date,
-                "drift_days": s.drift_days,
-                "status": s.status,
+                "source_state": {
+                    "last_verified_short_sha": s.source_status.upstream_short_sha,
+                    "last_verified_full_sha": s.source_status.upstream_full_sha,
+                    "last_verified_date": s.source_status.upstream_date,
+                    "drift_days": s.source_status.drift_days,
+                    "status": s.source_status.status,
+                },
+                "target_state": {
+                    "last_verified_short_sha": s.target_status.upstream_short_sha,
+                    "last_verified_full_sha": s.target_status.upstream_full_sha,
+                    "last_verified_date": s.target_status.upstream_date,
+                    "drift_days": s.target_status.drift_days,
+                    "status": s.target_status.status,
+                },
+                "overall_status": s.overall_status,
+                # 顶层 last_verified_* 保留 = max(source, target).last_verified
+                # （兼容旧代码 / 单字段快速判断）
+                "last_verified_short_sha": max(
+                    s.source_status.upstream_short_sha,
+                    s.target_status.upstream_short_sha,
+                    key=lambda x: 0 if x == "?" else 1,  # "?" 排后
+                ) if s.source_status.upstream_short_sha != "?" or s.target_status.upstream_short_sha != "?"
+                else "?",
             }
             for pair, s in zip(pairs, statuses)
         ],
     }
+    # 简化版顶层 last_verified：取 source/target 中更新日期更晚的那个
+    for pair_new, s in zip(new_state["pairs"], statuses):
+        src_date = s.source_status.upstream_date
+        tgt_date = s.target_status.upstream_date
+        if src_date and tgt_date:
+            if src_date >= tgt_date:
+                pair_new["last_verified_short_sha"] = s.source_status.upstream_short_sha
+                pair_new["last_verified_full_sha"] = s.source_status.upstream_full_sha
+                pair_new["last_verified_date"] = s.source_status.upstream_date
+            else:
+                pair_new["last_verified_short_sha"] = s.target_status.upstream_short_sha
+                pair_new["last_verified_full_sha"] = s.target_status.upstream_full_sha
+                pair_new["last_verified_date"] = s.target_status.upstream_date
+        elif src_date:
+            pair_new["last_verified_short_sha"] = s.source_status.upstream_short_sha
+            pair_new["last_verified_full_sha"] = s.source_status.upstream_full_sha
+            pair_new["last_verified_date"] = src_date
+        else:
+            pair_new["last_verified_short_sha"] = s.target_status.upstream_short_sha
+            pair_new["last_verified_full_sha"] = s.target_status.upstream_full_sha
+            pair_new["last_verified_date"] = tgt_date
+
     new_path = SYNC_STATE_PATH.with_suffix(".json.new")
     new_path.write_text(json.dumps(new_state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"\n新 sync state 已写到 {new_path}")
     print("人工 review 后 `mv` 覆盖原文件")
 
-    error_count = sum(1 for s in statuses if s.status == "error")
+    error_count = sum(1 for s in statuses if s.overall_status == "error")
     if error_count > 0:
         print(f"\n[FAIL] {error_count} 个 pair 超 SLA {SLA_DAYS}d 未同步", file=sys.stderr)
         return 1
