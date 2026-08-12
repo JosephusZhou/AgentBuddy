@@ -34,15 +34,21 @@ impl ProviderRouter {
         let mut providers: Vec<RouteProvider> = Vec::new();
 
         for row in &provider_rows {
-            // Filter by provider type compatibility for this API format
+            // Filter by provider type compatibility for this API format.
+            // Both groups accept google-generative-ai as backend（ClaudeCode
+            // 经 claude_gemini 翻译器，Codex 经 openai_openai_responses /
+            // openai_gemini 翻译器；OpenAI Chat 客户端到 Google 时优先走
+            // `/v1beta/openai/v1/...` passthrough）。
             let matches = match group {
                 RouteGroup::ClaudeCode => {
                     row.provider_type == crate::ai_provider::TYPE_ANTHROPIC
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
+                        || row.provider_type == crate::ai_provider::TYPE_GOOGLE_GENERATIVE_AI
                 }
                 RouteGroup::Codex => {
                     row.provider_type == crate::ai_provider::TYPE_OPENAI
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
+                        || row.provider_type == crate::ai_provider::TYPE_GOOGLE_GENERATIVE_AI
                 }
             };
             if !matches {

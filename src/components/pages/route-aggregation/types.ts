@@ -60,16 +60,19 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
 /** 是否可以参与路由聚合转发。
  *
  * 与 Rust 端 `provider_router::refresh_pool` 的协议过滤保持一致：
- * 当前聚合代理只实现 Anthropic Messages 与 OpenAI Chat Completions/Responses
- * 两种协议转发，因此只有这三种类型能被勾选；其他类型（如 Google Generative
- * AI 的 generateContent 协议）协议不兼容，在前端禁用勾选并展示说明，避免
- * toggle 写入 DB 后下游 pool 永远不收录、UI 状态永远显示"已勾选"的错乱。 */
+ * 聚合代理当前实现 Anthropic Messages / OpenAI Chat Completions / OpenAI
+ * Responses 三种客户端协议，分别在 ClaudeCode / Codex group 下翻译到
+ * 任意 backend protocol（Anthropic / OpenAI / Google Generative AI / Universal）。
+ * 因此 backend 类型为这四种的供应商都能勾选；其他类型（如未来的 antigravity
+ * 协议 backend）在前端禁用勾选，避免 toggle 写入 DB 后下游 pool 永远不收录、
+ * UI 状态永远显示"已勾选"的错乱。 */
 export function isRouteableProviderType(
   providerType: ProviderType | string,
 ): boolean {
   return (
     providerType === "anthropic" ||
     providerType === "openai" ||
+    providerType === "google-generative-ai" ||
     providerType === "universal"
   );
 }
