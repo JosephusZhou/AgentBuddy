@@ -4438,7 +4438,7 @@ a[href]:focus-visible {
 }
 
 /* ===== OpenCode config ===== */
-/* 弹窗骨架：限制 90vh，body 内部滚动（提供商 / 模型等长表单共用） */
+/* 弹窗骨架：限制 90vh，body 内部滚动（供应商 / 模型等长表单共用） */
 .oc-modal {
   max-height: 90vh;
   display: flex;

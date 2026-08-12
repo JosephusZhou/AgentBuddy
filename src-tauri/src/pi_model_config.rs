@@ -304,10 +304,10 @@ pub fn upsert_provider(
 ) -> Result<AgentActionResult, String> {
     let id = payload.id.trim().to_string();
     if id.is_empty() {
-        return Err("提供商 ID 不能为空".into());
+        return Err("供应商 ID 不能为空".into());
     }
     if id.contains('/') || id.contains(' ') {
-        return Err("提供商 ID 不能包含空格或 /".into());
+        return Err("供应商 ID 不能包含空格或 /".into());
     }
 
     let paths = family_paths(agent)?;
@@ -323,7 +323,7 @@ pub fn upsert_provider(
         let map = providers_map_mut(&mut root)?;
         if let Some(old) = map.remove(&prev) {
             if map.contains_key(&id) {
-                return Err(format!("提供商 `{id}` 已存在，无法重命名"));
+                return Err(format!("供应商 `{id}` 已存在，无法重命名"));
             }
             map.insert(id.clone(), old);
         }
@@ -368,7 +368,7 @@ pub fn upsert_provider(
     write_models_root(&paths, &root)?;
     Ok(AgentActionResult {
         ok: true,
-        message: format!("提供商 `{id}` 已保存"),
+        message: format!("供应商 `{id}` 已保存"),
         view: Some(get_config(agent)?),
     })
 }
@@ -380,7 +380,7 @@ pub fn delete_provider(
 ) -> Result<AgentActionResult, String> {
     let id = provider_id.trim().to_string();
     if id.is_empty() {
-        return Err("提供商 ID 不能为空".into());
+        return Err("供应商 ID 不能为空".into());
     }
     let paths = family_paths(agent)?;
     let (mut root, exists) = load_models_root(&paths)?;
@@ -394,7 +394,7 @@ pub fn delete_provider(
         .and_then(|m| m.remove(&id))
         .is_some();
     if !removed {
-        return Err(format!("未找到提供商 `{id}`"));
+        return Err(format!("未找到供应商 `{id}`"));
     }
     write_models_root(&paths, &root)?;
     if delete_auth {
@@ -404,7 +404,7 @@ pub fn delete_provider(
     }
     Ok(AgentActionResult {
         ok: true,
-        message: format!("已删除提供商 `{id}`"),
+        message: format!("已删除供应商 `{id}`"),
         view: Some(get_config(agent)?),
     })
 }
@@ -421,7 +421,7 @@ pub fn upsert_model(
     let pid = payload.provider_id.trim().to_string();
     let mid = payload.id.trim().to_string();
     if pid.is_empty() || mid.is_empty() {
-        return Err("提供商 ID 与模型 ID 均不能为空".into());
+        return Err("供应商 ID 与模型 ID 均不能为空".into());
     }
 
     let paths = family_paths(agent)?;

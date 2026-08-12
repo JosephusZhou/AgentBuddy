@@ -1,4 +1,4 @@
-//! OpenCode 全局配置：提供商 / 模型可视化读写（通用模型配置框架的 OpenCode 后端）。
+//! OpenCode 全局配置：供应商 / 模型可视化读写（通用模型配置框架的 OpenCode 后端）。
 //!
 //! - 配置：`~/.config/opencode/opencode.json(c)`（与 MCP 路径解析一致）
 //! - 密钥：`~/.local/share/opencode/auth.json`（`{ providerId: { type, key } }`）
@@ -735,10 +735,10 @@ fn ensure_options_mut(provider: &mut Map<String, Value>) -> &mut Map<String, Val
 pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResult, String> {
     let id = payload.id.trim().to_string();
     if id.is_empty() {
-        return Err("提供商 ID 不能为空".into());
+        return Err("供应商 ID 不能为空".into());
     }
     if id.contains('/') || id.contains(' ') {
-        return Err("提供商 ID 不能包含空格或 /".into());
+        return Err("供应商 ID 不能包含空格或 /".into());
     }
 
     let (path, _, mut root, _) = load_or_empty_config()?;
@@ -761,7 +761,7 @@ pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResu
         let map = provider_root.as_object_mut().unwrap();
         if let Some(old) = map.remove(&prev) {
             if map.contains_key(&id) {
-                return Err(format!("提供商 `{id}` 已存在，无法重命名"));
+                return Err(format!("供应商 `{id}` 已存在，无法重命名"));
             }
             map.insert(id.clone(), old);
         }
@@ -867,7 +867,7 @@ pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResu
     write_json_value(&path, &root)?;
     Ok(AgentActionResult {
         ok: true,
-        message: format!("提供商 `{id}` 已保存"),
+        message: format!("供应商 `{id}` 已保存"),
         view: Some(get_config()?),
     })
 }
@@ -875,7 +875,7 @@ pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResu
 pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<AgentActionResult, String> {
     let id = provider_id.trim().to_string();
     if id.is_empty() {
-        return Err("提供商 ID 不能为空".into());
+        return Err("供应商 ID 不能为空".into());
     }
     let (path, _, mut root, exists) = load_or_empty_config()?;
     if !exists {
@@ -888,7 +888,7 @@ pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<AgentAc
         .and_then(|m| m.remove(&id))
         .is_some();
     if !removed {
-        return Err(format!("未找到提供商 `{id}`"));
+        return Err(format!("未找到供应商 `{id}`"));
     }
     // Clean empty provider object? keep {}
     write_json_value(&path, &root)?;
@@ -899,7 +899,7 @@ pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<AgentAc
     }
     Ok(AgentActionResult {
         ok: true,
-        message: format!("已删除提供商 `{id}`"),
+        message: format!("已删除供应商 `{id}`"),
         view: Some(get_config()?),
     })
 }
@@ -920,7 +920,7 @@ pub fn upsert_model(payload: UpsertModelPayload) -> Result<AgentActionResult, St
     let pid = payload.provider_id.trim().to_string();
     let mid = payload.id.trim().to_string();
     if pid.is_empty() || mid.is_empty() {
-        return Err("提供商 ID 与模型 ID 均不能为空".into());
+        return Err("供应商 ID 与模型 ID 均不能为空".into());
     }
 
     let (path, _, mut root, _) = load_or_empty_config()?;

@@ -427,7 +427,7 @@ export default function RouteAggregation() {
         <div className="pref-section" style={{ marginBottom: 16 }}>
           <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Layers size={15} />
-            提供商配置
+            供应商配置
             <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}>
               {providers.length > 0 ? `${providers.length} 个` : ""}
             </span>

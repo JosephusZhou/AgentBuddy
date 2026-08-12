@@ -567,19 +567,19 @@ const AGENT_TABS: { id: ModelConfigAgentId; label: string; notInstalledHint: str
     id: "opencode",
     label: "OpenCode",
     notInstalledHint:
-      "请先安装 OpenCode CLI 或 App（例如 opencode 命令），安装后重新打开本页即可管理提供商与模型配置。",
+      "请先安装 OpenCode CLI 或 App（例如 opencode 命令），安装后重新打开本页即可管理供应商与模型配置。",
   },
   {
     id: "pi",
     label: "Pi",
     notInstalledHint:
-      "请先安装 Pi CLI（例如 npm install -g @earendil-works/pi-coding-agent，或 pi.dev/install.sh），安装后重新打开本页即可管理提供商与模型配置。",
+      "请先安装 Pi CLI（例如 npm install -g @earendil-works/pi-coding-agent，或 pi.dev/install.sh），安装后重新打开本页即可管理供应商与模型配置。",
   },
   {
     id: "oh-my-pi",
     label: "Oh-My-Pi",
     notInstalledHint:
-      "请先安装 Oh-My-Pi（例如 brew install can1357/tap/omp，或 omp.sh/install），安装后重新打开本页即可管理提供商与模型配置。",
+      "请先安装 Oh-My-Pi（例如 brew install can1357/tap/omp，或 omp.sh/install），安装后重新打开本页即可管理供应商与模型配置。",
   },
 ];
 
@@ -713,7 +713,7 @@ export default function ModelConfig() {
   const [draftSmallModel, setDraftSmallModel] = useState("");
   const [modelSearch, setModelSearch] = useState("");
 
-  // 模型弹窗内的「从供应商模型列表选择」：拉取当前提供商端点的模型列表
+  // 模型弹窗内的「从供应商模型列表选择」：拉取当前供应商端点的模型列表
   const [providerPickOpen, setProviderPickOpen] = useState(false);
   const [providerPickQuery, setProviderPickQuery] = useState("");
   const [providerPickModels, setProviderPickModels] = useState<string[]>([]);
@@ -1001,7 +1001,7 @@ export default function ModelConfig() {
     });
   };
 
-  /** 点击「从供应商模型列表选择」：从当前提供商的 Base URL 拉取模型列表。 */
+  /** 点击「从供应商模型列表选择」：从当前供应商的 Base URL 拉取模型列表。 */
   const loadProviderModels = async (providerId: string) => {
     setProviderPickOpen(true);
     setProviderPickMsg("");
@@ -1009,7 +1009,7 @@ export default function ModelConfig() {
     const baseUrl = (p?.baseUrl ?? "").trim();
     if (!baseUrl) {
       setProviderPickModels([]);
-      setProviderPickMsg("该提供商未配置 Base URL，无法拉取模型列表，请手动填写模型 ID");
+      setProviderPickMsg("该供应商未配置 Base URL，无法拉取模型列表，请手动填写模型 ID");
       return;
     }
     setProviderPickLoading(true);
@@ -1054,7 +1054,7 @@ export default function ModelConfig() {
     if (!providerForm) return;
     const id = providerForm.id.trim();
     if (!id) {
-      setFormError("请填写提供商 ID");
+      setFormError("请填写供应商 ID");
       return;
     }
     setBusy(true);
@@ -1086,7 +1086,7 @@ export default function ModelConfig() {
       if (res.view) applyView(res.view);
       else await loadConfig(true);
       setProviderForm(null);
-      setStatusMsg(res.message || "提供商已保存");
+      setStatusMsg(res.message || "供应商已保存");
     } catch (e) {
       setFormError(String(e));
     } finally {
@@ -1102,7 +1102,7 @@ export default function ModelConfig() {
       return;
     }
     if (!modelForm.providerId.trim()) {
-      setFormError("缺少提供商 ID");
+      setFormError("缺少供应商 ID");
       return;
     }
 
@@ -1170,7 +1170,7 @@ export default function ModelConfig() {
       if (res.view) applyView(res.view);
       else await loadConfig(true);
       setDeleteProvider(null);
-      setStatusMsg(res.message || "提供商已删除");
+      setStatusMsg(res.message || "供应商已删除");
     } catch (e) {
       setStatusMsg(`删除失败: ${e}`);
     } finally {
@@ -1305,7 +1305,7 @@ export default function ModelConfig() {
               type="button"
               className="action-btn"
               data-tooltip={
-                view && !view.installed ? `请先安装 ${agentLabel(agent)}` : "添加提供商"
+                view && !view.installed ? `请先安装 ${agentLabel(agent)}` : "添加供应商"
               }
               onClick={openAddProvider}
               disabled={busy || !!(view && !view.installed)}
@@ -1364,7 +1364,7 @@ export default function ModelConfig() {
               {catalogLoading
                 ? "正在加载 Models.dev 目录…"
                 : catalog
-                  ? `Models.dev 已加载：${catalog.providers.length} 个提供商${
+                  ? `Models.dev 已加载：${catalog.providers.length} 个供应商${
                       catalog.fromCache ? "（缓存）" : ""
                     }`
                   : catalogError
@@ -1405,15 +1405,15 @@ export default function ModelConfig() {
         ) : !view || view.providers.length === 0 ? (
           <div className="empty-state">
             <IconEmpty />
-            <div className="empty-state-text">暂无自定义提供商</div>
+            <div className="empty-state-text">暂无自定义供应商</div>
             <button type="button" className="btn btn-primary" onClick={openAddProvider}>
-              添加提供商
+              添加供应商
             </button>
           </div>
         ) : (
           <>
             <div className="mcp-summary">
-              共 <strong>{view.providers.length}</strong> 个提供商 ·{" "}
+              共 <strong>{view.providers.length}</strong> 个供应商 ·{" "}
               <strong>{configuredModelOptions.length}</strong> 个模型
             </div>
             <div className="oc-provider-list">
@@ -1505,7 +1505,7 @@ export default function ModelConfig() {
         <div className="modal modal-lg oc-modal">
           <div className="modal-header">
             <h2 className="modal-title">
-              {providerForm?.isNew ? "添加提供商" : "编辑提供商"}
+              {providerForm?.isNew ? "添加供应商" : "编辑供应商"}
             </h2>
             <button
               type="button"
@@ -1540,7 +1540,7 @@ export default function ModelConfig() {
                 )}
                 <div className="form-group">
                   <label className="form-label" htmlFor="oc-pid">
-                    提供商 ID
+                    供应商 ID
                   </label>
                   <input
                     ref={providerIdRef}
@@ -1894,7 +1894,7 @@ export default function ModelConfig() {
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">提供商</label>
+                  <label className="form-label">供应商</label>
                   <code className="oc-defaults-value">{modelForm.providerId}</code>
                 </div>
                 <div className="form-group">
@@ -2357,7 +2357,7 @@ export default function ModelConfig() {
       >
         <div className="modal">
           <div className="modal-header">
-            <h2 className="modal-title">删除提供商</h2>
+            <h2 className="modal-title">删除供应商</h2>
             <button
               type="button"
               className="modal-close"
@@ -2369,7 +2369,7 @@ export default function ModelConfig() {
           </div>
           <div className="modal-body">
             <p>
-              确定删除提供商 <strong>{deleteProvider?.id}</strong> 及其下全部模型？
+              确定删除供应商 <strong>{deleteProvider?.id}</strong> 及其下全部模型？
             </p>
             <label className="ui-check" style={{ marginTop: 12 }}>
               <input
