@@ -748,14 +748,16 @@ async fn get_claude_env_mcp_status() -> Result<claude_env::ClaudeEnvMcpStatusRes
         .map_err(|e| format!("读取 MCP 同步状态任务失败: {}", e))?
 }
 
+/// 远端拉取模型列表。仅服务于"临时配置"路径：Claude 环境 / Codex 环境 / 模型配置页
+/// （OpenCode / Pi / Oh-My-Pi）在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
+/// **不**适用于"已配置 AI 供应商"——后者以 `custom_models_json` 为唯一来源。
 #[tauri::command]
 async fn fetch_claude_env_remote_models(
     base_url: String,
     api_key: Option<String>,
-    provider_type: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_env::fetch_remote_models(base_url, api_key, provider_type)
+        claude_env::fetch_remote_models(base_url, api_key)
     })
     .await
     .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
@@ -1010,13 +1012,14 @@ async fn sync_all_codex_env_mcp() -> Result<codex_env::CodexEnvMcpSyncResult, St
         .map_err(|e| format!("批量同步 Codex MCP 任务失败: {}", e))?
 }
 
+/// 远端拉取模型列表（Codex 环境专用变体；走 OpenAI 兼容路径）。
 #[tauri::command]
 async fn fetch_codex_env_remote_models(
     base_url: String,
     api_key: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_env::fetch_remote_models(base_url, api_key, None)
+        claude_env::fetch_remote_models(base_url, api_key)
     })
     .await
     .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
@@ -1033,13 +1036,16 @@ async fn fetch_codex_env_remote_models(
 fn spawn_route_aggregation_pool_refresh(
     router: std::sync::Arc<route_aggregation::provider_router::ProviderRouter>,
 ) {
+    // Refresh the provider pool from DB rows without network I/O. This keeps
+    // provider changes visible immediately without blocking on remote calls.
     tauri::async_runtime::spawn(async move {
         for group in route_aggregation::RouteGroup::ALL {
-            if let Err(e) = router.refresh_pool(group).await {
+            if let Err(e) = router.refresh_pool_fast(group).await {
                 eprintln!(
                     "[ai-provider] 刷新路由聚合 {:?} pool 失败: {}",
                     group, e
                 );
+                continue;
             }
         }
     });
@@ -1110,7 +1116,7 @@ async fn get_route_aggregation_status(
 ) -> Result<route_aggregation::RouteAggregationStatus, String> {
     // Refresh pools so newly added/toggled providers show up without restart.
     for group in route_aggregation::RouteGroup::ALL {
-        state.provider_router.refresh_pool(group).await?;
+        state.provider_router.refresh_pool_fast(group).await?;
     }
     Ok(state.get_status().await)
 }
@@ -1153,7 +1159,7 @@ async fn update_route_aggregation_config(
         let server = route_aggregation::server::RouteAggregationServer::start(
             state.config.clone(),
             state.provider_router.clone(),
-            state.translator_registry.clone(),
+            state.log_store.clone(),
         )
         .await?;
         *state.server.write().await = Some(std::sync::Arc::new(server));
@@ -1161,7 +1167,7 @@ async fn update_route_aggregation_config(
 
     // Refresh provider pools for both API formats
     for group in route_aggregation::RouteGroup::ALL {
-        state.provider_router.refresh_pool(group).await?;
+        state.provider_router.refresh_pool_fast(group).await?;
     }
 
     Ok(state.get_status().await)
@@ -1184,13 +1190,13 @@ async fn start_route_aggregation(
 
     // Refresh provider pools for both API formats
     for group in route_aggregation::RouteGroup::ALL {
-        state.provider_router.refresh_pool(group).await?;
+        state.provider_router.refresh_pool_fast(group).await?;
     }
 
     let server = route_aggregation::server::RouteAggregationServer::start(
         state.config.clone(),
         state.provider_router.clone(),
-        state.translator_registry.clone(),
+        state.log_store.clone(),
     )
     .await?;
     *state.server.write().await = Some(std::sync::Arc::new(server));
@@ -1231,7 +1237,7 @@ async fn toggle_provider_route(
     .map_err(|e| format!("切换供应商路由开关任务失败: {e}"))??;
     // Refresh in-memory provider pools so status reflects the new toggle state
     for group in route_aggregation::RouteGroup::ALL {
-        state.provider_router.refresh_pool(group).await?;
+        state.provider_router.refresh_pool_fast(group).await?;
     }
     Ok(())
 }
@@ -1296,9 +1302,56 @@ async fn regenerate_route_aggregation_api_key(
     Ok(api_key)
 }
 
-/// Get the effective model list of a provider for the route aggregation UI:
-/// the provider's custom model list if non-empty, otherwise models fetched
-/// from its remote /v1/models API.
+/// Snapshot of all in-memory route aggregation log entries, newest last.
+/// Returned to the UI's "进出日志" list. Empty when the server isn't running.
+#[tauri::command]
+async fn get_route_aggregation_logs(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<Vec<route_aggregation::LogEntry>, String> {
+    Ok(state.log_store.snapshot().await)
+}
+
+/// Clear all in-memory route aggregation log entries.
+#[tauri::command]
+async fn clear_route_aggregation_logs(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<(), String> {
+    state.log_store.clear().await;
+    Ok(())
+}
+
+/// Path of the on-disk route aggregation log file, if a sink was attached
+/// during setup. The file is JSONL (one entry per line) and is the durable
+/// source of truth — the in-memory ring is just a fast UI window.
+#[tauri::command]
+fn get_route_aggregation_log_file_path(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Option<String> {
+    state
+        .log_store
+        .file_path()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Reveal the route aggregation log file in the OS file manager (Finder on
+/// macOS, Explorer on Windows). Soft-fails if the file hasn't been created
+/// yet (e.g. nobody has hit the proxy).
+#[tauri::command]
+fn reveal_route_aggregation_log_file(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<(), String> {
+    let path = state
+        .log_store
+        .file_path()
+        .ok_or_else(|| "本地日志文件未挂载".to_string())?;
+    crate::platform::reveal_path(&path)
+}
+
+/// Get the effective model list of a provider for the route aggregation UI.
+///
+/// 来源唯一：`ai_providers.custom_models_json`（用户在 AI 供应商编辑页手动配置的
+/// 模型列表）。即使该列表为空也**不**再向供应商远端 /v1/models 拉取——配置侧的
+/// 自定义列表即为对外暴露的全部模型。
 #[tauri::command]
 async fn get_route_provider_models(
     provider_id: String,
@@ -1310,34 +1363,20 @@ async fn get_route_provider_models(
             .find(|r| r.id == provider_id)
             .ok_or_else(|| format!("未找到供应商: {}", provider_id))?;
 
-        // Custom model list takes precedence (aliasId > model).
+        // 唯一来源：custom_models_json。alias_id 优先于 model；空列表直接返回空。
         let custom: Vec<ai_provider::CustomModel> =
             serde_json::from_str(&row.custom_models_json).unwrap_or_default();
-        if !custom.is_empty() {
-            return Ok(custom
-                .into_iter()
-                .map(|m| {
-                    if m.alias_id.trim().is_empty() {
-                        m.model
-                    } else {
-                        m.alias_id
-                    }
-                })
-                .filter(|id| !id.trim().is_empty())
-                .collect());
-        }
-
-        // Fall back to the remote model list.
-        let base_url = if row.provider_type == ai_provider::TYPE_UNIVERSAL {
-            ai_provider::derive_openai_base_url(&row.provider_type, &row.base_url)
-        } else {
-            row.base_url.clone()
-        };
-        let api_key = ai_provider::get_provider_secrets(provider_id.clone())?
+        Ok(custom
             .into_iter()
-            .next();
-        let result = claude_env::fetch_remote_models(base_url, api_key, Some(row.provider_type.clone()))?;
-        Ok(result.model_ids)
+            .map(|m| {
+                if m.alias_id.trim().is_empty() {
+                    m.model
+                } else {
+                    m.alias_id
+                }
+            })
+            .filter(|id| !id.trim().is_empty())
+            .collect())
     })
     .await
     .map_err(|e| format!("获取供应商模型列表任务失败: {e}"))?
@@ -1570,6 +1609,10 @@ pub fn run() {
             delete_route_aggregation_api_key,
             regenerate_route_aggregation_api_key,
             get_route_provider_models,
+            get_route_aggregation_logs,
+            clear_route_aggregation_logs,
+            get_route_aggregation_log_file_path,
+            reveal_route_aggregation_log_file,
         ])
         .setup(|_app| {
             use tauri::Manager;
@@ -1595,8 +1638,19 @@ pub fn run() {
                 let _ = route_aggregation::config::save_config(&ra_config);
             }
             let ra_state = route_aggregation::RouteAggregationState::new(ra_config.clone());
-            // 注册默认 pair 翻译器（Phase 1：仅 Anthropic → Gemini；后续 Phase 在此追加）
-            ra_state.populate_default_translators();
+            // Attach an on-disk log file so the user can `tail -f` the route
+            // aggregation traffic without depending on the UI. Best-effort:
+            // if the app data dir isn't writable we just skip the sink.
+            if let Ok(dir) = crate::platform::app_data_dir() {
+                let log_path = dir.join("route_aggregation.log");
+                if let Some(file) = route_aggregation::LogFile::open(&log_path) {
+                    eprintln!(
+                        "[route-aggregation] logging to {}",
+                        log_path.display()
+                    );
+                    ra_state.log_store.attach_file(file);
+                }
+            }
             _app.manage(ra_state);
 
             // Auto-start server if it was running when the app last exited.
@@ -1616,12 +1670,12 @@ pub fn run() {
                     }
                     // Refresh pools for both API formats
                     for group in route_aggregation::RouteGroup::ALL {
-                        let _ = state.provider_router.refresh_pool(group).await;
+                        let _ = state.provider_router.refresh_pool_fast(group).await;
                     }
                     match route_aggregation::server::RouteAggregationServer::start(
                         state.config.clone(),
                         state.provider_router.clone(),
-                        state.translator_registry.clone(),
+                        state.log_store.clone(),
                     )
                     .await
                     {

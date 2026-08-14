@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
   KeyRound,
@@ -10,9 +12,11 @@ import {
   Plus,
   Power,
   RefreshCw,
+  ScrollText,
   Server,
   Settings2,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import * as api from "./route-aggregation/api";
@@ -23,6 +27,8 @@ import {
   type ProviderRouteStatus,
   type RouteAggregationConfig,
   type RouteAggregationStatus,
+  type RouteLogEntry,
+  type InboundProtocol,
 } from "./route-aggregation/types";
 import { invokeList } from "./ai-providers/api";
 import type { AiProvider } from "./ai-providers/types";
@@ -34,6 +40,14 @@ export default function RouteAggregation() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 进出日志状态：列表 + 选中的详情弹窗
+  const [logs, setLogs] = useState<RouteLogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [selectedLog, setSelectedLog] = useState<RouteLogEntry | null>(null);
+  const [logAutoRefresh, setLogAutoRefresh] = useState(true);
+  const [logFilePath, setLogFilePath] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -52,8 +66,34 @@ export default function RouteAggregation() {
     }
   }, []);
 
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    try {
+      const list = await api.getRouteLogs();
+      // 环形缓冲区满后数量不再变化，必须比较内容，不能只比较长度。
+      setLogs((prev) => {
+        const unchanged =
+          prev.length === list.length && prev.every((entry, index) => entry.id === list[index]?.id);
+        return unchanged ? prev : list;
+      });
+      setSelectedLog((selected) =>
+        selected && list.some((entry) => entry.id === selected.id) ? selected : null,
+      );
+      setLogsError(null);
+    } catch (e) {
+      setLogsError(String(e));
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
+    loadLogs();
+    // Pull the on-disk log file path once on mount so the UI can show
+    // it next to the in-memory ring (the file is the durable source of
+    // truth for `tail -f` style debugging).
+    api.getRouteLogFilePath().then(setLogFilePath).catch(() => setLogFilePath(null));
     const interval = setInterval(async () => {
       try {
         const sts = await api.getStatus();
@@ -61,9 +101,12 @@ export default function RouteAggregation() {
       } catch {
         /* ignore */
       }
+      if (logAutoRefresh) {
+        loadLogs();
+      }
     }, 5000);
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [loadData, loadLogs, logAutoRefresh]);
 
   const handleConfigUpdate = async (newConfig: RouteAggregationConfig) => {
     setActionLoading(true);
@@ -459,7 +502,37 @@ export default function RouteAggregation() {
           )}
         </div>
 
-        {/* Usage instructions */}
+        {/* Logs */}
+        <LogsSection
+          logs={logs}
+          loading={logsLoading}
+          error={logsError}
+          autoRefresh={logAutoRefresh}
+          onToggleAutoRefresh={() => setLogAutoRefresh((v) => !v)}
+          onRefresh={loadLogs}
+          onClear={async () => {
+            try {
+              await api.clearRouteLogs();
+              setLogs([]);
+            } catch (e) {
+              setLogsError(String(e));
+            }
+          }}
+          onSelect={setSelectedLog}
+          logFilePath={logFilePath}
+          onRevealFile={async () => {
+            try {
+              await api.revealRouteLogFile();
+            } catch (e) {
+              setLogsError(`打开日志文件失败: ${e}`);
+            }
+          }}
+        />
+
+        {/* Log detail modal */}
+      <LogDetailModal entry={selectedLog} onClose={() => setSelectedLog(null)} />
+
+      {/* Usage instructions */}
         <div className="pref-section" style={{ marginBottom: 16 }}>
           <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Zap size={15} />
@@ -477,6 +550,13 @@ export default function RouteAggregation() {
               <code style={{ background: "var(--seed-surface-alt)", padding: "2px 6px", borderRadius: 4, fontSize: "var(--text-xs)", color: "var(--seed-primary)" }}>
                 OPENAI_BASE_URL={proxyUrl}/v1
               </code>
+            </p>
+            <p style={{ marginBottom: 4 }}>
+              <strong>OpenCode / 其他 OpenAI 兼容客户端:</strong> 使用 baseURL{" "}
+              <code style={{ background: "var(--seed-surface-alt)", padding: "2px 6px", borderRadius: 4, fontSize: "var(--text-xs)", color: "var(--seed-primary)" }}>
+                {proxyUrl}/v1
+              </code>
+              （转发 <code style={{ fontSize: "var(--text-xs)" }}>/v1/responses</code> 请求到勾选的供应商，未勾选或不匹配则透传失败）
             </p>
             <p style={{ color: "var(--seed-muted)", marginTop: 8 }}>
               客户端请求会自动经路由聚合代理转发到已勾选的供应商，享受整流器伪装和自动故障转移能力。
@@ -641,8 +721,8 @@ function ProviderSelectRow({
   const [modelsLoading, setModelsLoading] = useState(true);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
 
-  // 协议不兼容的类型（如 google-generative-ai）不会进路由聚合 pool，强制禁用勾选并隐藏
-  // 下游相关 UI（模型列表/熔断器状态等），避免 "DB toggle 写了但状态永远不更新" 的隐性错乱。
+  // 路由聚合仅接受 Anthropic / OpenAI / Universal 三类 backend；其它类型
+  // 不会进 pool，强制禁用勾选并隐藏下游相关 UI。
   const isRouteable = isRouteableProviderType(provider.providerType);
   // 无状态记录时视为默认勾选（与后端默认 enabled=true 对齐）
   const checked = routeStatus ? routeStatus.enabled : true;
@@ -792,7 +872,7 @@ function ProviderSelectRow({
           <button
             className="btn-icon-action"
             onClick={loadModels}
-            data-tooltip="刷新模型列表"
+            data-tooltip="刷新自定义模型列表"
             disabled={modelsLoading}
           >
             {modelsLoading ? (
@@ -809,15 +889,15 @@ function ProviderSelectRow({
       <div style={{ marginTop: 10, paddingLeft: 30 }}>
         {modelsLoading ? (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", display: "flex", alignItems: "center", gap: 6 }}>
-            <Loader2 size={12} className="animate-spin" /> 正在加载模型列表…
+            <Loader2 size={12} className="animate-spin" /> 正在读取自定义模型…
           </div>
         ) : modelsError ? (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-danger)" }}>
-            模型列表加载失败：{modelsError}
+            自定义模型读取失败：{modelsError}
           </div>
         ) : !models || models.length === 0 ? (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
-            暂无模型（请在「AI 供应商」中配置自定义模型，或确认端点支持远程拉取）
+            暂无自定义模型。供应商对外可见模型仅来自「AI 供应商」中的自定义模型列表，请前往配置。
           </div>
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -854,3 +934,608 @@ function ProviderSelectRow({
     </div>
   );
 }
+
+/* ===== Logs ( ===== Logs Section ===== */
+
+interface LogsSectionProps {
+  logs: RouteLogEntry[];
+  loading: boolean;
+  error: string | null;
+  autoRefresh: boolean;
+  onToggleAutoRefresh: () => void;
+  onRefresh: () => void;
+  onClear: () => void;
+  onSelect: (entry: RouteLogEntry) => void;
+  onRevealFile: () => void;
+  logFilePath: string | null;
+}
+
+const PROTOCOL_LABEL: Record<InboundProtocol, string> = {
+  claudeMessages: "Claude",
+  codexResponses: "Codex",
+  openaiModelsList: "Models",
+};
+
+const PROTOCOL_COLOR: Record<InboundProtocol, string> = {
+  claudeMessages: "var(--seed-primary)",
+  codexResponses: "#10a37f",
+  openaiModelsList: "var(--seed-muted)",
+};
+
+function formatTimestamp(ms: number): string {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const mmm = String(d.getMilliseconds()).padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${mmm}`;
+}
+
+function statusColor(status: number | null, success: boolean): string {
+  if (!success || status === null) return "var(--seed-danger)";
+  if (status >= 500) return "var(--seed-danger)";
+  if (status >= 400) return "#d4a017";
+  if (status >= 300) return "var(--seed-muted)";
+  return "#1aaa55";
+}
+
+function LogsSection({
+  logs,
+  loading,
+  error,
+  autoRefresh,
+  onToggleAutoRefresh,
+  onRefresh,
+  onClear,
+  onSelect,
+  onRevealFile,
+  logFilePath,
+}: LogsSectionProps) {
+  // 倒序：最新的在最上面（后端返回 newest-last）
+  const ordered = useMemo(() => [...logs].reverse(), [logs]);
+
+  return (
+    <div className="pref-section" style={{ marginBottom: 16 }}>
+      <div
+        className="pref-section-title"
+        style={{ display: "flex", alignItems: "center", gap: 8 }}
+      >
+        <ScrollText size={15} />
+        进出日志
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}>
+          {logs.length > 0 ? `${logs.length} 条` : "暂无"}
+        </span>
+        <div style={{ flex: 1 }} />
+        <label
+          className="ui-check"
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--seed-muted)",
+            /* reset .ui-check 默认的 16px 上 margin：此处是 pref-section-title 的横向 flex 子项，
+               保留该 margin 会让 "自动刷新" 视觉中心比左边的 "进出日志" 标题低约 8px */
+            marginTop: 0,
+          }}
+        >
+          <input
+            className="ui-check-input"
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={onToggleAutoRefresh}
+          />
+          <span className="ui-check-box">
+            <Check size={10} />
+          </span>
+          <span className="ui-check-label">自动刷新</span>
+        </label>
+        <button
+          className="btn-icon-action"
+          onClick={onRefresh}
+          data-tooltip="手动刷新"
+        >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+        </button>
+        <button
+          className="btn btn-secondary"
+          onClick={onClear}
+          disabled={logs.length === 0}
+          style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+        >
+          <Trash2 size={12} /> 清空
+        </button>
+      </div>
+
+      {logFilePath && (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            background: "var(--seed-surface-alt)",
+            border: "1px solid var(--seed-border)",
+            borderRadius: "var(--seed-radius)",
+            fontSize: "var(--text-xs)",
+            color: "var(--seed-muted)",
+          }}
+        >
+          <span style={{ flexShrink: 0 }}>本地日志:</span>
+          <code
+            style={{
+              flex: 1,
+              fontFamily: "monospace",
+              color: "var(--seed-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={logFilePath}
+          >
+            {logFilePath}
+          </code>
+          <button
+            className="btn btn-secondary"
+            onClick={onRevealFile}
+            style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
+          >
+            在 Finder 打开
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 12px",
+            background: "var(--seed-danger-bg)",
+            borderRadius: "var(--seed-radius)",
+            color: "var(--seed-danger)",
+            fontSize: "var(--text-sm)",
+            marginTop: 8,
+          }}
+        >
+          <AlertCircle size={14} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div
+        style={{
+          marginTop: 10,
+          border: "1px solid var(--seed-border)",
+          borderRadius: "var(--seed-radius)",
+          background: "var(--seed-surface)",
+          overflow: "hidden",
+        }}
+      >
+        {ordered.length === 0 ? (
+          <div className="empty-state" style={{ minHeight: 100, padding: "20px 12px" }}>
+            <ScrollText size={28} />
+            <div className="empty-state-text">暂无请求记录</div>
+            <div className="empty-state-subtext">
+              启动路由聚合后，客户端发起的请求会出现在这里
+            </div>
+          </div>
+        ) : (
+          <div style={{ maxHeight: 360, overflowY: "auto" }}>
+            {ordered.map((entry) => {
+              const protoColor = PROTOCOL_COLOR[entry.protocol] ?? "var(--seed-muted)";
+              const protoLabel = PROTOCOL_LABEL[entry.protocol] ?? entry.protocol;
+              const color = statusColor(entry.upstreamStatus, entry.success);
+              return (
+                <div
+                  key={entry.id}
+                  onClick={() => onSelect(entry)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "92px 160px minmax(160px, 1fr) auto auto auto",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 12px",
+                    borderBottom: "1px solid var(--seed-border)",
+                    cursor: "pointer",
+                    fontSize: "var(--text-sm)",
+                    background: "transparent",
+                    transition: "background 0.1s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.background =
+                      "var(--seed-surface-alt)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = "transparent";
+                  }}
+                >
+                  <span style={{ fontFamily: "monospace", color: "var(--seed-muted)", fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>
+                    {formatTimestamp(entry.timestampMs)}
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "var(--text-xs)",
+                        fontWeight: 600,
+                        color: protoColor,
+                        letterSpacing: "0.02em",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        minWidth: 0,
+                      }}
+                    >
+                      {protoLabel}
+                    </span>
+                    {entry.stream ? (
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 600,
+                          color: "var(--seed-muted)",
+                          background: "var(--seed-surface-alt)",
+                          padding: "0 4px",
+                          borderRadius: 3,
+                          border: "1px solid var(--seed-border)",
+                          lineHeight: 1.4,
+                          flexShrink: 0,
+                        }}
+                        title="Server-Sent Events"
+                      >
+                        SSE
+                      </span>
+                    ) : null}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "monospace",
+                      color: "var(--seed-primary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}
+                    title={entry.inboundModel ?? undefined}
+                  >
+                    {entry.inboundModel ?? "(无 model)"}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color,
+                      fontWeight: 600,
+                      minWidth: 32,
+                      textAlign: "right",
+                      fontFamily: "monospace",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {entry.upstreamStatus != null
+                      ? entry.upstreamStatus
+                      : entry.error
+                        ? "ERR"
+                        : "—"}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--seed-muted)",
+                      fontFamily: "monospace",
+                      minWidth: 52,
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {entry.durationMs} ms
+                  </span>
+                  <ChevronRight size={14} style={{ color: "var(--seed-muted)", flexShrink: 0 }} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Log Detail Modal ===== */
+
+interface LogDetailModalProps {
+  entry: RouteLogEntry | null;
+  onClose: () => void;
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function headersToText(headers: Array<[string, string]>): string {
+  return headers.map(([k, v]) => `${k}: ${v}`).join("\n");
+}
+
+function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
+  if (!entry) return null;
+
+  const protoColor = PROTOCOL_COLOR[entry.protocol] ?? "var(--seed-muted)";
+  const protoLabel = PROTOCOL_LABEL[entry.protocol] ?? entry.protocol;
+  const statusColorHex = statusColor(entry.upstreamStatus, entry.success);
+  const inboundJson = entry.inboundBody !== null ? formatJson(entry.inboundBody) : "(无 body)";
+  const upstreamBodyText =
+    entry.stream && !entry.upstreamBody
+      ? "(流式响应，未记录 body)"
+      : entry.upstreamBody != null && entry.upstreamBody !== ""
+        ? entry.upstreamBody
+        : entry.upstreamBody === ""
+          ? "(空 body)"
+          : "(无 body)";
+  const inboundHeadersText = headersToText(entry.inboundHeaders);
+  const upstreamHeadersText =
+    entry.upstreamHeaders.length > 0
+      ? headersToText(entry.upstreamHeaders)
+      : "(无)";
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "color-mix(in srgb, black 55%, transparent)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--seed-bg)",
+          borderRadius: "var(--seed-radius-lg)",
+          width: "min(960px, 100%)",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          border: "1px solid var(--seed-border)",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 16px",
+            borderBottom: "1px solid var(--seed-border)",
+            background: "var(--seed-surface)",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "var(--text-xs)",
+              fontWeight: 600,
+              color: protoColor,
+              padding: "2px 8px",
+              borderRadius: 4,
+              border: `1px solid ${protoColor}`,
+            }}
+          >
+            {protoLabel}
+            {entry.stream ? " · SSE" : ""}
+          </span>
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontSize: "var(--text-sm)",
+              color: "var(--seed-primary)",
+            }}
+          >
+            {entry.inboundMethod} {entry.inboundPath}
+          </span>
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontSize: "var(--text-xs)",
+              color: statusColorHex,
+              fontWeight: 600,
+            }}
+          >
+            {entry.upstreamStatus != null ? `→ ${entry.upstreamStatus}` : entry.error ? "ERROR" : ""}
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontFamily: "monospace" }}>
+            {formatTimestamp(entry.timestampMs)} · {entry.durationMs} ms
+          </span>
+          <button className="btn-icon-action" onClick={onClose} data-tooltip="关闭">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Summary line */}
+        <div
+          style={{
+            padding: "8px 16px",
+            fontSize: "var(--text-xs)",
+            color: "var(--seed-muted)",
+            background: "var(--seed-surface-alt)",
+            borderBottom: "1px solid var(--seed-border)",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 14,
+          }}
+        >
+          <span>
+            模型:{" "}
+            <code style={{ color: "var(--seed-primary)" }}>
+              {entry.inboundModel ?? "(无)"}
+            </code>
+          </span>
+          {entry.providerName && (
+            <span>
+              供应商:{" "}
+              <code style={{ color: "var(--seed-primary)" }}>{entry.providerName}</code>
+            </span>
+          )}
+          {entry.upstreamUrl && (
+            <span>
+              上游 URL:{" "}
+              <code style={{ color: "var(--seed-primary)" }}>{entry.upstreamUrl}</code>
+            </span>
+          )}
+          {entry.error && (
+            <span style={{ color: "var(--seed-danger)" }}>错误: {entry.error}</span>
+          )}
+        </div>
+
+        {/* Body */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <DetailSection title="入站请求头" copyText={inboundHeadersText}>
+            <pre style={codeBlockStyle}>{inboundHeadersText}</pre>
+          </DetailSection>
+          <DetailSection
+            title={`入站请求 body${entry.inboundBodyTruncated ? " (已截断)" : ""}`}
+            copyText={inboundJson}
+          >
+            <pre style={codeBlockStyle}>{inboundJson}</pre>
+          </DetailSection>
+          <DetailSection title="上游响应头" copyText={upstreamHeadersText}>
+            <pre style={codeBlockStyle}>{upstreamHeadersText}</pre>
+          </DetailSection>
+          <DetailSection
+            title={`上游响应 body${entry.upstreamBodyTruncated ? " (已截断)" : ""}`}
+            copyText={upstreamBodyText}
+          >
+            <pre style={codeBlockStyle}>{upstreamBodyText}</pre>
+          </DetailSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface DetailSectionProps {
+  title: string;
+  children: React.ReactNode;
+  /** 复制图标点击时写入剪贴板的文本；不传则不渲染复制按钮 */
+  copyText?: string;
+}
+
+function DetailSection({ title, children, copyText }: DetailSectionProps) {
+  const [open, setOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    // 复制按钮与折叠按钮在同一行，必须阻止冒泡，避免点复制时触发折叠
+    e.stopPropagation();
+    if (copyText === undefined) return;
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* 剪贴板权限/写失败时静默降级，不打断用户 */
+    }
+  };
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--seed-border)",
+        borderRadius: "var(--seed-radius)",
+        background: "var(--seed-surface)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 6px 6px 12px",
+          borderBottom: open ? "1px solid var(--seed-border)" : "none",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--seed-muted)",
+            fontSize: "var(--text-sm)",
+            fontWeight: 500,
+            padding: 0,
+            textAlign: "left",
+          }}
+        >
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {title}
+          </span>
+        </button>
+        {copyText !== undefined && (
+          <button
+            type="button"
+            className="btn-icon-action"
+            onClick={handleCopy}
+            data-tooltip={copied ? "已复制" : "复制内容"}
+            aria-label="复制内容"
+            style={{ width: 26, height: 26, flexShrink: 0 }}
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        )}
+      </div>
+      {open && <div style={{ padding: 12 }}>{children}</div>}
+    </div>
+  );
+}
+
+const codeBlockStyle: React.CSSProperties = {
+  margin: 0,
+  padding: 12,
+  background: "var(--seed-surface-alt)",
+  borderRadius: "var(--seed-radius)",
+  color: "var(--seed-primary)",
+  fontSize: "var(--text-xs)",
+  fontFamily: "monospace",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-all",
+  maxHeight: 280,
+  overflowY: "auto",
+};

@@ -109,6 +109,12 @@ export async function invokeGetSecret(id: string): Promise<string> {
   return invoke("get_codex_env_secret", { id }) as Promise<string>;
 }
 
+/**
+ * 从当前 Codex 环境的 Base URL 拉取远端模型列表。
+ *
+ * **临时配置专用**：当 Codex 环境**不**关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
+ * 若 env 已关联供应商，则应优先使用该供应商的 `customModels`（由调用方在 UI 层处理）。
+ */
 export async function invokeFetchRemoteModels(baseUrl: string, apiKey?: string): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const result = await invoke("fetch_codex_env_remote_models", { baseUrl, apiKey }) as {

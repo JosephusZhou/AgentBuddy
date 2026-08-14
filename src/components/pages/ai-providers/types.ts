@@ -3,13 +3,7 @@
 export type ProviderType =
   | "anthropic"
   | "openai"
-  | "universal"
-  | "google-generative-ai";
-
-/** Google Generative AI 默认 Base URL，与后端
- * `ai_provider::GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL` 对齐，避免常量漂移。 */
-export const GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL =
-  "https://generativelanguage.googleapis.com/v1beta";
+  | "universal";
 
 /** 自定义模型条目：从供应商端点拉取后用户筛选保留的模型，可自定义别名 ID。 */
 export interface CustomModel {
@@ -77,5 +71,4 @@ export const PROVIDER_TYPE_OPTIONS: Array<{ value: ProviderType; label: string; 
   { value: "anthropic", label: "Anthropic", sub: "支持按档位配置不同模型" },
   { value: "openai", label: "OpenAI" },
   { value: "universal", label: "通用", sub: "同时接入 Anthropic 与 OpenAI（OpenAI Base URL 自动派生 /v1）" },
-  { value: "google-generative-ai", label: "Google Generative AI", sub: "Gemini API，使用 x-goog-api-key 鉴权" },
 ];

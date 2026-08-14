@@ -93,12 +93,12 @@ const IconSyncMcp = () => (
   <Blocks size={16} strokeWidth={1.8} />
 );
 
-const IconDownload = () => (
-  <Download size={16} strokeWidth={1.8} />
-);
-
 const IconEmpty = () => (
   <Folder size={40} strokeWidth={1.5} />
+);
+
+const IconDownload = () => (
+  <Download size={16} strokeWidth={1.8} />
 );
 
 const IconChevron = ({ open }: { open?: boolean }) => (
@@ -291,7 +291,6 @@ export default function ClaudeEnv() {
   const [showCloneApiKey, setShowCloneApiKey] = useState(false);
   const [cloneModel, setCloneModel] = useState("");
   const [cloneRemoteModels, setCloneRemoteModels] = useState<string[]>([]);
-  const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
   const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
   const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
   const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
@@ -320,8 +319,9 @@ export default function ClaudeEnv() {
   const [editApiKey, setEditApiKey] = useState("");
   const [editModel, setEditModel] = useState("");
   const [editRemoteModels, setEditRemoteModels] = useState<string[]>([]);
-  const [editModelsLoading, setEditModelsLoading] = useState(false);
   const [editApiKeyVisible, setEditApiKeyVisible] = useState(false);
+  const [cloneModelsLoading, setCloneModelsLoading] = useState(false);
+  const [editModelsLoading, setEditModelsLoading] = useState(false);
   // 目录变更时的迁移二次确认（Tauri WebView 不支持原生 window.confirm，用受控 modal）。
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
   // 记录进入编辑时的原始值，用于三态判定（仅在实际变化时下发）。
@@ -482,6 +482,11 @@ export default function ClaudeEnv() {
     }
   };
 
+  // 模型列表两层来源：
+  // 1. 优先：所选 AI 供应商的 `customModels`（已在打开表单时同步装入 `cloneRemoteModels`
+  //    / `editRemoteModels`）。这是"已配置 AI 供应商"路径，**不**触发任何远端请求。
+  // 2. 回退：当前环境手填 baseUrl + apiKey 时，点击"拉取列表"按钮调用
+  //    `invokeFetchRemoteModels` 远端拉取（这是"临时配置"路径，AI 供应商库规则不适用）。
   const fetchModels = useCallback(async (mode: "clone" | "edit") => {
     const baseUrl = mode === "clone" ? cloneBaseUrl : editBaseUrl;
     const apiKey = mode === "clone" ? cloneApiKey : editApiKey;
@@ -489,13 +494,18 @@ export default function ClaudeEnv() {
     const setModels = mode === "clone" ? setCloneRemoteModels : setEditRemoteModels;
     const setModel = mode === "clone" ? setCloneModel : setEditModel;
 
-    // 优先使用所选供应商的自定义模型列表；未配置时才回退到拉取远端列表。
+    // 关联供应商后，customModels 是唯一来源；只有未关联供应商的临时配置
+    // 才允许通过 Base URL 拉取远端列表。
     const provider = mode === "clone" ? cloneSelectedProvider : editSelectedProvider;
     const customOptions = customModelOptionsOf(provider);
-    if (customOptions.length > 0) {
+    if (provider) {
       setModels(customOptions);
-      setModel(customOptions[0]);
-      setStatusMsg(`已使用供应商自定义模型列表（${customOptions.length} 个）`);
+      if (customOptions.length > 0) {
+        setModel(customOptions[0]);
+        setStatusMsg(`已使用供应商自定义模型列表（${customOptions.length} 个）`);
+      } else {
+        setStatusMsg("该供应商未配置自定义模型，请先在 AI 供应商页添加");
+      }
       return;
     }
 
@@ -1321,7 +1331,7 @@ providerId: cloneSelectedProvider?.id || undefined,
                         if (p) {
                           setCloneBaseUrl(p.baseUrl);
                           setCloneModel(p.defaultModel);
-                          // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                          // 自定义模型列表：已配置时直接作为模型下拉选项；未配置时清空（无远端拉取回退）
                           setCloneRemoteModels(customModelOptionsOf(p));
                           // 四档模型：直接用供应商的档位值覆盖
                           if (Object.keys(p.models).length > 0) {
@@ -1609,7 +1619,7 @@ return (
                     if (p) {
                       setEditBaseUrl(p.baseUrl);
                       setEditModel(p.defaultModel);
-                      // 自定义模型列表：已配置时直接作为模型下拉选项，否则清空待拉取远端
+                      // 自定义模型列表：已配置时直接作为模型下拉选项；未配置时清空（无远端拉取回退）
                       setEditRemoteModels(customModelOptionsOf(p));
                       // 四档模型：直接用供应商的档位值覆盖
                       if (Object.keys(p.models).length > 0) {

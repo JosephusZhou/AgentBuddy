@@ -42,6 +42,45 @@ export interface RouteAggregationStatus {
   providers: ProviderRouteStatus[];
 }
 
+/** 进站协议，分别对应路由聚合支持的两种透传协议。
+ *
+ * Phase 5+：路由聚合只接受 Claude Messages 与 Codex Responses 两种业务
+ * 协议；`openaiModelsList` 仅用于 `GET /v1/models` 元数据查询（不入路由池）。
+ */
+export type InboundProtocol =
+  | "claudeMessages"
+  | "codexResponses"
+  | "openaiModelsList";
+
+export interface RouteLogEntry {
+  /** 单调递增 ID；越大越新。 */
+  id: number;
+  /** Unix 毫秒。 */
+  timestampMs: number;
+  protocol: InboundProtocol;
+  inboundMethod: string;
+  inboundPath: string;
+  /** 进站请求头（已脱敏：Authorization / Cookie / x-api-key 等被替换为 "***"）。 */
+  inboundHeaders: Array<[string, string]>;
+  /** 进站请求体（JSON 解析后；超过 8KB 会被截断并设置标志）。 */
+  inboundBody: unknown | null;
+  inboundBodyTruncated: boolean;
+  inboundModel: string | null;
+  providerId: string | null;
+  providerName: string | null;
+  upstreamUrl: string | null;
+  upstreamStatus: number | null;
+  upstreamHeaders: Array<[string, string]>;
+  /** 上游响应体（流式响应时为 null；非流式截断到 8KB）。 */
+  upstreamBody: string | null;
+  upstreamBodyTruncated: boolean;
+  /** 是否为流式请求（SSE）。流式响应体不会读入日志。 */
+  stream: boolean;
+  durationMs: number;
+  success: boolean;
+  error: string | null;
+}
+
 export const DEFAULT_CONFIG: RouteAggregationConfig = {
   listenAddress: "127.0.0.1",
   listenPort: 16888,
@@ -59,20 +98,15 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
 
 /** 是否可以参与路由聚合转发。
  *
- * 与 Rust 端 `provider_router::refresh_pool` 的协议过滤保持一致：
- * 聚合代理当前实现 Anthropic Messages / OpenAI Chat Completions / OpenAI
- * Responses 三种客户端协议，分别在 ClaudeCode / Codex group 下翻译到
- * 任意 backend protocol（Anthropic / OpenAI / Google Generative AI / Universal）。
- * 因此 backend 类型为这四种的供应商都能勾选；其他类型（如未来的 antigravity
- * 协议 backend）在前端禁用勾选，避免 toggle 写入 DB 后下游 pool 永远不收录、
- * UI 状态永远显示"已勾选"的错乱。 */
+ * 与 Rust 端 `provider_router::build_pool_from_db` 的协议过滤保持一致：
+ * 路由聚合只接受 Anthropic / OpenAI / Universal 三类 backend，其它类型
+ * 一律不进入 pool。 */
 export function isRouteableProviderType(
   providerType: ProviderType | string,
 ): boolean {
   return (
     providerType === "anthropic" ||
     providerType === "openai" ||
-    providerType === "google-generative-ai" ||
     providerType === "universal"
   );
 }

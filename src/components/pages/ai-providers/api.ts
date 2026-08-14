@@ -4,7 +4,6 @@ import type {
   AiProvider,
   AiProviderActionResult,
   AiProviderUpsertPayload,
-  ProviderType,
 } from "./types";
 
 export async function invokeList(): Promise<AiProvider[]> {
@@ -36,20 +35,24 @@ export async function invokeGetSecrets(id: string): Promise<string[]> {
   return invoke("get_ai_provider_secrets", { id }) as Promise<string[]>;
 }
 
-/** 从 Base URL 拉取远端模型列表（复用 Claude/Codex 环境页的同一个命令）。
- * `providerType` 可选：传入 `google-generative-ai` 时后端走 Google 专用路径
- * （`x-goog-api-key` header + 解析 `models[].name`）；其他类型或缺省走 OpenAI/
- * Anthropic 通用解析逻辑。 */
+/**
+ * 从 Base URL 拉取远端模型列表。
+ *
+ * **临时配置专用**：当 Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi / Oh-My-Pi）
+ * 在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
+ *
+ * **不**适用于 AI 供应商库（`ai_providers`）本身——后者以 `custom_models_json` 为
+ * 唯一来源，**不**发起远程请求。
+ *
+ */
 export async function invokeFetchRemoteModels(
   baseUrl: string,
   apiKey?: string,
-  providerType?: ProviderType,
 ): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const result = (await invoke("fetch_claude_env_remote_models", {
     baseUrl,
     apiKey,
-    providerType,
   })) as { modelIds: string[] };
   return result.modelIds;
 }

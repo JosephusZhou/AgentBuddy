@@ -15,7 +15,6 @@ import {
 import {
   MODEL_TIERS,
   PROVIDER_TYPE_OPTIONS,
-  GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL,
   type AiProvider,
   type ProviderType,
   type CustomModel,
@@ -28,6 +27,7 @@ const IconClose = () => <X size={16} strokeWidth={2} />;
 const IconTrashConfirm = () => <Trash2 size={20} strokeWidth={2} />;
 const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
 const IconCopy = () => <Copy size={16} strokeWidth={1.8} />;
+const IconCopyModel = () => <Copy size={13} strokeWidth={1.8} />;
 const IconEmpty = () => <Boxes size={40} strokeWidth={1.5} />;
 const IconDownload = () => <Download size={14} strokeWidth={1.8} />;
 const IconSearch = () => <Search size={16} strokeWidth={1.8} />;
@@ -53,27 +53,23 @@ const IconChevron = ({ open }: { open?: boolean }) => (
   </svg>
 );
 
-/* RemoteModelField 已由共享组件 ModelComboBox 替代。 */
+/* ModelComboBox 是唯一的模型输入控件；下拉候选直接来自 `formCustomModels`。
+   自定义模型列表的录入方式有两种：
+   1. 下方"手动添加"输入框逐条录入
+   2. "从端点拉取"按钮 → 一次性拉取 + 多选 → 应用后批量写入
+   两种方式最终都落到 formCustomModels 并由 invokeUpsert 写入 DB。运行时
+   （Claude / Codex / 路由聚合）永远只读 customModels，不再向供应商端点发请求。 */
 
-/** 类型徽标：Anthropic / OpenAI / Google / 通用 用不同色调区分。 */
+/** 类型徽标：Anthropic / OpenAI / 通用 用不同色调区分。 */
 function TypeBadge({ type }: { type: ProviderType }) {
   let label: string;
   if (type === "anthropic") label = "Anthropic";
   else if (type === "openai") label = "OpenAI";
-  else if (type === "google-generative-ai") label = "Google";
   else label = "通用";
 
-  // Google 文字色由各主题 `--seed-google-fg` 提供（浅主题深蓝 / 深主题亮蓝），
-  // 背景与边框用 color-mix 与文字色联动，确保在 22 套主题下都保持足够对比度。
   const accentStyle =
     type === "openai"
       ? undefined
-      : type === "google-generative-ai"
-      ? {
-          background: "color-mix(in srgb, var(--seed-google-fg) 14%, transparent)",
-          color: "var(--seed-google-fg)",
-          borderColor: "color-mix(in srgb, var(--seed-google-fg) 40%, transparent)",
-        }
       : {
           background: "color-mix(in srgb, var(--seed-primary) 12%, transparent)",
           color: "var(--seed-active-fg)",
@@ -87,7 +83,7 @@ function TypeBadge({ type }: { type: ProviderType }) {
   );
 }
 
-/** 类型下拉：选项仅两个，复用 app-select 既有样式。 */
+/** 类型下拉：选项仅三个（Anthropic / OpenAI / 通用），复用 app-select 既有样式。 */
 function TypeSelect({
   value,
   onChange,
@@ -200,18 +196,17 @@ export default function AiProviders() {
   const [formTierModels, setFormTierModels] = useState<Record<string, string>>({});
   const [formNotes, setFormNotes] = useState("");
   const [editingHasKey, setEditingHasKey] = useState(false);
-  /** 自定义模型列表（从端点拉取后筛选保留）。 */
+  /** 自定义模型列表（运行时的唯一来源，由编辑页通过"手动添加"或"从端点拉取多选"录入）。 */
   const [formCustomModels, setFormCustomModels] = useState<CustomModel[]>([]);
-  /** 模型选择面板是否展开。 */
+  /** 模型选择面板是否展开（编辑页"从端点拉取"后的多选 UI）。 */
   const [showModelPicker, setShowModelPicker] = useState(false);
-  /** 从端点拉取的原始模型列表（用于选择面板）。 */
+  /** 从端点拉取的原始模型列表（用于选择面板的候选集）。 */
   const [pickerModels, setPickerModels] = useState<string[]>([]);
-  /** 选择面板中已勾选的模型。 */
+  /** 选择面板中已勾选的模型集合。 */
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
   const [pickerLoading, setPickerLoading] = useState(false);
-  /** 手动添加模型的输入值（部分供应商不支持拉取列表时使用）。 */
+  /** 手动添加模型的输入值（除"从端点拉取"外的另一种录入方式）。 */
   const [manualModelInput, setManualModelInput] = useState("");
-  // 远端模型列表：保留用于兼容（默认模型下拉仍可输入手动值）
 
   const idCounter = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -275,11 +270,10 @@ export default function AiProviders() {
     () => providers.filter((p) => p.providerType === "openai").length,
     [providers],
   );
-  const googleCount = useMemo(
-    () => providers.filter((p) => p.providerType === "google-generative-ai").length,
+  const universalCount = useMemo(
+    () => providers.filter((p) => p.providerType === "universal").length,
     [providers],
   );
-  const universalCount = providers.length - anthropicCount - openaiCount - googleCount;
 
   // 类型与关键词为「与」筛选；关键词覆盖名称、Base URL、模型与备注
   const filteredProviders = useMemo(
@@ -312,17 +306,6 @@ export default function AiProviders() {
       setTimeout(() => nameInputRef.current?.focus(), 100);
     }
   }, [showForm]);
-
-  // 类型切到 google-generative-ai 且 Base URL 为空时，自动填入官方默认端点。
-  // 已填值的场景不覆盖，避免误清用户已写的代理或私有网关。
-  useEffect(() => {
-    if (
-      formType === "google-generative-ai" &&
-      formBaseUrl.trim() === ""
-    ) {
-      setFormBaseUrl(GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL);
-    }
-  }, [formType, formBaseUrl]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -422,7 +405,10 @@ export default function AiProviders() {
     }
   }, []);
 
-  // 拉取远端模型列表：用于模型选择面板
+  // 拉取远端模型列表（**编辑页填表工具**：一次性导入候选模型，让用户多选后批量
+  // 写入 customModels；不影响"customModels 是运行时唯一来源"的规则——拉取的
+  // 结果仅在选择面板里暂存，"应用"按钮才会把它落到 formCustomModels 并由
+  // invokeUpsert 写入 DB。保存后再次打开表单依然只显示 customModels。）。
   const fetchModelsForPicker = useCallback(async () => {
     const baseUrl = formBaseUrl.trim();
     if (!baseUrl) {
@@ -437,12 +423,7 @@ export default function AiProviders() {
         const secrets = await invokeGetSecrets(editingId);
         apiKey = secrets[0]?.trim() || "";
       }
-      // 透传 provider type：Google 类型走专用解析路径。
-      const models = await invokeFetchRemoteModels(
-        baseUrl,
-        apiKey || undefined,
-        formType,
-      );
+      const models = await invokeFetchRemoteModels(baseUrl, apiKey || undefined);
       if (models.length === 0) {
         setStatusMsg("远端未返回可用模型");
         return;
@@ -458,9 +439,9 @@ export default function AiProviders() {
     } finally {
       setPickerLoading(false);
     }
-  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, formType, setStatusMsg]);
+  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, setStatusMsg]);
 
-  // 应用选择面板中的选择到自定义模型列表
+  // 应用选择面板中的选择到自定义模型列表（保留已有别名）。
   const applyPickerSelection = useCallback(() => {
     const existingMap = new Map(formCustomModels.map((cm) => [cm.model, cm.aliasId]));
     const newModels: CustomModel[] = [];
@@ -474,7 +455,6 @@ export default function AiProviders() {
     setShowModelPicker(false);
   }, [pickerSelected, formCustomModels]);
 
-  // 手动添加模型：部分供应商不支持拉取列表，需手动指定模型 ID
   const addManualModel = useCallback(() => {
     const model = manualModelInput.trim();
     if (!model) return;
@@ -486,6 +466,21 @@ export default function AiProviders() {
     setManualModelInput("");
     setFormError("");
   }, [manualModelInput, formCustomModels]);
+
+  // 复制自定义模型 ID 到系统剪贴板；toast 复用页面顶部 useStatusMessage。
+  // 表单保存后再次打开表单依然只显示 customModels，因此复制按钮始终读 formCustomModels 当前快照。
+  const copyModelId = useCallback(
+    async (modelId: string) => {
+      if (!modelId) return;
+      try {
+        await navigator.clipboard.writeText(modelId);
+        setStatusMsg(`已复制模型 ID：${modelId}`);
+      } catch {
+        setStatusMsg("复制失败，请手动选择文本");
+      }
+    },
+    [setStatusMsg],
+  );
 
   // 自定义模型列表中的模型 ID 列表（用于档位模型下拉）
   const customModelOptions = useMemo(
@@ -520,9 +515,9 @@ export default function AiProviders() {
     setFormError("");
     try {
       const id = editingId ?? nextId();
-      // 仅 Anthropic 类型提交档位模型；OpenAI / Google Generative AI 不支持档位覆盖
+      // 仅 Anthropic / 通用类型提交档位模型；OpenAI 不支持档位覆盖
       const models: Record<string, string> = {};
-      if (formType !== "openai" && formType !== "google-generative-ai") {
+      if (formType !== "openai") {
         for (const tier of MODEL_TIERS) {
           const v = (formTierModels[tier.key] ?? "").trim();
           if (v) models[tier.key] = v;
@@ -770,20 +765,23 @@ export default function AiProviders() {
                   { key: "anthropic", label: "Anthropic", count: anthropicCount, inheritFont: false },
                   { key: "openai", label: "OpenAI", count: openaiCount, inheritFont: false },
                   { key: "universal", label: "通用", count: universalCount, inheritFont: true },
-                  { key: "google-generative-ai", label: "Google", count: googleCount, inheritFont: false },
                 ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  className={`skill-source-chip ${opt.inheritFont ? "skill-source-chip-all" : ""} ${typeFilter === opt.key ? "active" : ""}`}
-                  aria-pressed={typeFilter === opt.key}
-                  onClick={() => setTypeFilter(opt.key)}
-                >
-                  <span className="skill-source-chip-label">{opt.label}</span>
-                  <span className="skill-source-chip-count">{opt.count}</span>
-                </button>
-              ))}
+              ).map((opt) => {
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    className={`skill-source-chip ${opt.inheritFont ? "skill-source-chip-all" : ""} ${typeFilter === opt.key ? "active" : ""}`}
+                    aria-pressed={typeFilter === opt.key}
+                    onClick={() => {
+                      setTypeFilter(opt.key);
+                    }}
+                  >
+                    <span className="skill-source-chip-label">{opt.label}</span>
+                    <span className="skill-source-chip-count">{opt.count}</span>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -925,8 +923,6 @@ export default function AiProviders() {
                 placeholder={
                   formType === "openai"
                     ? "https://api.openai.com/v1"
-                    : formType === "google-generative-ai"
-                    ? GOOGLE_GENERATIVE_AI_DEFAULT_BASE_URL
                     : "https://api.anthropic.com"
                 }
                 value={formBaseUrl}
@@ -1020,7 +1016,7 @@ export default function AiProviders() {
                 <button
                   type="button"
                   className="claude-env-fetch-models-btn"
-                  data-tooltip="从当前 Base URL 拉取模型列表"
+                  data-tooltip="从当前 Base URL 拉取候选模型并多选"
                   onClick={() => void fetchModelsForPicker()}
                   disabled={isSaving || pickerLoading}
                 >
@@ -1028,16 +1024,97 @@ export default function AiProviders() {
                   {pickerLoading ? "拉取中…" : "从端点拉取"}
                 </button>
               </div>
+              {/* 远程拉取的模型选择面板（"从端点拉取"后展开的多选 UI，放在标题与已有列表之间） */}
+              {showModelPicker && (
+                <div className="ai-provider-model-picker">
+                  <div className="ai-provider-model-picker-header">
+                    <span className="form-label">选择模型</span>
+                    <button
+                      type="button"
+                      className="modal-close"
+                      onClick={() => {
+                        setShowModelPicker(false);
+                        setPickerModels([]);
+                        setPickerSelected(new Set());
+                      }}
+                    >
+                      <IconClose />
+                    </button>
+                  </div>
+                  <div className="ai-provider-model-picker-list">
+                    {pickerModels.map((model) => {
+                      const checked = pickerSelected.has(model);
+                      const toggle = () => {
+                        setPickerSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(model)) {
+                            next.delete(model);
+                          } else {
+                            next.add(model);
+                          }
+                          return next;
+                        });
+                      };
+                      return (
+                        <div
+                          key={model}
+                          className="ai-provider-model-picker-item"
+                          role="checkbox"
+                          aria-checked={checked}
+                          tabIndex={0}
+                          onClick={toggle}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggle();
+                            }
+                          }}
+                        >
+                          <span className="ai-provider-model-picker-checkbox">
+                            {checked ? <IconCheckSquare /> : <IconSquare />}
+                          </span>
+                          <span>{model}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="ai-provider-model-picker-footer">
+                    <span className="ai-provider-model-picker-count">
+                      已选 {pickerSelected.size} / {pickerModels.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={applyPickerSelection}
+                      disabled={pickerSelected.size === 0}
+                    >
+                      应用
+                    </button>
+                  </div>
+                </div>
+              )}
               {formCustomModels.length === 0 ? (
                 <div className="ai-provider-custom-models-empty">
-                  暂无自定义模型，可点击“从端点拉取”获取供应商模型列表，或在下方手动添加
+                  暂无自定义模型，可点击"从端点拉取"获取供应商模型列表并多选，或在下方手动添加
                 </div>
               ) : (
                 <div className="ai-provider-custom-models-list">
                   {formCustomModels.map((cm, index) => (
                     <div key={cm.model} className="ai-provider-custom-model-item">
                       <div className="ai-provider-custom-model-info">
-                        <span className="ai-provider-custom-model-name">{cm.model}</span>
+                        <div className="ai-provider-custom-model-name-row">
+                          <span className="ai-provider-custom-model-name">{cm.model}</span>
+                          <button
+                            type="button"
+                            className="btn-icon-action ai-provider-custom-model-copy"
+                            data-tooltip="复制模型 ID"
+                            aria-label={`复制模型 ID ${cm.model}`}
+                            onClick={() => void copyModelId(cm.model)}
+                            disabled={isSaving}
+                          >
+                            <IconCopyModel />
+                          </button>
+                        </div>
                         {cm.aliasId && (
                           <span className="ai-provider-custom-model-alias">别名: {cm.aliasId}</span>
                         )}
@@ -1073,7 +1150,7 @@ export default function AiProviders() {
                   ))}
                 </div>
               )}
-              {/* 手动添加模型（供应商不支持拉取列表时使用） */}
+              {/* 手动添加模型（除"从端点拉取"外的另一种录入方式） */}
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
                 <input
                   type="text"
@@ -1101,71 +1178,6 @@ export default function AiProviders() {
                 </button>
               </div>
             </div>
-            {/* 模型选择面板 */}
-            {showModelPicker && (
-              <div className="ai-provider-model-picker">
-                <div className="ai-provider-model-picker-header">
-                  <span className="form-label">选择模型</span>
-                  <button
-                    type="button"
-                    className="modal-close"
-                    onClick={() => setShowModelPicker(false)}
-                  >
-                    <IconClose />
-                  </button>
-                </div>
-                <div className="ai-provider-model-picker-list">
-                  {pickerModels.map((model) => {
-                    const checked = pickerSelected.has(model);
-                    const toggle = () => {
-                      setPickerSelected((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(model)) {
-                          next.delete(model);
-                        } else {
-                          next.add(model);
-                        }
-                        return next;
-                      });
-                    };
-                    return (
-                      <div
-                        key={model}
-                        className="ai-provider-model-picker-item"
-                        role="checkbox"
-                        aria-checked={checked}
-                        tabIndex={0}
-                        onClick={toggle}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            toggle();
-                          }
-                        }}
-                      >
-                        <span className="ai-provider-model-picker-checkbox">
-                          {checked ? <IconCheckSquare /> : <IconSquare />}
-                        </span>
-                        <span>{model}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="ai-provider-model-picker-footer">
-                  <span className="ai-provider-model-picker-count">
-                    已选 {pickerSelected.size} / {pickerModels.length}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={applyPickerSelection}
-                    disabled={pickerSelected.size === 0}
-                  >
-                    应用
-                  </button>
-                </div>
-              </div>
-            )}
             {/* 默认模型选择（从自定义模型列表筛选） */}
             {formType === "universal" && (
               <div className="form-group">
@@ -1196,13 +1208,11 @@ export default function AiProviders() {
                 placeholder={
                   formType === "openai"
                     ? "gpt-5"
-                    : formType === "google-generative-ai"
-                    ? "gemini-2.5-pro"
                     : "claude-sonnet-4-5"
                 }
               />
             </div>
-            {formType !== "openai" && formType !== "google-generative-ai" ? (
+            {formType !== "openai" ? (
               <div className="form-group">
                 <label className="form-label">
                   档位模型 <span className="form-label-optional">可选，从自定义模型列表选择</span>

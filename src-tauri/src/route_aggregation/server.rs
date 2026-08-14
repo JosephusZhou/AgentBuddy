@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{oneshot, RwLock};
 
 use super::config::RouteAggregationConfig;
+use super::log::LogStore;
 use super::provider_router::ProviderRouter;
-use super::translator::TranslatorRegistry;
 
 /// Route aggregation HTTP server. Owns the tokio task and shutdown signal.
 pub struct RouteAggregationServer {
@@ -29,7 +29,7 @@ impl RouteAggregationServer {
     pub async fn start(
         config: Arc<RwLock<RouteAggregationConfig>>,
         provider_router: Arc<ProviderRouter>,
-        translator_registry: Arc<TranslatorRegistry>,
+        log_store: LogStore,
     ) -> Result<Self, String> {
         let (listen_addr, listen_port) = {
             let cfg = config.read().await;
@@ -52,7 +52,7 @@ impl RouteAggregationServer {
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-        let app = super::router::build_router(config, provider_router, translator_registry);
+        let app = super::router::build_router(config, provider_router, log_store);
 
         let join_handle = tokio::spawn(async move {
             let _ = axum::serve(listener, app)

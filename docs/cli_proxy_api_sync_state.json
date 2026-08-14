@@ -1,119 +1,127 @@
 {
-  "schema_version": 3,
-  "last_checked_at": "2026-08-12T00:00:00Z",
+  "schema_version": 6,
+  "last_checked_at": "2026-08-14T00:00:00Z",
   "sla_days": 14,
   "upstream_repo": "router-for-me/CLIProxyAPI",
-  "schema_note": "v3: 嵌套元数据块改名为 source_state/target_state（v2 用的 source/target 与顶层 Format 枚举字段同名冲突）。",
-  "pairs": [
+  "schema_note": "v6: 路由聚合仅维护同协议 passthrough；client_fingerprint_anchors 跟踪 Claude Code / Codex CLI 客户端指纹与对应 upstream 提交哈希。",
+  "passthrough_paths": [
     {
-      "source": "Anthropic",
-      "target": "Gemini",
-      "source_dir": "internal/translator/claude/gemini",
-      "target_dir": "internal/translator/gemini/claude",
-      "last_verified_short_sha": "934da23",
-      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-      "last_verified_date": "2026-08-11",
-      "last_verified_note": "Phase 1 初始实现：system / messages / tools / tool_choice / thinking / image 字段映射。流式 + 非流式响应翻译。tool_name sanitize（含 Phase 3 冲突检测）。",
-      "source_state": {
-        "last_verified_short_sha": "dcee14d",
-        "last_verified_full_sha": "dcee14dd3c53378446ff487fc3e6ae53b40c8590",
-        "last_verified_date": "2026-08-06",
-        "last_verified_note": "claude/gemini dir HEAD；含 feat(compat) preserve compat-mode thinking/signature blocks（AgentBuddy Phase 5 未实现 is-compat 元数据通路）"
-      },
-      "target_state": {
-        "last_verified_short_sha": "934da23",
-        "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-        "last_verified_date": "2026-08-11",
-        "last_verified_note": "gemini/claude dir HEAD；Phase 1 响应翻译基线"
-      }
+      "id": "anthropic_passthrough",
+      "label": "Anthropic Messages → Anthropic Messages (A → A)",
+      "inbound": "/v1/messages",
+      "client": "Claude Code (RouteGroup::ClaudeCode)",
+      "upstream_format": "Anthropic",
+      "transport": "passthrough（请求体/响应体/SSE 直接转发，不做协议翻译）",
+      "header_rewrite": "x-api-key / Authorization 仅替换为已勾选供应商的 key，body 透传"
     },
     {
-      "source": "OpenAiChat",
-      "target": "Gemini",
-      "source_dir": "internal/translator/openai/gemini",
-      "target_dir": "internal/translator/gemini/openai/chat-completions",
-      "last_verified_short_sha": "b3046d2",
-      "last_verified_full_sha": "b3046d29b9859c22c797b86cc99c52ac6ca1a2fc",
-      "last_verified_date": "2026-07-30",
-      "last_verified_note": "Phase 2 初始实现：OpenAI Chat → Gemini 请求（含 system 字段、tool_calls、tool_choice、image_url data URL、input_audio）；Gemini → OpenAI Chat 响应（流式 + 非流式）。passthrough 优先由 forwarder 探测。",
-      "source_state": {
-        "last_verified_short_sha": "7c61e98",
-        "last_verified_full_sha": "7c61e982e490f028d295d69e22e372b29cd2db8c",
-        "last_verified_date": "2026-07-19",
-        "last_verified_note": "openai/gemini dir HEAD；perf(JoinRawArray → SetRawArrayItems) 为 Go 性能优化，Rust 不直接适用"
-      },
-      "target_state": {
-        "last_verified_short_sha": "b3046d2",
-        "last_verified_full_sha": "b3046d29b9859c22c797b86cc99c52ac6ca1a2fc",
-        "last_verified_date": "2026-07-30",
-        "last_verified_note": "gemini/openai/chat-completions dir HEAD；含 feat(thinking) preserve cross-protocol summary visibility"
-      }
+      "id": "openai_responses_passthrough",
+      "label": "OpenAI Responses → OpenAI Responses (OR → OR)",
+      "inbound": "/v1/responses",
+      "client": "Codex CLI (RouteGroup::Codex)",
+      "upstream_format": "OpenAiResponses",
+      "transport": "passthrough（请求体/响应体/SSE 直接转发，不做协议翻译）",
+      "header_rewrite": "Authorization: Bearer <provider key>，body 透传；流式响应按 SSE 帧直接回写"
+    }
+  ],
+  "client_fingerprint_anchors": [
+    {
+      "id": "claude_code_fingerprint",
+      "label": "Claude Code 客户端指纹",
+      "config_version_field": "claude_code_version",
+      "current_version": "2.1.63",
+      "notes": "claude_code_version 变化时必须 review cloaking/claude_*.rs；CLIProxyAPI 侧的 internal/runtime/executor/ 每次 Claude Code 发布新版本（通常 1-2 周）会有 commit 改动。",
+      "files": [
+        {
+          "local_path": "cloaking/claude_billing.rs",
+          "upstream_path": "internal/runtime/executor/claude_signing.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "Phase 5 收口时对齐到 main HEAD；下一步升级 Claude Code 版本前必须重新核对 xxHash64 salt 与 header 顺序"
+        },
+        {
+          "local_path": "cloaking/claude_cloaking.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "system prompt 注入 + billing header forging 同步到 main"
+        },
+        {
+          "local_path": "cloaking/claude_headers.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "applyClaudeHeaders 对齐（与 cloaking 主模块同文件）"
+        },
+        {
+          "local_path": "cloaking/claude_system_prompt.rs",
+          "upstream_path": "internal/runtime/executor/helps/claude_system_prompt.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "Claude Code v2.1.63 prompts.ts segments"
+        },
+        {
+          "local_path": "cloaking/device_profile.rs",
+          "upstream_path": "internal/runtime/executor/claude_device_profile.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "设备指纹字段（id / platform / arch）已对齐"
+        },
+        {
+          "local_path": "cloaking/obfuscate.rs",
+          "upstream_path": "internal/runtime/executor/cloak_obfuscate.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "零宽空格混淆敏感词"
+        },
+        {
+          "local_path": "cloaking/tool_remap.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "OAuth tool rename map（与 cloaking 主模块同文件）"
+        },
+        {
+          "local_path": "cloaking/header_scrub.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "ScrubProxyAndFingerprintHeaders 反向剥离"
+        }
+      ]
     },
     {
-      "source": "Gemini",
-      "target": "OpenAiChat",
-      "source_dir": "internal/translator/gemini/openai/chat-completions",
-      "target_dir": "internal/translator/openai/gemini",
-      "last_verified_short_sha": "b3046d2",
-      "last_verified_full_sha": "b3046d29b9859c22c797b86cc99c52ac6ca1a2fc",
-      "last_verified_date": "2026-07-30",
-      "last_verified_note": "Phase 2: response 方向；与上一对同 commit。⚠️ 实际设计上与 OpenAiChat→Gemini 是同一个 pair 的双向（请求 + 响应），未来可考虑合并 pair。",
-      "source_state": {
-        "last_verified_short_sha": "b3046d2",
-        "last_verified_full_sha": "b3046d29b9859c22c797b86cc99c52ac6ca1a2fc",
-        "last_verified_date": "2026-07-30",
-        "last_verified_note": "gemini/openai/chat-completions dir HEAD"
-      },
-      "target_state": {
-        "last_verified_short_sha": "7c61e98",
-        "last_verified_full_sha": "7c61e982e490f028d295d69e22e372b29cd2db8c",
-        "last_verified_date": "2026-07-19",
-        "last_verified_note": "openai/gemini dir HEAD（Go perf 优化，Rust 不适用）"
-      }
-    },
-    {
-      "source": "OpenAiResponses",
-      "target": "Gemini",
-      "source_dir": "internal/translator/openai/openai/responses",
-      "target_dir": "internal/translator/gemini/openai/responses",
-      "last_verified_short_sha": "934da23",
-      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-      "last_verified_date": "2026-08-11",
-      "last_verified_note": "Phase 4 初始实现：Responses input items → Gemini contents（含 message / function_call / function_call_output / reasoning item / parallel_tool_calls）。",
-      "source_state": {
-        "last_verified_short_sha": "934da23",
-        "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-        "last_verified_date": "2026-08-11",
-        "last_verified_note": "openai/openai/responses dir HEAD；含 fix(openai) preserve structured and stringified custom tool outputs during Responses conversion"
-      },
-      "target_state": {
-        "last_verified_short_sha": "9b8d974",
-        "last_verified_full_sha": "9b8d97441e8692eccd4ea4b010547abeaf352992",
-        "last_verified_date": "2026-08-04",
-        "last_verified_note": "gemini/openai/responses dir HEAD；含 fix(responses) preserve original request model on response.created/response.in_progress payloads"
-      }
-    },
-    {
-      "source": "Gemini",
-      "target": "OpenAiResponses",
-      "source_dir": "internal/translator/gemini/openai/responses",
-      "target_dir": "internal/translator/openai/openai/responses",
-      "last_verified_short_sha": "934da23",
-      "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-      "last_verified_date": "2026-08-11",
-      "last_verified_note": "Phase 4: response 方向；与上一对同 commit。Codex CLI 主路径。⚠️ 与 OpenAiResponses→Gemini 是同一个 pair 的双向，未来可考虑合并。",
-      "source_state": {
-        "last_verified_short_sha": "9b8d974",
-        "last_verified_full_sha": "9b8d97441e8692eccd4ea4b010547abeaf352992",
-        "last_verified_date": "2026-08-04",
-        "last_verified_note": "gemini/openai/responses dir HEAD"
-      },
-      "target_state": {
-        "last_verified_short_sha": "934da23",
-        "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-        "last_verified_date": "2026-08-11",
-        "last_verified_note": "openai/openai/responses dir HEAD"
-      }
+      "id": "codex_fingerprint",
+      "label": "Codex CLI 客户端指纹",
+      "config_version_field": "codex_version",
+      "current_version": "0.146.0",
+      "notes": "codex_version 变化时必须 review cloaking/codex_*.rs。",
+      "files": [
+        {
+          "local_path": "cloaking/codex_cloaking.rs",
+          "upstream_path": "internal/runtime/executor/codex_executor_request.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "applyCodexIdentityConfuseBody 同步"
+        },
+        {
+          "local_path": "cloaking/codex_headers.rs",
+          "upstream_path": "internal/runtime/executor/codex_executor_request.go",
+          "last_verified_short_sha": "934da23",
+          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
+          "last_verified_date": "2026-08-13",
+          "last_verified_note": "applyCodexHeadersFromSources（与 cloaking 主模块同文件）"
+        }
+      ]
     }
   ]
 }

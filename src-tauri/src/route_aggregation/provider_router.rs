@@ -16,6 +16,19 @@ pub struct ProviderRouter {
     breakers: RwLock<HashMap<(String, RouteGroup), Arc<CircuitBreaker>>>,
 }
 
+/// Intermediate row used while building a `RouteProvider` from the DB row.
+/// Keeps DB parsing and route-provider construction separate.
+struct ProviderBuild {
+    id: String,
+    name: String,
+    provider_type: String,
+    base_url: String,
+    api_key: String,
+    model_ids: Vec<String>,
+    enabled: bool,
+    sort_order: i32,
+}
+
 impl ProviderRouter {
     pub fn new() -> Self {
         Self {
@@ -24,31 +37,48 @@ impl ProviderRouter {
         }
     }
 
-    /// Refresh the provider pool for an API format from the database.
-    /// Loads AI providers, filters by type compatibility, decrypts API keys,
-    /// and merges with the unified provider toggle settings.
-    pub async fn refresh_pool(&self, group: RouteGroup) -> Result<usize, String> {
+    /// Refresh the provider pool from DB rows. Every provider's
+    /// `supported_model_ids` is filled synchronously from
+    /// `custom_models_json` (non-empty → `Some(list)`, empty → `None`
+    /// to allow manually specified model IDs).
+    ///
+    /// 适用于热路径：启动、状态轮询、provider toggle、路由聚合重启等。
+    pub async fn refresh_pool_fast(&self, group: RouteGroup) -> Result<usize, String> {
+        let providers = self.build_pool_from_db(group).await?;
+        let count = providers.len();
+        let mut pools = self.pools.write().await;
+        pools.insert(group, providers);
+        let mut breakers = self.breakers.write().await;
+        let pool = pools.get(&group).unwrap();
+        for p in pool {
+            let key = (p.id.clone(), group);
+            breakers
+                .entry(key)
+                .or_insert_with(|| Arc::new(CircuitBreaker::new()));
+        }
+        Ok(count)
+    }
+
+    /// Build the provider list for a group from the DB, decrypting API keys
+    /// and applying toggles. `supported_model_ids` is filled synchronously from
+    /// `custom_models_json` (non-empty → `Some(list)`, empty → `None`).
+    async fn build_pool_from_db(&self, group: RouteGroup) -> Result<Vec<RouteProvider>, String> {
         let provider_rows = crate::db::load_ai_provider_rows()?;
         let toggles = crate::db::load_provider_route_toggles()?;
 
-        let mut providers: Vec<RouteProvider> = Vec::new();
+        let mut builds: Vec<ProviderBuild> = Vec::new();
 
         for row in &provider_rows {
             // Filter by provider type compatibility for this API format.
-            // Both groups accept google-generative-ai as backend（ClaudeCode
-            // 经 claude_gemini 翻译器，Codex 经 openai_openai_responses /
-            // openai_gemini 翻译器；OpenAI Chat 客户端到 Google 时优先走
-            // `/v1beta/openai/v1/...` passthrough）。
+            // Phase 5+：路由聚合只接受 Anthropic / OpenAI / Universal 三类 backend。
             let matches = match group {
                 RouteGroup::ClaudeCode => {
                     row.provider_type == crate::ai_provider::TYPE_ANTHROPIC
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                        || row.provider_type == crate::ai_provider::TYPE_GOOGLE_GENERATIVE_AI
                 }
                 RouteGroup::Codex => {
                     row.provider_type == crate::ai_provider::TYPE_OPENAI
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                        || row.provider_type == crate::ai_provider::TYPE_GOOGLE_GENERATIVE_AI
                 }
             };
             if !matches {
@@ -95,22 +125,26 @@ impl ProviderRouter {
 
             // Effective model IDs from the provider's custom model list.
             // Each entry is {model, aliasId}; aliasId takes precedence.
-            let model_ids: Vec<String> = serde_json::from_str::<
-                Vec<crate::ai_provider::CustomModel>,
-            >(&row.custom_models_json)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|m| {
-                if m.alias_id.trim().is_empty() {
-                    m.model
-                } else {
-                    m.alias_id
-                }
-            })
-            .filter(|id| !id.trim().is_empty())
-            .collect();
+            let model_ids: Vec<String> =
+                serde_json::from_str::<Vec<crate::ai_provider::CustomModel>>(
+                    &row.custom_models_json,
+                )
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| {
+                    if m.alias_id.trim().is_empty() {
+                        m.model
+                    } else {
+                        m.alias_id
+                    }
+                })
+                .filter(|id| !id.trim().is_empty())
+                .collect();
 
-            // For universal type in Codex group, use the derived OpenAI base URL
+            // For universal type in Codex group, append /v1 so the upstream OpenAI Responses
+            // endpoint at `{base}/v1/responses` is reachable. In ClaudeCode group the
+            // raw Anthropic base URL is used (Anthropic Messages endpoint already
+            // lives at `{base}/v1/messages`).
             let base_url = if row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
                 && group == RouteGroup::Codex
             {
@@ -119,7 +153,7 @@ impl ProviderRouter {
                 row.base_url.clone()
             };
 
-            providers.push(RouteProvider {
+            builds.push(ProviderBuild {
                 id: row.id.clone(),
                 name: row.name.clone(),
                 provider_type: row.provider_type.clone(),
@@ -131,22 +165,30 @@ impl ProviderRouter {
             });
         }
 
-        // Sort by sort_order
-        providers.sort_by_key(|p| p.sort_order);
+        // Sort by sort_order so the in-memory order matches the user's intent.
+        builds.sort_by_key(|b| b.sort_order);
 
-        let count = providers.len();
-        let mut pools = self.pools.write().await;
-        pools.insert(group, providers);
+        let providers: Vec<RouteProvider> = builds
+            .iter()
+            .map(|b| RouteProvider {
+                id: b.id.clone(),
+                name: b.name.clone(),
+                provider_type: b.provider_type.clone(),
+                base_url: b.base_url.clone(),
+                api_key: b.api_key.clone(),
+                model_ids: b.model_ids.clone(),
+                enabled: b.enabled,
+                // 模型列表唯一来源：用户在 AI 供应商编辑页配置的 `custom_models_json`。
+                // 非空时直接作为 supported_model_ids；空列表保持 None（failover 不按模型过滤）。
+                supported_model_ids: if b.model_ids.is_empty() {
+                    None
+                } else {
+                    Some(b.model_ids.clone())
+                },
+            })
+            .collect();
 
-        // Ensure circuit breakers exist for all providers
-        let mut breakers = self.breakers.write().await;
-        let pool = pools.get(&group).unwrap();
-        for p in pool {
-            let key = (p.id.clone(), group);
-            breakers.entry(key).or_insert_with(|| Arc::new(CircuitBreaker::new()));
-        }
-
-        Ok(count)
+        Ok(providers)
     }
 
     /// Select providers for forwarding. If failover is enabled, returns all enabled
@@ -189,6 +231,34 @@ impl ProviderRouter {
         result
     }
 
+    /// Filter a provider list by model support, so the caller doesn't waste a
+    /// request round-trip on a provider that doesn't even advertise the model.
+    ///
+    /// Rules:
+    /// - `model = None`: no filter (used by `/v1/models`, etc.).
+    /// - Provider has `supported_model_ids = None` (no custom model list):
+    ///   pass through unfiltered so manually specified model IDs still work.
+    /// - Provider has `supported_model_ids = Some(ids)`: keep iff `model` is
+    ///   in `ids`.
+    ///
+    /// This is a pure filter; ordering is preserved so the caller's `sort_order`
+    /// (already applied while building the pool) is intact.
+    pub fn filter_by_model(
+        providers: Vec<RouteProvider>,
+        model: Option<&str>,
+    ) -> Vec<RouteProvider> {
+        let Some(model) = model else {
+            return providers;
+        };
+        providers
+            .into_iter()
+            .filter(|p| match &p.supported_model_ids {
+                None => true,
+                Some(ids) => ids.iter().any(|id| id == model),
+            })
+            .collect()
+    }
+
     /// Record a successful request for a provider.
     pub async fn record_success(&self, provider_id: &str, group: RouteGroup) {
         let breakers = self.breakers.read().await;
@@ -216,33 +286,21 @@ impl ProviderRouter {
         }
     }
 
-    /// Get merged info for all enabled providers across both API formats:
-    /// (id, name, custom_model_ids, fetch_base_url, api_key).
-    /// Codex-format entries are visited first so universal providers expose
-    /// their OpenAI-style base URL (used for remote /v1/models fetching).
-    pub async fn get_enabled_provider_model_infos(
-        &self,
-    ) -> Vec<(String, String, Vec<String>, String, String)> {
+    /// Get the union of custom model IDs for all enabled providers.
+    pub async fn get_enabled_model_ids(&self) -> Vec<String> {
         let pools = self.pools.read().await;
-        let mut result: Vec<(String, String, Vec<String>, String, String)> = Vec::new();
+        let mut model_ids = std::collections::BTreeSet::new();
+        // 合并两个入口的启用 provider 模型；BTreeSet 自动去重。
         for group in [RouteGroup::Codex, RouteGroup::ClaudeCode] {
             let pool = match pools.get(&group) {
                 Some(p) => p,
                 None => continue,
             };
             for p in pool.iter().filter(|p| p.enabled) {
-                if !result.iter().any(|(id, _, _, _, _)| *id == p.id) {
-                    result.push((
-                        p.id.clone(),
-                        p.name.clone(),
-                        p.model_ids.clone(),
-                        p.base_url.clone(),
-                        p.api_key.clone(),
-                    ));
-                }
+                model_ids.extend(p.model_ids.iter().cloned());
             }
         }
-        result
+        model_ids.into_iter().collect()
     }
 
     /// Get status snapshots for all providers in a group.

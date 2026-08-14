@@ -2,6 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Upstream protocol used by a route group. Route aggregation only supports
+/// same-protocol passthrough; this is intentionally not a protocol registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProviderFormat {
+    Anthropic,
+    OpenAiResponses,
+}
+
 /// API format — determines which API paths and cloaking strategy to use.
 /// Internal only: the aggregated endpoint always serves both formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -79,16 +87,12 @@ pub struct RouteProvider {
     pub model_ids: Vec<String>,
     /// Whether this provider is enabled.
     pub enabled: bool,
-    pub sort_order: i32,
-}
-
-/// Result of a forwarding attempt for one provider.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct ForwardAttempt {
-    pub provider_id: String,
-    pub provider_name: String,
-    pub success: bool,
-    pub error: Option<String>,
-    pub status_code: Option<u16>,
+    /// Known supported model IDs used to short-circuit the failover pool when a
+    /// request names a model none of the providers actually offer. Populated at
+    /// `refresh_pool_fast` time:
+    /// - If `model_ids` is non-empty (custom list), this is `Some(model_ids)`
+    ///   and the provider participates in failover unfiltered iff the model
+    ///   is in the list.
+    /// - Empty list → `None` (no filter, every request is allowed).
+    pub supported_model_ids: Option<Vec<String>>,
 }

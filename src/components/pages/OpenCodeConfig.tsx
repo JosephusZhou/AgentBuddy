@@ -714,6 +714,8 @@ export default function ModelConfig() {
   const [modelSearch, setModelSearch] = useState("");
 
   // 模型弹窗内的「从供应商模型列表选择」：拉取当前供应商端点的模型列表
+  // **临时配置专用**：当 OpenCode / Pi / Oh-My-Pi provider **不**关联 AI 供应商库、
+  // 手填 baseUrl + apiKey 时调用。"已配置 AI 供应商"路径以 `customModels` 为唯一来源。
   const [providerPickOpen, setProviderPickOpen] = useState(false);
   const [providerPickQuery, setProviderPickQuery] = useState("");
   const [providerPickModels, setProviderPickModels] = useState<string[]>([]);
@@ -857,8 +859,9 @@ export default function ModelConfig() {
     }));
   }, [providerPickHits, catalog, modelForm?.providerId]);
 
-  /** 加载已配置的 AI 供应商（仅 OpenAI / 通用类型可对接本页面）；编辑时按 Base URL 预选。
-   * 路由聚合运行时将虚拟供应商「路由聚合」置顶。 */
+
+/** 加载已配置的 AI 供应商（仅 OpenAI / 通用类型可对接本页面）；编辑时按 Base URL 预选。
+ * 路由聚合运行时将虚拟供应商「路由聚合」置顶。 */
   const loadAiProviders = useCallback(async (presetBaseUrl?: string) => {
     setFormAiProviderId("");
     try {
@@ -1001,7 +1004,12 @@ export default function ModelConfig() {
     });
   };
 
-  /** 点击「从供应商模型列表选择」：从当前供应商的 Base URL 拉取模型列表。 */
+  /** 点击「从供应商模型列表选择」：从当前 provider 的 Base URL 拉取模型列表。
+   *
+   * **临时配置专用**：仅当 OpenCode / Pi / Oh-My-Pi provider **不**关联 AI 供应商
+   * 库、手填 baseUrl + apiKey 时使用。"已配置 AI 供应商"路径以 `customModels` 为
+   * 唯一来源，**不**触发远端拉取。
+   */
   const loadProviderModels = async (providerId: string) => {
     setProviderPickOpen(true);
     setProviderPickMsg("");

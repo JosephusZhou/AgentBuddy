@@ -1730,6 +1730,12 @@ label,
   min-width: 0;
   flex: 1;
 }
+.ai-provider-custom-model-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 .ai-provider-custom-model-name {
   font-size: var(--text-sm);
   font-weight: 500;
@@ -1737,6 +1743,17 @@ label,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.ai-provider-custom-model-copy {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.ai-provider-custom-model-copy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .ai-provider-custom-model-alias {
   font-size: var(--text-xs);
