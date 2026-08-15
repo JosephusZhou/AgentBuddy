@@ -69,7 +69,11 @@ export default function RouteAggregation() {
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
     try {
-      const list = await api.getRouteLogs();
+      const [list, currentLogPath] = await Promise.all([
+        api.getRouteLogs(),
+        api.getRouteLogFilePath(),
+      ]);
+      setLogFilePath(currentLogPath);
       // 环形缓冲区满后数量不再变化，必须比较内容，不能只比较长度。
       setLogs((prev) => {
         const unchanged =
@@ -90,10 +94,6 @@ export default function RouteAggregation() {
   useEffect(() => {
     loadData();
     loadLogs();
-    // Pull the on-disk log file path once on mount so the UI can show
-    // it next to the in-memory ring (the file is the durable source of
-    // truth for `tail -f` style debugging).
-    api.getRouteLogFilePath().then(setLogFilePath).catch(() => setLogFilePath(null));
     const interval = setInterval(async () => {
       try {
         const sts = await api.getStatus();

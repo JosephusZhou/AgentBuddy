@@ -1642,11 +1642,11 @@ pub fn run() {
             // aggregation traffic without depending on the UI. Best-effort:
             // if the app data dir isn't writable we just skip the sink.
             if let Ok(dir) = crate::platform::app_data_dir() {
-                let log_path = dir.join("route_aggregation.log");
+                let log_path = dir.join("logs").join("route_aggregation.log");
                 if let Some(file) = route_aggregation::LogFile::open(&log_path) {
                     eprintln!(
                         "[route-aggregation] logging to {}",
-                        log_path.display()
+                        file.path().display()
                     );
                     ra_state.log_store.attach_file(file);
                 }
