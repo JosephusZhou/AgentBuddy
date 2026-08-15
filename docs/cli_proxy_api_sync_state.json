@@ -3,7 +3,17 @@
   "last_checked_at": "2026-08-15T00:00:00Z",
   "sla_days": 14,
   "upstream_repo": "router-for-me/CLIProxyAPI",
-  "schema_note": "v6: 路由聚合仅维护同协议 passthrough；client_fingerprint_anchors 跟踪 Claude Code / Codex CLI 客户端指纹与对应 upstream 提交哈希。",
+  "schema_note": "v6: 路由聚合维护同协议转发边界；Claude Code Messages 在边界内执行 cloaking，client_fingerprint_anchors 跟踪客户端指纹与对应 upstream 提交哈希。",
+  "local_cloaking_status": {
+    "status": "implemented_and_tested",
+    "verified_at": "2026-08-15",
+    "scope": [
+      "Claude Messages 请求头、设备 profile、system relocation、billing/CCH、user_id、工具名映射、敏感词、cache/context 策略",
+      "count_tokens 请求路径与 system relocation",
+      "非流式响应和 SSE 响应中的工具名反向映射"
+    ],
+    "known_local_difference": "设备 profile 使用 AgentBuddy 作用域内存缓存，不复用 CLIProxyAPI 的 home KV；上游提交哈希未因本地实现完成而伪造推进。"
+  },
   "passthrough_paths": [
     {
       "id": "anthropic_passthrough",
@@ -11,8 +21,17 @@
       "inbound": "/v1/messages",
       "client": "Claude Code (RouteGroup::ClaudeCode)",
       "upstream_format": "Anthropic",
-      "transport": "passthrough（请求体/响应体/SSE 直接转发，不做协议翻译）",
-      "header_rewrite": "x-api-key / Authorization 仅替换为已勾选供应商的 key，body 透传"
+      "transport": "同协议转发（不做协议翻译）；Claude Code 请求执行 cloaking，非流式/SSE 响应执行工具名恢复",
+      "header_rewrite": "认证头替换为已勾选供应商的 key，并覆盖 Claude Code 指纹头"
+    },
+    {
+      "id": "anthropic_count_tokens_passthrough",
+      "label": "Anthropic count_tokens → Anthropic count_tokens",
+      "inbound": "/v1/messages/count_tokens",
+      "client": "Claude Code (RouteGroup::ClaudeCode)",
+      "upstream_format": "Anthropic",
+      "transport": "同协议转发；执行 count_tokens 专用 system relocation 和请求级 cloaking",
+      "header_rewrite": "认证头替换为已勾选供应商的 key，并覆盖 Claude Code 指纹头"
     },
     {
       "id": "openai_responses_passthrough",

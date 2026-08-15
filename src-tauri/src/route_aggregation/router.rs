@@ -47,6 +47,10 @@ pub fn build_router(
         // Claude Code: POST /v1/messages (and /claude/v1/messages alias)
         .route("/v1/messages", post(handler::handle_claude_messages))
         .route("/claude/v1/messages", post(handler::handle_claude_messages))
+        .route(
+            "/v1/messages/count_tokens",
+            post(handler::handle_claude_count_tokens),
+        )
         // Codex: POST /v1/responses (Responses API, not Chat Completions)
         .route("/v1/responses", post(handler::handle_codex_responses))
         // /v1/models is always available when the server is running

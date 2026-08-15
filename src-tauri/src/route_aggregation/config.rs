@@ -26,6 +26,16 @@ pub struct RouteAggregationConfig {
     pub claude_code_version: String,
     #[serde(default = "default_codex_version")]
     pub codex_version: String,
+    /// Drop caller-provided system instructions instead of relocating them.
+    #[serde(default)]
+    pub claude_strict_mode: bool,
+    /// Sensitive words to obfuscate in Claude system/message text.
+    #[serde(default = "default_claude_sensitive_words")]
+    pub claude_sensitive_words: Vec<String>,
+    #[serde(default = "default_claude_cache_max_blocks")]
+    pub claude_cache_max_blocks: u8,
+    #[serde(default)]
+    pub claude_context_management: bool,
     /// Endpoint API keys. The first key (index 0) is the primary key and can
     /// only be regenerated, never deleted; additional keys can be deleted.
     /// Empty list = no authentication required.
@@ -73,6 +83,25 @@ fn default_codex_version() -> String {
     "0.146.0".to_string()
 }
 
+fn default_claude_sensitive_words() -> Vec<String> {
+    [
+        "proxy",
+        "relay",
+        "forward",
+        "upstream",
+        "agentbuddy",
+        "route",
+        "aggregat",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn default_claude_cache_max_blocks() -> u8 {
+    4
+}
+
 impl Default for RouteAggregationConfig {
     fn default() -> Self {
         Self {
@@ -86,6 +115,10 @@ impl Default for RouteAggregationConfig {
             cloaking_mode: super::CloakingMode::Auto,
             claude_code_version: default_claude_code_version(),
             codex_version: default_codex_version(),
+            claude_strict_mode: false,
+            claude_sensitive_words: default_claude_sensitive_words(),
+            claude_cache_max_blocks: default_claude_cache_max_blocks(),
+            claude_context_management: true,
             api_keys: Vec::new(),
             auto_start: false,
         }
@@ -113,7 +146,9 @@ pub fn save_config(config: &super::RouteAggregationConfig) -> Result<(), String>
 }
 
 /// Normalize + validate config before write.
-pub fn normalize_config(mut config: super::RouteAggregationConfig) -> Result<super::RouteAggregationConfig, String> {
+pub fn normalize_config(
+    mut config: super::RouteAggregationConfig,
+) -> Result<super::RouteAggregationConfig, String> {
     config.listen_address = config.listen_address.trim().to_string();
     if config.listen_address.is_empty() {
         config.listen_address = default_listen_address();

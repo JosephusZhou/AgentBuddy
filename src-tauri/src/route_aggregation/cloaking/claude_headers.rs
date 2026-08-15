@@ -3,6 +3,8 @@
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 
+use super::device_profile;
+
 /// Inject Claude Code client headers into the request.
 ///
 /// This simulates a real Claude Code CLI request by injecting:
@@ -13,11 +15,8 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue};
 /// - X-Stainless-* SDK headers
 /// - X-Claude-Code-Session-Id
 /// - X-Client-Request-Id
-pub fn inject_claude_headers(
-    headers: &mut HeaderMap,
-    version: &str,
-    session_id: &str,
-) {
+pub fn inject_claude_headers(headers: &mut HeaderMap, version: &str, session_id: &str) {
+    let profile = device_profile::get_stable_profile(version);
     // Anthropic-Beta
     set_header(
         headers,
@@ -36,10 +35,18 @@ pub fn inject_claude_headers(
     set_header(headers, "x-stainless-runtime", "node");
     set_header(headers, "x-stainless-lang", "js");
     set_header(headers, "x-stainless-timeout", "600");
-    set_header(headers, "x-stainless-package-version", "0.94.0");
-    set_header(headers, "x-stainless-runtime-version", "v26.3.0");
-    set_header(headers, "x-stainless-os", "MacOS");
-    set_header(headers, "x-stainless-arch", "arm64");
+    set_header(
+        headers,
+        "x-stainless-package-version",
+        &profile.package_version,
+    );
+    set_header(
+        headers,
+        "x-stainless-runtime-version",
+        &profile.runtime_version,
+    );
+    set_header(headers, "x-stainless-os", &profile.os);
+    set_header(headers, "x-stainless-arch", &profile.arch);
 
     // Claude Code session ID
     set_header(headers, "x-claude-code-session-id", session_id);
@@ -49,8 +56,7 @@ pub fn inject_claude_headers(
     set_header(headers, "x-client-request-id", &request_id);
 
     // User-Agent
-    let ua = format!("claude-cli/{} (external, cli)", version);
-    set_header(headers, "user-agent", &ua);
+    set_header(headers, "user-agent", &profile.user_agent);
 }
 
 fn set_header(headers: &mut HeaderMap, name: &str, value: &str) {

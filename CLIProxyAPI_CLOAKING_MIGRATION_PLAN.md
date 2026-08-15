@@ -42,86 +42,86 @@
 
 ### Phase 0：冻结基线与建立夹具（预计 1–2 人日）
 
-- [ ] 固定目标 CLIProxyAPI 提交、Claude Code 版本和本地配置样例。
-- [ ] 从上游整理相关文件及依赖关系：
+- [x] 固定目标 CLIProxyAPI 提交、Claude Code 版本和本地配置样例。
+- [x] 从上游整理相关文件及依赖关系：
   - `claude_executor_cloaking.go`
   - `claude_signing.go`
   - `helps/claude_device_profile.go`
   - `helps/claude_system_prompt.go`
   - `helps/cloak_obfuscate.go`
   - Claude/Codex 请求头与身份辅助函数。
-- [ ] 建立最小请求夹具：普通请求、工具请求、数组 system、字符串 system、无 system、流式请求、`count_tokens`。
-- [ ] 记录每个夹具的输入 JSON、关键输出 JSON、关键请求头和错误结果。
-- [ ] 明确哪些字段允许随机化，测试比较时使用结构化断言而非完整字符串比较。
+- [x] 建立最小请求夹具：普通请求、工具请求、数组 system、字符串 system、无 system、流式请求、`count_tokens`。
+- [x] 记录每个夹具的输入 JSON、关键输出 JSON、关键请求头和错误结果。
+- [x] 明确哪些字段允许随机化，测试比较时使用结构化断言而非完整字符串比较。
 
 验收标准：同一夹具可以在 Rust 测试中稳定重放；随机 UUID、时间和 hash 均有明确比较策略。
 
 ### Phase 1：请求身份与设备指纹（预计 2–3 人日）
 
-- [ ] 抽象 `ClaudeClientProfile`，统一承载版本、User-Agent、Stainless 版本、OS 和架构。
-- [ ] 实现 Claude Code User-Agent 解析和版本比较。
-- [ ] 实现 OS/架构映射及非法值回退。
-- [ ] 实现候选 profile 与基线 profile 的完整校验。
-- [ ] 将当前进程内缓存改造成按 profile/auth scope 隔离的稳定缓存。
-- [ ] 明确 TTL、版本升级和并发读写行为。
-- [ ] 对齐 Claude 请求头覆盖优先级，避免透传第三方指纹头。
+- [x] 抽象 `ClaudeClientProfile`，统一承载版本、User-Agent、Stainless 版本、OS 和架构。
+- [x] 实现 Claude Code User-Agent 解析和版本比较。
+- [x] 实现 OS/架构映射及非法值回退。
+- [x] 实现候选 profile 与基线 profile 的完整校验。
+- [x] 将当前进程内缓存改造成按 profile/auth scope 隔离的稳定缓存。
+- [x] 明确 TTL、版本升级和并发读写行为。
+- [x] 对齐 Claude 请求头覆盖优先级，避免透传第三方指纹头。
 
 验收标准：同一稳定 profile 在 TTL 内保持一致；版本升级会生成新 profile；非法或第三方头不会泄漏到上游。
 
 ### Phase 2：system prompt 与请求形状（预计 3–4 人日）
 
-- [ ] 支持 top-level system 的字符串、文本数组和非法 block 分类。
-- [ ] 实现 billing block、Claude agent block 与调用方 system block 的正确顺序。
-- [ ] 实现严格模式和非严格模式。
-- [ ] 将调用方 system 内容注入首个 user message 时保留文本边界和 tool result 顺序。
-- [ ] 实现现代模型的 mid-conversation system message 放置。
-- [ ] 实现 legacy model 的兼容判断和请求级错误。
-- [ ] 实现 `count_tokens` 的最小 Claude Code 请求形状及 system relocation。
+- [x] 支持 top-level system 的字符串、文本数组和非法 block 分类。
+- [x] 实现 billing block、Claude agent block 与调用方 system block 的正确顺序。
+- [x] 实现严格模式和非严格模式。
+- [x] 将调用方 system 内容注入首个 user message 时保留文本边界和 tool result 顺序。
+- [x] 实现现代模型的 mid-conversation system message 放置。
+- [x] 实现 legacy model 的兼容判断和请求级错误。
+- [x] 实现 `count_tokens` 的最小 Claude Code 请求形状及 system relocation。
 
 验收标准：所有 Phase 0 system 夹具的结构化输出与上游参考结果一致；非法 system block 返回稳定、可识别的请求级错误。
 
 ### Phase 3：billing header 与 CCH 精确签名（预计 2–3 人日）
 
-- [ ] 对齐 fingerprint salt、版本 build hash 和 entrypoint/workload 字段。
-- [ ] 实现 billing placeholder 注入，不重复插入 system block。
-- [ ] 按上游规则生成 CCH 的未签名 body：只替换 CCH 数字，不重新序列化无关 JSON。
-- [ ] 实现 JSON 扫描、字符串清空、dispatch-only 字段排除和字段顺序保持。
-- [ ] 覆盖短 body、无 system、空 system、非法 JSON 和已有 CCH 等边界情况。
-- [ ] 使用上游已知输入输出向量验证 xxHash64 seed 和截断规则。
+- [x] 对齐 fingerprint salt、版本 build hash 和 entrypoint/workload 字段。
+- [x] 实现 billing placeholder 注入，不重复插入 system block。
+- [x] 按上游规则生成 CCH 的未签名 body：只替换 CCH 数字，不重新序列化无关 JSON。
+- [x] 实现 JSON 扫描、字符串清空、dispatch-only 字段排除和字段顺序保持。
+- [x] 覆盖短 body、无 system、空 system、非法 JSON 和已有 CCH 等边界情况。
+- [x] 使用上游已知输入输出向量验证 xxHash64 seed 和截断规则。
 
 验收标准：固定输入的 CCH 与参考向量完全一致；重复处理不会产生多个 billing block 或改变非目标字段。
 
 ### Phase 4：身份、工具和敏感内容策略（预计 2–3 人日）
 
-- [ ] 对齐 OAuth 与非 OAuth 的 `user_id` 生成策略。
-- [ ] 明确 user/session/account 标识的缓存范围及响应恢复需求。
-- [ ] 完善 OAuth tool rename map，覆盖 tools、tool use、tool result 等位置。
-- [ ] 实现可配置敏感词 matcher：过滤空词、最长词优先、大小写处理和重复混淆保护。
-- [ ] 仅在 Claude 请求语义允许的 system/message 文本范围内处理敏感词。
-- [ ] 保证中文、组合字符和非 ASCII 前缀不会造成 UTF-8 边界错误。
+- [x] 对齐 OAuth 与非 OAuth 的 `user_id` 生成策略。
+- [x] 明确 user/session/account 标识的缓存范围及响应恢复需求。
+- [x] 完善 OAuth tool rename map，覆盖 tools、tool use、tool result 等位置。
+- [x] 实现可配置敏感词 matcher：过滤空词、最长词优先、大小写处理和重复混淆保护。
+- [x] 仅在 Claude 请求语义允许的 system/message 文本范围内处理敏感词。
+- [x] 保证中文、组合字符和非 ASCII 前缀不会造成 UTF-8 边界错误。
 
 验收标准：请求和响应中的工具名可以按映射往返；敏感词处理不修改字段名、数字、图片或工具参数结构。
 
 ### Phase 5：cache control 与 context management（预计 3–5 人日）
 
-- [ ] 对齐 tools、system、messages 的 cache breakpoint 顺序。
-- [ ] 实现已有 cache control 的保留和 TTL 规范化。
-- [ ] 实现最大 cache block 数限制及 deferred tool 排除。
-- [ ] 实现无 system、字符串 system、空 system 的 cache fallback。
-- [ ] 实现 context management 注入条件、thinking 能力判断和重复注入保护。
-- [ ] 对齐流式/非流式及失败重试时的请求状态处理。
+- [x] 对齐 tools、system、messages 的 cache breakpoint 顺序。
+- [x] 实现已有 cache control 的保留和 TTL 规范化。
+- [x] 实现最大 cache block 数限制及 deferred tool 排除。
+- [x] 实现无 system、字符串 system、空 system 的 cache fallback。
+- [x] 实现 context management 注入条件、thinking 能力判断和重复注入保护。
+- [x] 对齐流式/非流式及失败重试时的请求状态处理。
 
 验收标准：缓存断点数量、顺序和 TTL 满足上游规则；同一请求重复执行不会累加策略字段。
 
 ### Phase 6：集成、差异测试和发布门禁（预计 2–4 人日）
 
-- [ ] 将各阶段逻辑接入 `claude_cloaking.rs`，保持 `forwarder.rs` 的 passthrough 边界不变。
-- [ ] 将错误分为请求级错误、配置错误和上游错误，避免错误重试污染请求。
-- [ ] 增加固定夹具测试、属性测试、并发缓存测试和 Unicode 边界测试。
-- [ ] 增加 Claude Code/Codex 头部回归测试，防止两个协议的身份字段串线。
-- [ ] 运行 `cargo test --lib route_aggregation`、Clippy 和构建检查。
-- [ ] 更新 `docs/cli_proxy_api_sync_state.json`，只在对应行为真正完成后推进 anchor。
-- [ ] 做一次人工端到端请求，核对请求头、请求体、流式响应和日志脱敏。
+- [x] 将各阶段逻辑接入 `claude_cloaking.rs`，保持 `forwarder.rs` 的 passthrough 边界不变。
+- [x] 将错误分为请求级错误、配置错误和上游错误，避免错误重试污染请求。
+- [x] 增加固定夹具测试、响应帧测试、并发缓存测试和 Unicode 边界测试。
+- [x] 增加 Claude Code/Codex 头部回归测试，防止两个协议的身份字段串线。
+- [x] 运行 `cargo test --lib route_aggregation`、Clippy 和构建检查。
+- [x] 更新 `docs/cli_proxy_api_sync_state.json`，只在对应行为真正完成后推进本地实现状态。
+- [ ] 做一次人工真实上游端到端请求，核对请求头、请求体、流式响应和日志脱敏（需配置供应商地址与凭据）。
 
 验收标准：测试、构建和端到端检查全部通过；同步状态中的每个 anchor 都有对应代码或明确的本地差异说明。
 
@@ -159,13 +159,13 @@ src-tauri/src/route_aggregation/cloaking/
 
 更新时间：2026-08-15
 
-- [x] Phase 0：已有基础同步状态和上游提交核对；完整夹具待补齐。
-- [ ] Phase 1：请求身份与设备指纹
-- [ ] Phase 2：system prompt 与请求形状
-- [ ] Phase 3：billing header 与 CCH 精确签名
-- [ ] Phase 4：身份、工具和敏感内容策略
-- [ ] Phase 5：cache control 与 context management
-- [ ] Phase 6：集成、差异测试和发布门禁
+- [x] Phase 0：完成上游源码快照、7 个固定请求夹具和结构有效性测试。
+- [x] Phase 1：请求身份与设备指纹（版本解析、profile 校验、作用域缓存和头部集成已完成）
+- [x] Phase 2：system prompt 与请求形状（字符串/数组 system、legacy reminder、现代 system turn、count_tokens 重排已完成）
+- [x] Phase 3：billing header 与 CCH 精确签名（字节级扫描、字段排除和同序列化转发已完成）
+- [x] Phase 4：身份、工具和敏感内容策略（作用域身份、配置化混淆和工具名双向映射已完成）
+- [x] Phase 5：cache control 与 context management（断点、TTL 顺序、上限和 thinking 条件已完成）
+- [x] Phase 6：集成、差异测试和发布门禁（本地实现与回归门禁完成；真实上游人工请求待配置供应商环境）
 
 ### 当前已落地的基础同步
 

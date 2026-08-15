@@ -1,0 +1,6 @@
+{
+  "model": "claude-sonnet-4-5",
+  "max_tokens": 128,
+  "system": [{"type": "text", "text": "Follow the project rules."}, {"type": "text", "text": "Use concise answers."}],
+  "messages": [{"role": "user", "content": "Implement the change"}]
+}

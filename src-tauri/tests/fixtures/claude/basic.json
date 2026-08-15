@@ -1,0 +1,6 @@
+{
+  "model": "claude-sonnet-4-5",
+  "max_tokens": 128,
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": false
+}

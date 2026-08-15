@@ -1,8 +1,11 @@
 //! Cloaking submodules — Claude Code rectifier + Codex client simulation.
 
 pub mod claude_billing;
+pub mod claude_cache;
 pub mod claude_cloaking;
+pub mod claude_context;
 pub mod claude_headers;
+pub mod claude_identity;
 pub mod claude_system_prompt;
 pub mod codex_cloaking;
 pub mod codex_headers;

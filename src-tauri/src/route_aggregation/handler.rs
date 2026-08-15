@@ -65,6 +65,24 @@ pub async fn handle_claude_messages(
         InboundProtocol::ClaudeMessages,
         headers,
         body,
+        false,
+    )
+    .await
+}
+
+/// Handler for Claude Code token counting: POST /v1/messages/count_tokens.
+pub async fn handle_claude_count_tokens(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    handle_with_log(
+        state,
+        RouteGroup::ClaudeCode,
+        InboundProtocol::ClaudeMessages,
+        headers,
+        body,
+        true,
     )
     .await
 }
@@ -82,6 +100,7 @@ pub async fn handle_codex_responses(
         InboundProtocol::CodexResponses,
         headers,
         body,
+        false,
     )
     .await
 }
@@ -99,6 +118,7 @@ async fn handle_with_log(
     protocol: InboundProtocol,
     headers: HeaderMap,
     body: serde_json::Value,
+    count_tokens: bool,
 ) -> Response {
     let started = Instant::now();
     let config = state.config.read().await.clone();
@@ -106,6 +126,7 @@ async fn handle_with_log(
     // Re-derive the inbound path from headers (axum's matched_path is in the
     // router; we keep a stable string here instead of plumbing it through).
     let inbound_path = match protocol {
+        InboundProtocol::ClaudeMessages if count_tokens => "/v1/messages/count_tokens",
         InboundProtocol::ClaudeMessages => "/v1/messages",
         InboundProtocol::CodexResponses => "/v1/responses",
         InboundProtocol::OpenAiModelsList => "/v1/models",
@@ -164,8 +185,15 @@ async fn handle_with_log(
         return resp;
     }
 
-    let forward_result =
-        forwarder::forward(group, body, &headers, &config, &state.provider_router).await;
+    let forward_result = forwarder::forward(
+        group,
+        body,
+        &headers,
+        &config,
+        &state.provider_router,
+        count_tokens,
+    )
+    .await;
 
     match forward_result {
         Ok(result) => {
@@ -252,7 +280,7 @@ fn forward_error_to_response(err: forwarder::ForwardError) -> Response {
             error_response(StatusCode::BAD_GATEWAY, "所有供应商均请求失败")
         }
         forwarder::ForwardError::CloakingError(msg) => {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg)
+            error_response(StatusCode::BAD_REQUEST, &msg)
         }
         forwarder::ForwardError::RequestError(msg) => error_response(StatusCode::BAD_GATEWAY, &msg),
     }

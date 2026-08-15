@@ -1,0 +1,6 @@
+{
+  "model": "claude-3-7-sonnet-latest",
+  "messages": [{"role": "user", "content": "Count these tokens"}],
+  "system": [{"type": "text", "text": "Count this caller instruction."}],
+  "tools": []
+}

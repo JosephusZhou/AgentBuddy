@@ -6,6 +6,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
+use bytes::Bytes;
 use futures::StreamExt;
 
 use super::cloaking;
@@ -90,6 +91,7 @@ pub async fn forward(
     client_headers: &HeaderMap,
     config: &RouteAggregationConfig,
     router: &Arc<ProviderRouter>,
+    count_tokens: bool,
 ) -> Result<ForwardResult, ForwardError> {
     // select_providers already filters by circuit breaker state
     let providers = router.select_providers(group, config.auto_failover).await;
@@ -115,13 +117,18 @@ pub async fn forward(
     for (index, provider) in providers.iter().take(max_attempts as usize).enumerate() {
         let target_format = format_for_provider_type(&provider.provider_type, group);
 
-
         // 1. Apply cloaking (Claude Code rectifier or Codex client simulation).
         let (cloaked_body, mut cloaked_headers) = match group {
-            RouteGroup::ClaudeCode => {
+            RouteGroup::ClaudeCode => if count_tokens {
+                cloaking::claude_cloaking::apply_count_tokens_cloaking(
+                    &body,
+                    client_headers,
+                    config,
+                )
+            } else {
                 cloaking::claude_cloaking::apply_cloaking(&body, client_headers, config)
-                    .map_err(ForwardError::CloakingError)?
             }
+            .map_err(ForwardError::CloakingError)?,
             RouteGroup::Codex => {
                 cloaking::codex_cloaking::apply_cloaking(&body, client_headers, config)
                     .map_err(ForwardError::CloakingError)?
@@ -153,11 +160,24 @@ pub async fn forward(
         // 5. Build upstream URL（Phase 5+：无 passthrough 旁路，直接拼 target 路径）
         let is_stream = is_stream(&effective_body);
         let upstream_url = build_upstream_url(
-            provider, target_format, &effective_model, is_stream,
+            provider,
+            target_format,
+            &effective_model,
+            is_stream,
+            count_tokens,
         );
 
         // 6. Send request
-        match send_request(&upstream_url, &cloaked_headers, &effective_body, config, is_stream).await {
+        match send_request(
+            &upstream_url,
+            &cloaked_headers,
+            &effective_body,
+            config,
+            is_stream,
+            matches!(group, RouteGroup::ClaudeCode) && !count_tokens,
+        )
+        .await
+        {
             Ok((resp, body_preview, body_truncated)) => {
                 router.record_success(&provider.id, group).await;
                 // passthrough：直接返回上游响应，不做协议转换
@@ -192,7 +212,9 @@ pub async fn forward(
 }
 
 fn is_stream(body: &serde_json::Value) -> bool {
-    body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
+    body.get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 /// Build authentication headers based on target format.
@@ -229,11 +251,13 @@ fn build_upstream_url(
     target: ProviderFormat,
     _model: &str,
     _is_stream: bool,
+    count_tokens: bool,
 ) -> String {
     let base = provider.base_url.trim_end_matches('/');
     let base = base.strip_suffix("/v1").unwrap_or(base);
 
     match target {
+        ProviderFormat::Anthropic if count_tokens => format!("{}/v1/messages/count_tokens", base),
         ProviderFormat::Anthropic => format!("{}/v1/messages", base),
         ProviderFormat::OpenAiResponses => format!("{}/v1/responses", base),
     }
@@ -251,6 +275,7 @@ async fn send_request(
     body: &serde_json::Value,
     config: &RouteAggregationConfig,
     is_stream: bool,
+    reverse_tool_names: bool,
 ) -> Result<(Response, Vec<u8>, bool), String> {
     let client = build_proxied_client(config)?;
 
@@ -259,7 +284,11 @@ async fn send_request(
         .header("content-type", "application/json")
         .header(
             "accept",
-            if is_stream { "text/event-stream" } else { "application/json" },
+            if is_stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
         );
 
     // Copy cloaked headers (skip ones we already set)
@@ -276,32 +305,37 @@ async fn send_request(
         req = req.header(name, value);
     }
 
-    let body_str = serde_json::to_string(body)
-        .map_err(|e| format!("序列化请求体失败: {e}"))?;
-    let req = req.body(body_str);
+    let body_bytes = super::cloaking::claude_billing::serialize_body_without_html_escaping(body)?;
+    let req = req.body(body_bytes);
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| format!("上游请求失败: {e}"))?;
+    let response = req.send().await.map_err(|e| format!("上游请求失败: {e}"))?;
 
     let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::OK);
 
     let mut response_builder = Response::builder().status(status);
 
     // Copy key response headers
-    for key in &["content-type", "cache-control", "connection", "x-request-id"] {
+    for key in &[
+        "content-type",
+        "cache-control",
+        "connection",
+        "x-request-id",
+    ] {
         if let Some(val) = response.headers().get(*key) {
             response_builder = response_builder.header(*key, val);
         }
     }
 
     if is_stream {
-        let stream = response
-            .bytes_stream()
-            .map(|result| {
-                result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            });
+        let stream = if reverse_tool_names {
+            reverse_tool_names_in_sse(response.bytes_stream())
+        } else {
+            Box::pin(
+                response
+                    .bytes_stream()
+                    .map(|result| result.map_err(|e| std::io::Error::other(e.to_string()))),
+            )
+        };
 
         let response = response_builder
             .body(Body::from_stream(stream))
@@ -312,10 +346,13 @@ async fn send_request(
             .bytes()
             .await
             .map_err(|e| format!("读取响应体失败: {e}"))?;
-        let (preview, truncated) = super::log::truncate_for_preview(
-            &body_bytes,
-            super::log::BODY_PREVIEW_MAX_BYTES,
-        );
+        let body_bytes = if reverse_tool_names {
+            reverse_tool_names_in_json(&body_bytes)
+        } else {
+            body_bytes.to_vec()
+        };
+        let (preview, truncated) =
+            super::log::truncate_for_preview(&body_bytes, super::log::BODY_PREVIEW_MAX_BYTES);
         let response = response_builder
             .body(Body::from(body_bytes))
             .map_err(|e| format!("构建响应失败: {e}"))?;
@@ -323,10 +360,126 @@ async fn send_request(
     }
 }
 
+fn reverse_tool_names_in_json(body: &[u8]) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    if !cloaking::tool_remap::reverse_remap_tool_names_in_response(&mut value) {
+        return body.to_vec();
+    }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
+fn reverse_tool_names_in_sse<S>(
+    stream: S,
+) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Bytes, std::io::Error>> + Send>>
+where
+    S: futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+{
+    let stream = futures::stream::unfold(
+        (Box::pin(stream), Vec::<u8>::new(), false),
+        |(mut upstream, mut pending, mut finished)| async move {
+            loop {
+                if let Some(end) = find_sse_event_end(&pending) {
+                    let frame: Vec<u8> = pending.drain(..end).collect();
+                    return Some((
+                        Ok(Bytes::from(transform_sse_frame(&frame))),
+                        (upstream, pending, finished),
+                    ));
+                }
+                if finished {
+                    if pending.is_empty() {
+                        return None;
+                    }
+                    let frame = std::mem::take(&mut pending);
+                    return Some((
+                        Ok(Bytes::from(transform_sse_frame(&frame))),
+                        (upstream, pending, finished),
+                    ));
+                }
+                match upstream.next().await {
+                    Some(Ok(chunk)) => pending.extend_from_slice(&chunk),
+                    Some(Err(error)) => {
+                        finished = true;
+                        return Some((
+                            Err(std::io::Error::other(error.to_string())),
+                            (upstream, pending, finished),
+                        ));
+                    }
+                    None => finished = true,
+                }
+            }
+        },
+    );
+    Box::pin(stream)
+}
+
+fn find_sse_event_end(bytes: &[u8]) -> Option<usize> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| index + 2);
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4);
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) => Some(lf.min(crlf)),
+        (Some(end), None) | (None, Some(end)) => Some(end),
+        (None, None) => None,
+    }
+}
+
+fn transform_sse_frame(frame: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(frame.len());
+    let mut start = 0;
+    while start < frame.len() {
+        let Some(relative_end) = frame[start..].iter().position(|byte| *byte == b'\n') else {
+            output.extend_from_slice(&transform_sse_line(&frame[start..]));
+            break;
+        };
+        let end = start + relative_end + 1;
+        output.extend_from_slice(&transform_sse_line(&frame[start..end]));
+        start = end;
+    }
+    output
+}
+
+fn transform_sse_line(line: &[u8]) -> Vec<u8> {
+    let Some(colon) = line.iter().position(|byte| *byte == b':') else {
+        return line.to_vec();
+    };
+    if &line[..colon] != b"data" {
+        return line.to_vec();
+    }
+    let mut value_start = colon + 1;
+    if line.get(value_start) == Some(&b' ') {
+        value_start += 1;
+    }
+    let line_end = if line.ends_with(b"\r\n") {
+        line.len() - 2
+    } else if line.ends_with(b"\n") {
+        line.len() - 1
+    } else {
+        line.len()
+    };
+    let data = &line[value_start..line_end];
+    let transformed = reverse_tool_names_in_json(data);
+    if transformed == data {
+        return line.to_vec();
+    }
+    let mut output = Vec::with_capacity(line.len());
+    output.extend_from_slice(&line[..value_start]);
+    output.extend_from_slice(&transformed);
+    output.extend_from_slice(&line[line_end..]);
+    output
+}
+
 /// Build a reqwest async client with outbound proxy applied.
 fn build_proxied_client(config: &RouteAggregationConfig) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(config.non_stream_total_timeout));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(
+        config.non_stream_total_timeout,
+    ));
 
     let network = crate::config::load_network_settings().unwrap_or_default();
     use crate::config::{ProxyMode, ProxyProtocol};
@@ -338,10 +491,7 @@ fn build_proxied_client(config: &RouteAggregationConfig) -> Result<reqwest::Clie
         ProxyMode::System => {
             #[cfg(target_os = "macos")]
             {
-                if let Ok(output) = std::process::Command::new("scutil")
-                    .arg("--proxy")
-                    .output()
-                {
+                if let Ok(output) = std::process::Command::new("scutil").arg("--proxy").output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     if let Some(host) = parse_scutil_proxy(&stdout, "HTTP") {
                         if let Ok(proxy) = reqwest::Proxy::all(&host) {
@@ -354,11 +504,18 @@ fn build_proxied_client(config: &RouteAggregationConfig) -> Result<reqwest::Clie
         ProxyMode::Custom => {
             let p = &network.proxy;
             if !p.host.is_empty() && p.port > 0 {
-                let scheme = if p.protocol == ProxyProtocol::Socks5 { "socks5" } else { "http" };
+                let scheme = if p.protocol == ProxyProtocol::Socks5 {
+                    "socks5"
+                } else {
+                    "http"
+                };
                 let url = if p.username.is_empty() {
                     format!("{}://{}:{}", scheme, p.host, p.port)
                 } else {
-                    format!("{}://{}:{}@{}:{}", scheme, p.username, p.password, p.host, p.port)
+                    format!(
+                        "{}://{}:{}@{}:{}",
+                        scheme, p.username, p.password, p.host, p.port
+                    )
                 };
                 if let Ok(proxy) = reqwest::Proxy::all(&url) {
                     builder = builder.proxy(proxy);
@@ -367,7 +524,9 @@ fn build_proxied_client(config: &RouteAggregationConfig) -> Result<reqwest::Clie
         }
     }
 
-    builder.build().map_err(|e| format!("构建 HTTP 客户端失败: {e}"))
+    builder
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -406,5 +565,69 @@ fn parse_scutil_proxy(scutil_output: &str, proxy_type: &str) -> Option<String> {
         Some(format!("http://{}:{}", host, port))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_sse_event_end, reverse_tool_names_in_json, transform_sse_frame};
+
+    #[test]
+    fn reverses_tool_name_in_non_stream_response_without_touching_input() {
+        let body = br#"{"content":[{"type":"tool_use","name":"Bash","input":{"name":"Bash"}}]}"#;
+        let transformed = reverse_tool_names_in_json(body);
+        let value: serde_json::Value = serde_json::from_slice(&transformed).unwrap();
+        assert_eq!(value["content"][0]["name"], "bash");
+        assert_eq!(value["content"][0]["input"]["name"], "Bash");
+    }
+
+    #[test]
+    fn transforms_only_json_data_lines_and_preserves_sse_boundaries() {
+        let frame = b"event: content_block_start\r\ndata: {\"content_block\":{\"type\":\"tool_use\",\"name\":\"Bash\"}}\r\n\r\n";
+        let transformed = transform_sse_frame(frame);
+        assert!(transformed.ends_with(b"\r\n\r\n"));
+        assert!(transformed
+            .windows(8)
+            .any(|window| window == b"\"name\":\""));
+        assert!(transformed
+            .windows(b"\"name\":\"bash\"".len())
+            .any(|window| window == b"\"name\":\"bash\""));
+        assert_eq!(find_sse_event_end(frame), Some(frame.len()));
+    }
+
+    #[test]
+    fn leaves_non_json_and_done_sse_data_unchanged() {
+        assert_eq!(
+            transform_sse_frame(b"data: [DONE]\n\n"),
+            b"data: [DONE]\n\n"
+        );
+        assert_eq!(
+            transform_sse_frame(b": keep-alive\n\n"),
+            b": keep-alive\n\n"
+        );
+    }
+
+    #[test]
+    fn count_tokens_uses_anthropic_count_tokens_endpoint() {
+        let provider = crate::route_aggregation::RouteProvider {
+            id: "test".into(),
+            name: "test".into(),
+            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            base_url: "https://example.test/v1/".into(),
+            api_key: String::new(),
+            model_ids: Vec::new(),
+            enabled: true,
+            supported_model_ids: None,
+        };
+        assert_eq!(
+            super::build_upstream_url(
+                &provider,
+                crate::route_aggregation::ProviderFormat::Anthropic,
+                "claude-sonnet",
+                false,
+                true,
+            ),
+            "https://example.test/v1/messages/count_tokens"
+        );
     }
 }
