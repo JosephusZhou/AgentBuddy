@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  create-release:
-    name: Create GitHub Release
+  validate:
+    name: Validate release version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -56,30 +56,18 @@ jobs:
           console.log(`Validated release version ${version}`);
           NODE
 
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
-          gh release create "$TAG_NAME" \
-            --verify-tag \
-            --title "AgentBuddy $TAG_NAME" \
-            --generate-notes
-
   build-macos:
     name: Build macOS ${{ matrix.arch }} DMG
-    needs: create-release
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
             target: x86_64-apple-darwin
-            runner: macos-13
           - arch: aarch64
             target: aarch64-apple-darwin
-            runner: macos-14
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4
@@ -102,6 +90,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Configure x86_64 cross-linker
+        if: matrix.arch == 'x86_64'
+        run: |
+          echo '#!/bin/bash' > "$RUNNER_TEMP/x86_64-linker"
+          echo 'exec clang -arch x86_64 "$@"' >> "$RUNNER_TEMP/x86_64-linker"
+          chmod +x "$RUNNER_TEMP/x86_64-linker"
+          echo "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=$RUNNER_TEMP/x86_64-linker" >> "$GITHUB_ENV"
+          echo "CC_x86_64_apple_darwin=clang -arch x86_64" >> "$GITHUB_ENV"
+          echo "CXX_x86_64_apple_darwin=clang++ -arch x86_64" >> "$GITHUB_ENV"
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -110,7 +108,7 @@ jobs:
 
       - name: Rename DMG
         env:
-          VERSION: ${{ needs.create-release.outputs.version }}
+          VERSION: ${{ needs.validate.outputs.version }}
           TARGET: ${{ matrix.target }}
           ARCH: ${{ matrix.arch }}
         run: |
@@ -119,17 +117,16 @@ jobs:
           test -n "$DMG"
           mv "$DMG" "AgentBuddy_${VERSION}_${ARCH}.dmg"
 
-      - name: Upload DMG to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-          VERSION: ${{ needs.create-release.outputs.version }}
-          ARCH: ${{ matrix.arch }}
-        run: gh release upload "$TAG_NAME" "AgentBuddy_${VERSION}_${ARCH}.dmg" --clobber
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: AgentBuddy_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.dmg
+          if-no-files-found: error
 
   build-windows:
     name: Build Windows NSIS
-    needs: create-release
+    needs: validate
     runs-on: windows-latest
     steps:
       - name: Check out tagged source
@@ -160,7 +157,7 @@ jobs:
 
       - name: Rename installer
         env:
-          VERSION: ${{ needs.create-release.outputs.version }}
+          VERSION: ${{ needs.validate.outputs.version }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -187,11 +184,41 @@ jobs:
           Move-Item -LiteralPath $installer -Destination $out -Force
           Write-Host "Prepared $out"
 
-      - name: Upload NSIS installer to release
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: AgentBuddy_${{ needs.validate.outputs.version }}_x64-setup.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [validate, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS DMGs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
-          VERSION: ${{ needs.create-release.outputs.version }}
-        shell: pwsh
         run: |
-          gh release upload "$env:TAG_NAME" "AgentBuddy_$($env:VERSION)_x64-setup.exe" --clobber
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --verify-tag \
+              --title "AgentBuddy $TAG_NAME" \
+              --generate-notes
+          fi
+          gh release upload "$TAG_NAME" artifacts/* --clobber
