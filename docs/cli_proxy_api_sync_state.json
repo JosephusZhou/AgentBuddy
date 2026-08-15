@@ -1,6 +1,6 @@
 {
   "schema_version": 6,
-  "last_checked_at": "2026-08-14T00:00:00Z",
+  "last_checked_at": "2026-08-15T00:00:00Z",
   "sla_days": 14,
   "upstream_repo": "router-for-me/CLIProxyAPI",
   "schema_note": "v6: 路由聚合仅维护同协议 passthrough；client_fingerprint_anchors 跟踪 Claude Code / Codex CLI 客户端指纹与对应 upstream 提交哈希。",
@@ -29,72 +29,72 @@
       "id": "claude_code_fingerprint",
       "label": "Claude Code 客户端指纹",
       "config_version_field": "claude_code_version",
-      "current_version": "2.1.63",
+      "current_version": "2.1.220",
       "notes": "claude_code_version 变化时必须 review cloaking/claude_*.rs；CLIProxyAPI 侧的 internal/runtime/executor/ 每次 Claude Code 发布新版本（通常 1-2 周）会有 commit 改动。",
       "files": [
         {
           "local_path": "cloaking/claude_billing.rs",
           "upstream_path": "internal/runtime/executor/claude_signing.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "Phase 5 收口时对齐到 main HEAD；下一步升级 Claude Code 版本前必须重新核对 xxHash64 salt 与 header 顺序"
+          "last_verified_short_sha": "a8bbbea",
+          "last_verified_full_sha": "a8bbbea2b9b53149f90710d59668a53b4b0427a4",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "同步 CCH seed；本地保留简化的 billing header 生成流程"
         },
         {
           "local_path": "cloaking/claude_cloaking.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "system prompt 注入 + billing header forging 同步到 main"
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "核对 legacy-model system turn 处理；本地保留同协议透传范围内的提示词注入"
         },
         {
           "local_path": "cloaking/claude_headers.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "applyClaudeHeaders 对齐（与 cloaking 主模块同文件）"
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "核对 Claude 请求头；同步 2.1.220 指纹对应的 Stainless 版本"
         },
         {
           "local_path": "cloaking/claude_system_prompt.rs",
           "upstream_path": "internal/runtime/executor/helps/claude_system_prompt.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "Claude Code v2.1.63 prompts.ts segments"
+          "last_verified_short_sha": "f3e25ab",
+          "last_verified_full_sha": "f3e25ab2bae6e7d533637d3ef1b64722525435d4",
+          "last_verified_date": "2026-08-02",
+          "last_verified_note": "核对 Claude Code 2.1.220 的系统提示词入口；保留本地提示词片段布局"
         },
         {
           "local_path": "cloaking/device_profile.rs",
-          "upstream_path": "internal/runtime/executor/claude_device_profile.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "设备指纹字段（id / platform / arch）已对齐"
+          "upstream_path": "internal/runtime/executor/helps/claude_device_profile.go",
+          "last_verified_short_sha": "903e41b",
+          "last_verified_full_sha": "903e41b6dcd08a698ab7109af446bf5485f2873e",
+          "last_verified_date": "2026-08-03",
+          "last_verified_note": "同步 Claude Code 2.1.220 / Stainless 0.94.0 / Node v26.3.0 基线"
         },
         {
           "local_path": "cloaking/obfuscate.rs",
-          "upstream_path": "internal/runtime/executor/cloak_obfuscate.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "零宽空格混淆敏感词"
+          "upstream_path": "internal/runtime/executor/helps/cloak_obfuscate.go",
+          "last_verified_short_sha": "42eef10",
+          "last_verified_full_sha": "42eef103d6d2cd4b90989c05525e04ba9dc2edcb",
+          "last_verified_date": "2026-08-04",
+          "last_verified_note": "同步 helps 路径迁移及零宽空格匹配规则；保留本地递归 JSON 字符串处理"
         },
         {
           "local_path": "cloaking/tool_remap.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "OAuth tool rename map（与 cloaking 主模块同文件）"
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "核对 OAuth tool rename map"
         },
         {
           "local_path": "cloaking/header_scrub.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "ScrubProxyAndFingerprintHeaders 反向剥离"
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "核对代理追踪及指纹头剥离"
         }
       ]
     },
@@ -108,18 +108,18 @@
         {
           "local_path": "cloaking/codex_cloaking.rs",
           "upstream_path": "internal/runtime/executor/codex_executor_request.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "applyCodexIdentityConfuseBody 同步"
+          "last_verified_short_sha": "f43aad7",
+          "last_verified_full_sha": "f43aad7637ad813745bf7d341acb5663617570c5",
+          "last_verified_date": "2026-08-12",
+          "last_verified_note": "同步 Session-Id 头规范及身份混淆核对"
         },
         {
           "local_path": "cloaking/codex_headers.rs",
           "upstream_path": "internal/runtime/executor/codex_executor_request.go",
-          "last_verified_short_sha": "934da23",
-          "last_verified_full_sha": "934da2379d6272a704953a02322b666b2a2efa3e",
-          "last_verified_date": "2026-08-13",
-          "last_verified_note": "applyCodexHeadersFromSources（与 cloaking 主模块同文件）"
+          "last_verified_short_sha": "f43aad7",
+          "last_verified_full_sha": "f43aad7637ad813745bf7d341acb5663617570c5",
+          "last_verified_date": "2026-08-12",
+          "last_verified_note": "同步 Session-Id 头名称（由下划线改为连字符）"
         }
       ]
     }

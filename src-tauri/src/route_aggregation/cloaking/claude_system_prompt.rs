@@ -1,6 +1,6 @@
 //! Claude Code system prompt constants.
 //! Reference: CLIProxyAPI internal/runtime/executor/helps/claude_system_prompt.go
-//! These correspond to Claude Code v2.1.63 prompts.ts segments.
+//! These correspond to the Claude Code v2.1.220 client identity baseline.
 
 /// Agent identifier — the first line Claude Code sends.
 pub const CLAUDE_CODE_AGENT_IDENTIFIER: &str =

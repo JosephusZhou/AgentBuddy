@@ -36,8 +36,8 @@ pub fn inject_claude_headers(
     set_header(headers, "x-stainless-runtime", "node");
     set_header(headers, "x-stainless-lang", "js");
     set_header(headers, "x-stainless-timeout", "600");
-    set_header(headers, "x-stainless-package-version", "0.74.0");
-    set_header(headers, "x-stainless-runtime-version", "v24.3.0");
+    set_header(headers, "x-stainless-package-version", "0.94.0");
+    set_header(headers, "x-stainless-runtime-version", "v26.3.0");
     set_header(headers, "x-stainless-os", "MacOS");
     set_header(headers, "x-stainless-arch", "arm64");
 

@@ -52,7 +52,7 @@ python3 scripts/check_upstream_sync.py
   • OpenAI Responses → OpenAI Responses (OR → OR)
 
 === Cloaking 客户端指纹 (2 clients) ===
-  📦 Claude Code 客户端指纹 (config: claude_code_version = 2.1.63, 8 files)
+    📦 Claude Code 客户端指纹 (config: claude_code_version = 2.1.220, 8 files)
     ⚠ cloaking/claude_billing.rs (上游 2d 内有新 commit)
     ✗ cloaking/device_profile.rs (上游 135d 未同步，超 SLA 14d)
     ...
@@ -105,8 +105,8 @@ CI 行为：
    | `internal/runtime/executor/claude_executor_cloaking.go` | `cloaking/claude_cloaking.rs` / `claude_headers.rs` / `tool_remap.rs` |
    | `internal/runtime/executor/claude_signing.go` | `cloaking/claude_billing.rs` |
    | `internal/runtime/executor/helps/claude_system_prompt.go` | `cloaking/claude_system_prompt.rs` |
-   | `internal/runtime/executor/claude_device_profile.go` | `cloaking/device_profile.rs` |
-   | `internal/runtime/executor/cloak_obfuscate.go` | `cloaking/obfuscate.rs` |
+| `internal/runtime/executor/helps/claude_device_profile.go` | `cloaking/device_profile.rs` |
+| `internal/runtime/executor/helps/cloak_obfuscate.go` | `cloaking/obfuscate.rs` |
    | `internal/runtime/executor/codex_executor_request.go` | `cloaking/codex_cloaking.rs` / `codex_headers.rs` |
 
 4. **同步常量与算法**（典型改动点）：
@@ -121,7 +121,7 @@ CI 行为：
    ```json
    {
      "local_path": "cloaking/device_profile.rs",
-     "upstream_path": "internal/runtime/executor/claude_device_profile.go",
+     "upstream_path": "internal/runtime/executor/helps/claude_device_profile.go",
      "last_verified_short_sha": "<NEW_SHORT_SHA>",
      "last_verified_full_sha": "<NEW_FULL_SHA>",
      "last_verified_date": "<YYYY-MM-DD>",
@@ -132,7 +132,7 @@ CI 行为：
 6. **更新 `config.rs` 版本常量**（如新版本号）：
    ```rust
    fn default_claude_code_version() -> String {
-       "2.1.64".to_string()  // 旧值 2.1.63
+       "2.1.220".to_string()  // 当前 CLIProxyAPI Claude Code 指纹基线
    }
    ```
 

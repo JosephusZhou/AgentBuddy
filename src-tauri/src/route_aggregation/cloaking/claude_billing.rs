@@ -8,7 +8,7 @@ use xxhash_rust::xxh64;
 const FINGERPRINT_SALT: &str = "59cf53e54c78";
 
 /// CCH signing seed (extracted from CLIProxyAPI).
-const CCH_SEED: u64 = 0x6E52736AC806831E;
+const CCH_SEED: u64 = 0x4D659218E32A3268;
 
 /// Generate the x-anthropic-billing-header value.
 /// Format: cc_version=<ver>; cc_entrypoint=cli; cch=<hash>;

@@ -26,8 +26,8 @@ pub fn inject_codex_headers(
     // Originator
     set_header(headers, "originator", "codex-tui");
 
-    // Session-Id
-    set_header(headers, "session_id", session_id);
+    // Session-Id (the upstream wire name uses a hyphen, not an underscore)
+    set_header(headers, "session-id", session_id);
 
     // ChatGPT-Account-Id (if provided)
     if let Some(id) = account_id {
@@ -44,5 +44,20 @@ fn set_header(headers: &mut HeaderMap, name: &str, value: &str) {
         HeaderValue::from_bytes(value.as_bytes()),
     ) {
         headers.insert(n, v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inject_codex_headers;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn uses_upstream_session_id_header_name() {
+        let mut headers = HeaderMap::new();
+        inject_codex_headers(&mut headers, "0.146.0", None, "session-123");
+
+        assert_eq!(headers.get("session-id").unwrap(), "session-123");
+        assert!(headers.get("session_id").is_none());
     }
 }

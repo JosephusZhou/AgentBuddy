@@ -1,5 +1,5 @@
 //! Device profile stabilization.
-//! Reference: CLIProxyAPI claude_device_profile.go
+//! Reference: CLIProxyAPI helps/claude_device_profile.go
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -18,9 +18,9 @@ pub struct DeviceProfile {
 impl Default for DeviceProfile {
     fn default() -> Self {
         Self {
-            user_agent: "claude-cli/2.1.63 (external, cli)".to_string(),
-            package_version: "0.74.0".to_string(),
-            runtime_version: "v24.3.0".to_string(),
+            user_agent: "claude-cli/2.1.220 (external, cli)".to_string(),
+            package_version: "0.94.0".to_string(),
+            runtime_version: "v26.3.0".to_string(),
             os: "MacOS".to_string(),
             arch: "arm64".to_string(),
         }

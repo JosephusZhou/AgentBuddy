@@ -1,5 +1,5 @@
 //! Sensitive word obfuscation using zero-width spaces.
-//! Reference: CLIProxyAPI cloak_obfuscate.go
+//! Reference: CLIProxyAPI helps/cloak_obfuscate.go
 
 /// Insert a zero-width space (U+200B) after the first character of sensitive words
 /// to bypass text-based detection without changing visible output.
@@ -22,7 +22,9 @@ pub fn obfuscate_sensitive_words(text: &str) -> String {
 }
 
 fn replace_sensitive(text: &str, word: &str) -> String {
-    let lower = text.to_lowercase();
+    // The configured words are ASCII. ASCII-only folding preserves byte
+    // offsets, unlike Unicode lowercasing which may expand a preceding rune.
+    let lower = text.to_ascii_lowercase();
     let positions: Vec<usize> = lower.match_indices(word).map(|(i, _)| i).collect();
 
     if positions.is_empty() {
@@ -92,5 +94,31 @@ pub fn obfuscate_body_strings(body: &mut serde_json::Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{obfuscate_body_strings, obfuscate_sensitive_words};
+
+    #[test]
+    fn obfuscates_case_insensitively_without_corrupting_utf8_offsets() {
+        assert_eq!(
+            obfuscate_sensitive_words("İProxy"),
+            "İP\u{200B}roxy"
+        );
+    }
+
+    #[test]
+    fn obfuscates_nested_json_string_values() {
+        let mut body = serde_json::json!({
+            "system": [{"type": "text", "text": "Use the proxy."}],
+            "messages": [{"content": "relay"}]
+        });
+
+        obfuscate_body_strings(&mut body);
+
+        assert_eq!(body["system"][0]["text"], "Use the p\u{200B}roxy.");
+        assert_eq!(body["messages"][0]["content"], "r\u{200B}elay");
     }
 }
