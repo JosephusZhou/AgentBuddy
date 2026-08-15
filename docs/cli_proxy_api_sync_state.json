@@ -3,7 +3,7 @@
   "last_checked_at": "2026-08-15T00:00:00Z",
   "sla_days": 14,
   "upstream_repo": "router-for-me/CLIProxyAPI",
-  "schema_note": "v6: 路由聚合维护同协议转发边界；Claude Code Messages 在边界内执行 cloaking，client_fingerprint_anchors 跟踪客户端指纹与对应 upstream 提交哈希。",
+  "schema_note": "v6: 路由聚合维护两种协议、三个同协议入口；Claude Code / Codex CLI 在边界内执行 cloaking，client_fingerprint_anchors 跟踪客户端行为与对应 upstream 提交哈希。",
   "local_cloaking_status": {
     "status": "implemented_and_tested",
     "verified_at": "2026-08-15",
@@ -12,7 +12,7 @@
       "count_tokens 请求路径与 system relocation",
       "非流式响应和 SSE 响应中的工具名反向映射"
     ],
-    "known_local_difference": "设备 profile 使用 AgentBuddy 作用域内存缓存，不复用 CLIProxyAPI 的 home KV；上游提交哈希未因本地实现完成而伪造推进。"
+    "known_local_difference": "设备 profile 和 user_id 使用 AgentBuddy 作用域内存缓存，不复用 CLIProxyAPI 的 home KV；敏感词规则可配置，响应工具名恢复和 SSE 分帧属于本地 forwarder 集成；上游提交哈希未因本地实现完成而伪造推进。"
   },
   "passthrough_paths": [
     {
@@ -39,8 +39,8 @@
       "inbound": "/v1/responses",
       "client": "Codex CLI (RouteGroup::Codex)",
       "upstream_format": "OpenAiResponses",
-      "transport": "passthrough（请求体/响应体/SSE 直接转发，不做协议翻译）",
-      "header_rewrite": "Authorization: Bearer <provider key>，body 透传；流式响应按 SSE 帧直接回写"
+      "transport": "同协议转发（不做协议转换）；启用 cloaking 时模拟 Codex CLI 请求头和身份字段；流式响应按 SSE 帧直接回写",
+      "header_rewrite": "Authorization: Bearer <provider key>，覆盖客户端指纹头并清理代理追踪头"
     }
   ],
   "client_fingerprint_anchors": [
@@ -49,7 +49,7 @@
       "label": "Claude Code 客户端指纹",
       "config_version_field": "claude_code_version",
       "current_version": "2.1.220",
-      "notes": "claude_code_version 变化时必须 review cloaking/claude_*.rs；CLIProxyAPI 侧的 internal/runtime/executor/ 每次 Claude Code 发布新版本（通常 1-2 周）会有 commit 改动。",
+      "notes": "claude_code_version 变化时必须 review cloaking/claude_*.rs、obfuscate.rs、tool_remap.rs 和 header_scrub.rs；CLIProxyAPI 侧的 internal/runtime/executor/ 每次 Claude Code 发布新版本（通常 1-2 周）会有 commit 改动。",
       "files": [
         {
           "local_path": "cloaking/claude_billing.rs",
@@ -114,6 +114,30 @@
           "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
           "last_verified_date": "2026-08-11",
           "last_verified_note": "核对代理追踪及指纹头剥离"
+        },
+        {
+          "local_path": "cloaking/claude_cache.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "按上游 breakpoint、TTL 和 cache block 上限行为拆分实现；本地保留配置化上限"
+        },
+        {
+          "local_path": "cloaking/claude_context.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "按上游 thinking 能力和 clear_thinking 注入条件拆分实现"
+        },
+        {
+          "local_path": "cloaking/claude_identity.rs",
+          "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
+          "last_verified_short_sha": "189776a",
+          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
+          "last_verified_date": "2026-08-11",
+          "last_verified_note": "按上游 user/session/account 身份格式拆分实现；本地使用作用域内存缓存替代 home KV"
         }
       ]
     },
