@@ -67,6 +67,8 @@ struct AgentProjectSpec {
     config_dir: &'static str,
     /// sub-dirs for Full mode (officially supported / common skeleton)
     full_sub_dirs: &'static [&'static str],
+    /// shared sub-dirs linked from `.agents` in Symlink mode
+    shared_sub_dirs: &'static [&'static str],
     /// extra files to create inside config_dir in Full mode
     config_files: &'static [(&'static str, &'static str)], // (name, content)
     /// project-level MCP config file (written as a merge, keyed by server title)
@@ -76,6 +78,7 @@ struct AgentProjectSpec {
 /// Shared sub-dirs under `.agents/` and symlinked into each agent config dir (Symlink mode).
 /// Full mode uses per-agent `full_sub_dirs` instead — sets intentionally differ.
 const SHARED_SUB_DIRS: &[&str] = &["commands", "rules", "skills", "agents"];
+const PI_SHARED_SUB_DIRS: &[&str] = &["skills"];
 
 static AGENT_SPECS: &[AgentProjectSpec] = &[
     AgentProjectSpec {
@@ -83,6 +86,7 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("CLAUDE.md"),
         config_dir: ".claude",
         full_sub_dirs: &["commands", "agents"],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: ".mcp.json",
@@ -95,6 +99,7 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("AGENTS.md"),
         config_dir: ".codex",
         full_sub_dirs: &[],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[("instructions.md", "")],
         mcp: Some(ProjectMcpSpec {
             file: ".codex/config.toml",
@@ -107,6 +112,7 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("AGENTS.md"),
         config_dir: ".opencode",
         full_sub_dirs: &["agent", "command", "plugin", "tool"],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: "opencode.json",
@@ -119,6 +125,7 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("GEMINI.md"),
         config_dir: ".gemini",
         full_sub_dirs: &["commands"],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: ".gemini/settings.json",
@@ -131,6 +138,7 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("AGENTS.md"),
         config_dir: ".codebuddy",
         full_sub_dirs: &["rules", "skills"],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: ".mcp.json",
@@ -143,9 +151,36 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         root_file: Some("AGENTS.md"),
         config_dir: ".workbuddy",
         full_sub_dirs: &["rules", "skills"],
+        shared_sub_dirs: SHARED_SUB_DIRS,
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: ".mcp.json",
+            dialect: McpDialect::JsonMcpServers,
+            jsonc: false,
+        }),
+    },
+    AgentProjectSpec {
+        name: "pi",
+        root_file: Some("AGENTS.md"),
+        config_dir: ".pi/agent",
+        full_sub_dirs: &["skills"],
+        shared_sub_dirs: PI_SHARED_SUB_DIRS,
+        config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".pi/agent/mcp.json",
+            dialect: McpDialect::JsonMcpServers,
+            jsonc: false,
+        }),
+    },
+    AgentProjectSpec {
+        name: "oh-my-pi",
+        root_file: Some("AGENTS.md"),
+        config_dir: ".omp/agent",
+        full_sub_dirs: &["skills"],
+        shared_sub_dirs: PI_SHARED_SUB_DIRS,
+        config_files: &[],
+        mcp: Some(ProjectMcpSpec {
+            file: ".omp/agent/mcp.json",
             dialect: McpDialect::JsonMcpServers,
             jsonc: false,
         }),
@@ -320,6 +355,34 @@ fn create_dir_symlink(
             e
         )),
     }
+}
+
+/// Build a relative link from an agent config directory to the project-level
+/// shared directory. Nested layouts such as `.pi/agent` need two `..` levels,
+/// while existing one-level layouts such as `.claude` need only one.
+fn shared_link_source(config_dir: &str, sub_dir: &str) -> PathBuf {
+    let mut source = PathBuf::new();
+    for _ in Path::new(config_dir).components() {
+        source.push("..");
+    }
+    source.push(".agents");
+    source.push(sub_dir);
+    source
+}
+
+fn selected_shared_sub_dirs(selected_agents: &[AgentConfigRequest]) -> Vec<&'static str> {
+    let mut result = Vec::new();
+    for req in selected_agents {
+        let Some(spec) = find_spec(&req.name) else {
+            continue;
+        };
+        for sub_dir in spec.shared_sub_dirs {
+            if !result.contains(sub_dir) {
+                result.push(*sub_dir);
+            }
+        }
+    }
+    result
 }
 
 pub fn check_project_config_exists(
@@ -523,10 +586,10 @@ fn run_init(
         }
 
         InitMode::Symlink => {
-            // 1. Create .agents/ with all shared sub-dirs
+            // 1. Create .agents/ with the shared sub-dirs used by the selected agents.
             let agents_dir = base.join(".agents");
             create_dir(&agents_dir, &mut created, &mut skipped, &mut errors);
-            for sub in SHARED_SUB_DIRS {
+            for sub in selected_shared_sub_dirs(selected_agents) {
                 create_dir(
                     &agents_dir.join(sub),
                     &mut created,
@@ -570,11 +633,11 @@ fn run_init(
                 let config_dir = base.join(spec.config_dir);
                 create_dir(&config_dir, &mut created, &mut skipped, &mut errors);
 
-                // Symlink all shared sub-dirs into config_dir (relative targets for portability).
+                // Symlink supported shared sub-dirs into config_dir (relative targets for portability).
                 // Always directory links via platform::symlink_dir — never CWD-based is_dir().
-                for sub in SHARED_SUB_DIRS {
+                for sub in spec.shared_sub_dirs {
                     let dest = config_dir.join(sub);
-                    let source = PathBuf::from("..").join(".agents").join(sub);
+                    let source = shared_link_source(spec.config_dir, sub);
                     create_dir_symlink(
                         &source,
                         &dest,
@@ -640,7 +703,7 @@ fn run_init(
 
         // Full mode: link each agent's skills dir to the shared store so every
         // selected agent sees the same skills. Symlink mode already links
-        // `<config_dir>/skills` above via SHARED_SUB_DIRS.
+        // `<config_dir>/skills` above via the selected agent's shared sub-dirs.
         if *mode == InitMode::Full {
             let mut seen_config_dirs: HashSet<String> = HashSet::new();
             for req in selected_agents {
@@ -654,7 +717,7 @@ fn run_init(
                 let config_dir = base.join(spec.config_dir);
                 create_dir(&config_dir, &mut created, &mut skipped, &mut errors);
                 create_dir_symlink(
-                    &PathBuf::from("..").join(".agents").join("skills"),
+                    &shared_link_source(spec.config_dir, "skills"),
                     &config_dir.join("skills"),
                     overwrite,
                     &mut created,
@@ -847,6 +910,35 @@ mod tests {
     }
 
     #[test]
+    fn full_mode_creates_pi_family_dirs_and_mcp_files() {
+        let base = scratch("pi-family-full");
+        let agents = vec![req("pi"), req("oh-my-pi")];
+        let result = init_project_config(
+            base.to_str().unwrap(),
+            &agents,
+            &InitMode::Full,
+            false,
+            &[mcp_draft("shared-server")],
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        assert!(base.join("AGENTS.md").is_file());
+        assert!(base.join(".pi/agent/skills").is_dir());
+        assert!(base.join(".omp/agent/skills").is_dir());
+
+        for path in [".pi/agent/mcp.json", ".omp/agent/mcp.json"] {
+            let doc: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(base.join(path)).unwrap()).unwrap();
+            assert_eq!(doc["mcpServers"]["shared-server"]["command"], "npx");
+        }
+
+        cleanup(&base);
+    }
+
+    #[test]
     fn skip_existing_without_overwrite() {
         let base = scratch("skip");
         fs::write(base.join("CLAUDE.md"), "user content\n").unwrap();
@@ -981,6 +1073,34 @@ mod tests {
         let pointer = fs::read_to_string(base.join("CLAUDE.md")).unwrap();
         assert!(pointer.contains("`AGENTS.md`"), "{pointer}");
         assert!(!pointer.contains(".agents/AGENTS.md"), "{pointer}");
+
+        cleanup(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_mode_uses_nested_relative_links_for_pi_family() {
+        let base = scratch("pi-family-symlink");
+        let result = init_project_config(
+            base.to_str().unwrap(),
+            &[req("pi"), req("oh-my-pi")],
+            &InitMode::Symlink,
+            false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        for config_dir in [".pi/agent", ".omp/agent"] {
+            let link = base.join(config_dir).join("skills");
+            assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+            assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../../.agents/skills"));
+            assert!(base.join(config_dir).join("../../.agents/skills").is_dir());
+            assert!(!base.join(config_dir).join("commands").exists());
+        }
+        assert!(base.join(".agents/skills").is_dir());
 
         cleanup(&base);
     }

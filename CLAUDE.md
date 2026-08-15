@@ -109,7 +109,7 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
   的 MCP 同步到 `$CLAUDE_CONFIG_DIR/.claude.json`。
 - Codex 使用 `CODEX_HOME`；默认 MCP 在 `~/.codex/config.toml` 的 `[mcp_servers]`，自定义
   环境同步时只替换该表并保留其它配置。
-- 项目级配置由 `project_config.rs` 的 6 个 `AGENT_SPECS` 决定；全局 MCP 应用不会默认写项目。
+- 项目级配置由 `project_config.rs` 的 8 个 `AGENT_SPECS` 决定；全局 MCP 应用不会默认写项目。
 - Skills 库位于 `~/.agentbuddy/skills/<id>/SKILL.md`，项目级统一安装到 `.agents/skills`，
   再按 Full/Symlink 模式供选中的 Agent 使用。Claude Desktop 当前不支持本地 Skills。
 

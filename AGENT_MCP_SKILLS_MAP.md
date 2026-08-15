@@ -432,7 +432,8 @@ if removeFromAgentConfigs:
 | `opencode` | `opencode.json` | `JsonMcp` |
 | `antigravity` | `.gemini/settings.json` | `JsonGeminiMixed` |
 | `claude-desktop` | — | ❌（桌面应用，不做项目级） |
-| `pi` / `oh-my-pi` | — | ❌（暂不支持项目级；如需可后续追加） |
+| `pi` | `.pi/agent/mcp.json` | `JsonMcpServers` |
+| `oh-my-pi` | `.omp/agent/mcp.json` | `JsonMcpServers` |
 
 **写策略**：复用 `mcp_config::apply_draft_to_file` 的方言写器，**按 server title 合并**、保留文件其它键、
 原子写；不参与「覆盖/跳过」确认。
@@ -442,15 +443,14 @@ if removeFromAgentConfigs:
 - 统一安装到 `<repo>/.agents/skills/<id>`（`skill-copy-or-symlink`：完整复制或软链接，源为
   `~/.agentbuddy/skills` 技能库）。
 - 多 agent 共享：
-  - **Symlink 模式**：`<config_dir>/skills` 本已链接至 `.agents/skills`（每个被勾选的 agent 都享受）。
-  - **Full 模式**：勾选 skills 时为每个 agent 创建 `<config_dir>/skills → ../.agents/skills` 相对软链接（跳过创建真实 skills 子目录），实现多 agent 共享。
+  - **Symlink 模式**：`<config_dir>/skills` 本已链接至 `.agents/skills`（每个被勾选的 agent 都享受）。多级目录使用对应层级的相对路径。
+  - **Full 模式**：勾选 skills 时为每个 agent 创建指向项目根 `.agents/skills` 的相对软链接（例如 `.pi/agent/skills → ../../.agents/skills`，跳过创建真实 skills 子目录），实现多 agent 共享。
 - 安全语义：非空真实目录拒绝删除；overwrite 可替换软链接/空目录。
 
 ### 8.3 不支持项目级
 
 - `claude-desktop` — 桌面应用，不写项目树
 - `codebuddy`（国际版）— 已移除支持
-- `pi` / `oh-my-pi` — 当前未在 `AGENT_SPECS` 内，如需后续追加
 
 ---
 
@@ -510,8 +510,8 @@ if removeFromAgentConfigs:
    Codex 需兼容 `~/.agents/skills` 与 `~/.codex/skills` 双路径。
 4. **全局应用**默认只写用户级文件；Claude Code 写 `~/.claude.json` 顶层 `mcpServers`，
    Antigravity 远程用 `httpUrl` 而非 `url`。
-5. **项目级** MCP 由 `project_config::AGENT_SPECS` 决定落地路径；目前支持 6 个 agent
-   （claude-code / codebuddy-cn / workbuddy / codex / opencode / antigravity）。
+5. **项目级** MCP 由 `project_config::AGENT_SPECS` 决定落地路径；目前支持 8 个 agent
+   （claude-code / codebuddy-cn / workbuddy / codex / opencode / antigravity / pi / oh-my-pi）。
 6. **OpenCode** 用 `mcp` 顶层键 + `local`/`remote`，不是 `mcpServers`；JSONC 用 `json5`。
 7. **Pi / Oh-My-Pi** 用 `JsonMcpServers` 方言；模型配置经通用 `agent_model_config` + 各自
    后端（`opencode_config` / `pi_model_config`）。
