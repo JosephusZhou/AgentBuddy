@@ -13,7 +13,11 @@ import type {
   ModelConfigAgentId,
   ModelsDevCatalog,
 } from "./opencode-config/types";
-import { EFFORT_PRESETS, MODALITY_OPTIONS } from "./opencode-config/types";
+import {
+  EFFORT_PRESETS,
+  MODALITY_OPTIONS,
+  PI_MODALITY_OPTIONS,
+} from "./opencode-config/types";
 import {
   invokeDeleteModel,
   invokeDeleteProvider,
@@ -288,7 +292,10 @@ function applyCatalogLimits(
   // —— 模态字段 ——
   // 目录里 modalities 字段几乎一定能拿到（非空向量），overwrite 模式直接覆盖；
   // 非 overwrite 模式（用户手输 ID 触发）只在当前为空且目录非空时补全。
-  const hitInputMods = hit.modalitiesInput;
+  const hitInputMods =
+    options.agent == null || options.agent === "opencode"
+      ? hit.modalitiesInput
+      : normalizePiInputModalities(hit.modalitiesInput);
   const hitOutputMods = hit.modalitiesOutput;
   if (overwrite) {
     // 强制覆盖：input 始终写（Pi 系也支持），output 仅 opencode 写
@@ -453,6 +460,29 @@ const NPM_SELECT_OPTIONS: AppSelectOption[] = [
   { value: "__custom__", label: "自定义…" },
 ];
 
+/** Pi / Oh-My-Pi 原生支持的三种 HTTP API 格式。 */
+const PI_API_OPTIONS: AppSelectOption[] = [
+  {
+    value: "openai-completions",
+    label: "OpenAI Chat Completions",
+    sub: "/v1/chat/completions",
+  },
+  {
+    value: "openai-responses",
+    label: "OpenAI Responses",
+    sub: "/v1/responses",
+  },
+  {
+    value: "anthropic-messages",
+    label: "Anthropic Messages",
+    sub: "/v1/messages",
+  },
+];
+
+function piApiLabel(api: string): string {
+  return PI_API_OPTIONS.find((option) => option.value === api)?.label ?? api;
+}
+
 const THINKING_TYPE_OPTIONS: AppSelectOption[] = [
   { value: "", label: "（不设置）" },
   { value: "enabled", label: "enabled" },
@@ -469,6 +499,7 @@ type ProviderForm = {
   previousId: string | null;
   name: string;
   npm: string;
+  api: string;
   baseUrl: string;
   timeout: string;
   chunkTimeout: string;
@@ -508,6 +539,7 @@ function emptyProviderForm(): ProviderForm {
     previousId: null,
     name: "",
     npm: "@ai-sdk/openai-compatible",
+    api: "openai-completions",
     baseUrl: "",
     timeout: "",
     chunkTimeout: "",
@@ -558,6 +590,37 @@ function parseOptionalNumber(raw: string): number | null {
 
 function toggleModality(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
+}
+
+/** 将通用目录的输入能力收敛到 Pi/Oh-My-Pi 的 models.json schema。 */
+function normalizePiInputModalities(input: ReadonlyArray<string>): string[] {
+  const hasText = input.includes("text");
+  const hasImage = input.includes("image");
+  if (!hasText && !hasImage) return input.length > 0 ? ["text"] : [];
+  return hasImage ? ["text", "image"] : ["text"];
+}
+
+function inputModalitiesForAgent(
+  agent: ModelConfigAgentId,
+  input: ReadonlyArray<string>,
+): string[] {
+  return agent === "opencode" ? [...input] : normalizePiInputModalities(input);
+}
+
+function toggleInputModality(
+  list: string[],
+  value: string,
+  agent: ModelConfigAgentId,
+): string[] {
+  const next = toggleModality(list, value);
+  if (agent === "opencode") return next;
+  // Pi 的 schema 只允许 text 或 text + image；取消 text 时同时取消 image，
+  // 让「未设置 input」仍保持合法，而不会产生 image-only 数组。
+  if (value === "text" && !next.includes("text")) return [];
+  if (value === "image" && next.includes("image") && !next.includes("text")) {
+    return ["text", "image"];
+  }
+  return next;
 }
 
 /* ===== Agent 切换 ===== */
@@ -935,6 +998,7 @@ export default function ModelConfig() {
       previousId: p.id,
       name: p.name ?? "",
       npm: p.npm ?? "",
+      api: p.api ?? "openai-completions",
       baseUrl: p.baseUrl ?? "",
       timeout: p.timeout != null ? String(p.timeout) : "",
       chunkTimeout: p.chunkTimeout != null ? String(p.chunkTimeout) : "",
@@ -985,7 +1049,7 @@ export default function ModelConfig() {
       limitContext: numToInput(model.limitContext),
       limitInput: numToInput(model.limitInput),
       limitOutput: numToInput(model.limitOutput),
-      modalitiesInput: [...model.modalitiesInput],
+      modalitiesInput: inputModalitiesForAgent(agent, model.modalitiesInput),
       modalitiesOutput: [...model.modalitiesOutput],
       reasoning: model.reasoning ?? null,
       toolCall: model.toolCall ?? null,
@@ -1074,6 +1138,9 @@ export default function ModelConfig() {
         name: providerForm.name.trim() || null,
         baseUrl: providerForm.baseUrl.trim() || null,
       };
+      if (!isOpenCode) {
+        payload.api = providerForm.api;
+      }
       if (isOpenCode) {
         payload.npm = providerForm.npm.trim() || null;
         payload.timeout = (() => {
@@ -1264,6 +1331,8 @@ export default function ModelConfig() {
         return hit;
       })()
     : null;
+  const inputModalityOptions =
+    agent === "opencode" ? MODALITY_OPTIONS : PI_MODALITY_OPTIONS;
 
   return (
     <>
@@ -1443,9 +1512,14 @@ export default function ModelConfig() {
                       </div>
                       <div className="oc-provider-meta">
                         {p.npm ? <span>npm: {p.npm}</span> : null}
-                        {p.baseUrl || p.api ? (
-                          <span className="oc-provider-url" title={p.baseUrl || p.api || ""}>
-                            {p.baseUrl || p.api}
+                        {p.baseUrl ? (
+                          <span className="oc-provider-url" title={p.baseUrl}>
+                            {p.baseUrl}
+                          </span>
+                        ) : null}
+                        {p.api ? (
+                          <span className="oc-provider-url" title={p.api}>
+                            {!isOpenCode ? piApiLabel(p.api) : p.api}
                           </span>
                         ) : null}
                       </div>
@@ -1612,6 +1686,25 @@ export default function ModelConfig() {
                       disabled={busy}
                       spellCheck={false}
                     />
+                  </div>
+                )}
+                {!isOpenCode && (
+                  <div className="form-group">
+                    <label className="form-label" id="oc-api-format-label" htmlFor="oc-api-format">
+                      API 格式
+                    </label>
+                    <AppSelect
+                      id="oc-api-format"
+                      labelId="oc-api-format-label"
+                      value={providerForm.api}
+                      options={PI_API_OPTIONS}
+                      onChange={(api) => setProviderForm({ ...providerForm, api })}
+                      disabled={busy}
+                      placeholder="请选择 API 格式"
+                    />
+                    <p className="oc-form-hint">
+                      选择后会写入 Pi/Oh-My-Pi 的供应商配置。
+                    </p>
                   </div>
                 )}
                 <div className="form-group">
@@ -2018,7 +2111,7 @@ export default function ModelConfig() {
                 <div className="form-group">
                   <label className="form-label">输入模态</label>
                   <div className="oc-modality-checks">
-                    {MODALITY_OPTIONS.map((m) => (
+                    {inputModalityOptions.map((m) => (
                       <label key={`in-${m}`} className="ui-check">
                         <input
                           type="checkbox"
@@ -2027,7 +2120,11 @@ export default function ModelConfig() {
                           onChange={() =>
                             setModelForm({
                               ...modelForm,
-                              modalitiesInput: toggleModality(modelForm.modalitiesInput, m),
+                              modalitiesInput: toggleInputModality(
+                                modelForm.modalitiesInput,
+                                m,
+                                agent,
+                              ),
                             })
                           }
                           disabled={busy}
@@ -2038,29 +2135,31 @@ export default function ModelConfig() {
                     ))}
                   </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">输出模态</label>
-                  <div className="oc-modality-checks">
-                    {MODALITY_OPTIONS.map((m) => (
-                      <label key={`out-${m}`} className="ui-check">
-                        <input
-                          type="checkbox"
-                          className="ui-check-input"
-                          checked={modelForm.modalitiesOutput.includes(m)}
-                          onChange={() =>
-                            setModelForm({
-                              ...modelForm,
-                              modalitiesOutput: toggleModality(modelForm.modalitiesOutput, m),
-                            })
-                          }
-                          disabled={busy}
-                        />
-                        <CheckGlyph />
-                        <span className="ui-check-label">{m}</span>
-                      </label>
-                    ))}
+                {isOpenCode && (
+                  <div className="form-group">
+                    <label className="form-label">输出模态</label>
+                    <div className="oc-modality-checks">
+                      {MODALITY_OPTIONS.map((m) => (
+                        <label key={`out-${m}`} className="ui-check">
+                          <input
+                            type="checkbox"
+                            className="ui-check-input"
+                            checked={modelForm.modalitiesOutput.includes(m)}
+                            onChange={() =>
+                              setModelForm({
+                                ...modelForm,
+                                modalitiesOutput: toggleModality(modelForm.modalitiesOutput, m),
+                              })
+                            }
+                            disabled={busy}
+                          />
+                          <CheckGlyph />
+                          <span className="ui-check-label">{m}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">能力标记</label>

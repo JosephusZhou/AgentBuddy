@@ -163,4 +163,7 @@ export interface UpsertModelPayload {
 export const MODALITY_OPTIONS = ["text", "image", "pdf", "audio", "video"] as const;
 export type Modality = (typeof MODALITY_OPTIONS)[number];
 
+/** Pi / Oh-My-Pi models.json 仅接受这两种输入模态。 */
+export const PI_MODALITY_OPTIONS = ["text", "image"] as const;
+
 export const EFFORT_PRESETS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

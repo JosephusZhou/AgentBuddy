@@ -26,6 +26,18 @@ use std::path::PathBuf;
 /// Pi 家族模型条目的已知键；其余字段进 extraOptions 原样往返。
 const MODEL_KNOWN_KEYS: &[&str] = &["id", "name", "reasoning", "input", "contextWindow", "maxTokens"];
 
+/// Pi / Oh-My-Pi 的 models schema 只接受 `text` 或 `text + image`。
+/// 其它通用目录模态（pdf/audio/video）不能写入 Pi 家族配置。
+fn normalize_input_modalities(input: &[String]) -> Vec<String> {
+    let has_text = input.iter().any(|value| value == "text");
+    let has_image = input.iter().any(|value| value == "image");
+    match (has_text, has_image) {
+        (false, false) => Vec::new(),
+        (true, false) => vec!["text".into()],
+        (_, true) => vec!["text".into(), "image".into()],
+    }
+}
+
 /* ===== Paths ===== */
 
 struct FamilyPaths {
@@ -160,7 +172,7 @@ fn parse_model(raw: &Value) -> AgentModelView {
         limit_context: f64_opt(raw, "contextWindow"),
         limit_input: None,
         limit_output: f64_opt(raw, "maxTokens"),
-        modalities_input: string_list(raw, "input"),
+        modalities_input: normalize_input_modalities(&string_list(raw, "input")),
         modalities_output: Vec::new(),
         reasoning: bool_opt(raw, "reasoning"),
         tool_call: None,
@@ -473,12 +485,13 @@ pub fn upsert_model(
         m.insert("reasoning".into(), Value::Bool(r));
     }
     if let Some(ref inputs) = payload.modalities_input {
-        if inputs.is_empty() {
+        let normalized = normalize_input_modalities(inputs);
+        if normalized.is_empty() {
             m.remove("input");
         } else {
             m.insert(
                 "input".into(),
-                Value::Array(inputs.iter().map(|s| Value::String(s.clone())).collect()),
+                Value::Array(normalized.into_iter().map(Value::String).collect()),
             );
         }
     }
@@ -752,7 +765,8 @@ mod tests {
                 limit_context: Some(128000.0),
                 limit_input: None,
                 limit_output: None,
-                modalities_input: Some(vec!["text".into()]),
+                // Pi schema 不允许 pdf/audio/video；写入层必须收敛为 text + image。
+                modalities_input: Some(vec!["text".into(), "image".into(), "pdf".into()]),
                 modalities_output: None,
                 reasoning: Some(true),
                 tool_call: None,
@@ -773,6 +787,7 @@ mod tests {
         let m0 = &raw.pointer("/providers/deepseek/models/0").unwrap();
         assert_eq!(m0.get("id").and_then(|x| x.as_str()), Some("deepseek-v3"));
         assert_eq!(m0.get("contextWindow").and_then(|x| x.as_f64()), Some(128000.0));
+        assert_eq!(m0.get("input"), Some(&json!(["text", "image"])));
         // Unmodeled field preserved
         assert!(m0.pointer("/extraKeep/a").is_some());
         // apiKey untouched
