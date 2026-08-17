@@ -341,7 +341,7 @@
 | 项 | 值 |
 |----|-----|
 | 模型文件 | `~/.omp/agent/models.yml`（YAML；兼容读 `.yaml` 与旧版 `models.json`） |
-| 密钥文件 | `~/.omp/agent/auth.json` |
+| 密钥配置 | `~/.omp/agent/models.yml` / `models.yaml` 中 provider 的 `apiKey`；旧版 `auth.json` 仅用于一次性迁移 |
 | 默认模型 | 暂不支持可视化编辑（在 omp 内用 `/model` 或 `omp config` 管理） |
 
 ---

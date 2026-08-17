@@ -217,13 +217,12 @@ pub fn candidate_executable_names(name: &str) -> Vec<String> {
     out
 }
 
-/// Search `PATH` for `binary_name`, applying PATHEXT on Windows and skipping shim dirs.
-pub fn find_in_path<F>(binary_name: &str, is_shim: F) -> Option<PathBuf>
+fn find_in_dirs<I, F>(dirs: I, binary_name: &str, is_shim: F) -> Option<PathBuf>
 where
-    F: Fn(&str) -> bool,
+    I: IntoIterator<Item = PathBuf>,
+    F: Fn(&str) -> bool + Copy,
 {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
+    for dir in dirs {
         let dir_s = dir.to_string_lossy();
         if is_shim(dir_s.as_ref()) {
             continue;
@@ -236,6 +235,108 @@ where
         }
     }
     None
+}
+
+/// Search `PATH` for `binary_name`, applying PATHEXT on Windows and skipping shim dirs.
+pub fn find_in_path<F>(binary_name: &str, is_shim: F) -> Option<PathBuf>
+where
+    F: Fn(&str) -> bool + Copy,
+{
+    let path_var = std::env::var_os("PATH")?;
+    find_in_dirs(std::env::split_paths(&path_var), binary_name, is_shim)
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if path.is_dir() && !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn append_version_bin_dirs(paths: &mut Vec<PathBuf>, root: &Path, suffix: &[&str]) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let mut bin = entry.path();
+        for part in suffix {
+            bin.push(part);
+        }
+        push_unique_path(paths, bin);
+    }
+}
+
+fn managed_cli_bin_dirs_for_home(home: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    // Common user-level package-manager and version-manager shims.
+    for relative in [
+        ".local/bin",
+        ".bun/bin",
+        ".volta/bin",
+        ".asdf/shims",
+        ".nodenv/shims",
+        ".nodebrew/current/bin",
+        ".npm-global/bin",
+        ".yarn/bin",
+        ".config/yarn/global/node_modules/.bin",
+        ".local/share/pnpm",
+        ".local/share/mise/shims",
+        ".mise/shims",
+        "Library/pnpm",
+    ] {
+        push_unique_path(&mut dirs, home.join(relative));
+    }
+
+    // nvm keeps each active Node version's global binaries in its own bin dir.
+    append_version_bin_dirs(&mut dirs, &home.join(".nvm/versions/node"), &["bin"]);
+
+    // fnm uses a different layout on Unix/macOS installations.
+    append_version_bin_dirs(
+        &mut dirs,
+        &home.join(".local/share/fnm/node-versions"),
+        &["installation", "bin"],
+    );
+    append_version_bin_dirs(
+        &mut dirs,
+        &home.join("Library/Application Support/fnm/node-versions"),
+        &["installation", "bin"],
+    );
+
+    #[cfg(windows)]
+    {
+        for relative in [
+            "AppData/Roaming/npm",
+            "AppData/Local/pnpm",
+            "AppData/Local/Volta/bin",
+        ] {
+            push_unique_path(&mut dirs, home.join(relative));
+        }
+        if let Some(nvm_home) = std::env::var_os("NVM_HOME") {
+            push_unique_path(&mut dirs, PathBuf::from(nvm_home));
+        }
+    }
+
+    dirs
+}
+
+/// Find a CLI in known user-level package/version-manager directories.
+///
+/// Desktop apps often do not inherit shell startup files, so relying only on
+/// `PATH` misses CLIs installed by nvm/fnm and similar tools. The directory
+/// list is deliberately explicit and shallow to avoid treating arbitrary home
+/// directory files as installed agents.
+pub fn find_in_managed_bin_dirs<F>(binary_name: &str, is_shim: F) -> Option<PathBuf>
+where
+    F: Fn(&str) -> bool + Copy,
+{
+    let home = home_dir().ok()?;
+    find_in_dirs(managed_cli_bin_dirs_for_home(&home), binary_name, is_shim)
 }
 
 /* ===== Open / reveal ===== */
@@ -734,6 +835,41 @@ mod tests {
         assert!(names
             .iter()
             .any(|n| n == "codex" || n.starts_with("codex.")));
+    }
+
+    #[test]
+    fn managed_dirs_include_nvm_and_fnm_version_bins() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-managed-bin-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let nvm_bin = base.join(".nvm/versions/node/v22.1.0/bin");
+        let fnm_bin = base.join(".local/share/fnm/node-versions/v22.1.0/installation/bin");
+        fs::create_dir_all(&nvm_bin).unwrap();
+        fs::create_dir_all(&fnm_bin).unwrap();
+
+        let dirs = managed_cli_bin_dirs_for_home(&base);
+        assert!(dirs.contains(&nvm_bin));
+        assert!(dirs.contains(&fnm_bin));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn find_in_dirs_finds_cli_without_path_environment() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-managed-bin-find-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let bin = base.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let pi = bin.join("pi");
+        fs::write(&pi, "#!/usr/bin/env node\n").unwrap();
+
+        let found = find_in_dirs(vec![bin], "pi", |_| false);
+        assert_eq!(found, Some(pi));
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

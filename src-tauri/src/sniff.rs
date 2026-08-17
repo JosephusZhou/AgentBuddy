@@ -177,6 +177,21 @@ fn collect_install_paths(spec: &crate::agents::AgentSpec) -> Vec<String> {
         }
     }
 
+    // Desktop-launched apps commonly lack shell-managed PATH entries (for
+    // example ~/.nvm/.../bin). Check known user-level manager directories for
+    // every CLI agent, so detection is consistent with terminal usage.
+    if install_paths.is_empty() {
+        for bin_name in spec.search_names {
+            if let Some(found) = crate::platform::find_in_managed_bin_dirs(bin_name, is_shim_path) {
+                let path_str = found.to_string_lossy().to_string();
+                if !is_shim_path(&path_str) && !install_paths.contains(&path_str) {
+                    install_paths.push(path_str);
+                }
+                break;
+            }
+        }
+    }
+
     // Prefer App paths over CLI paths in list items
     order_install_paths(&mut install_paths);
     install_paths

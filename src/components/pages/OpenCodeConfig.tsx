@@ -650,13 +650,13 @@ function agentLabel(id: ModelConfigAgentId): string {
   return AGENT_TABS.find((t) => t.id === id)?.label ?? id;
 }
 
-/** API Key 写入的 auth.json 路径提示（按 agent）。 */
-function authFileHint(id: ModelConfigAgentId): string {
+/** API Key 写入位置提示（按 agent）。 */
+function credentialLocationHint(id: ModelConfigAgentId): string {
   switch (id) {
     case "pi":
       return "~/.pi/agent/auth.json";
     case "oh-my-pi":
-      return "~/.omp/agent/auth.json";
+      return "~/.omp/agent/models.yml（或 models.yaml）";
     default:
       return "~/.local/share/opencode/auth.json";
   }
@@ -1802,7 +1802,7 @@ export default function ModelConfig() {
                       type={showApiKey ? "text" : "password"}
                       placeholder={
                         providerForm.isNew
-                          ? `可选，写入 ${authFileHint(agent)}`
+                          ? `可选，写入 ${credentialLocationHint(agent)}`
                           : "留空且不改动；清空并保存可删除密钥"
                       }
                       value={providerForm.apiKey}
@@ -1828,7 +1828,11 @@ export default function ModelConfig() {
                     </button>
                   </div>
                   <p className="oc-form-hint">
-                    密钥默认写入 <code>auth.json</code>，列表不会回传明文。清空输入并保存可删除密钥。
+                    {agent === "oh-my-pi" ? (
+                      <>密钥写入模型配置供 OMP 校验自定义模型；列表不会回传明文。清空输入并保存可删除密钥。</>
+                    ) : (
+                      <>密钥默认写入 <code>auth.json</code>，列表不会回传明文。清空输入并保存可删除密钥。</>
+                    )}
                   </p>
                   <button
                     type="button"
@@ -2478,17 +2482,23 @@ export default function ModelConfig() {
             <p>
               确定删除供应商 <strong>{deleteProvider?.id}</strong> 及其下全部模型？
             </p>
-            <label className="ui-check" style={{ marginTop: 12 }}>
-              <input
-                type="checkbox"
-                className="ui-check-input"
-                checked={deleteAuthToo}
-                onChange={(e) => setDeleteAuthToo(e.target.checked)}
-                disabled={busy}
-              />
-              <CheckGlyph />
-              <span className="ui-check-label">同时删除 auth.json 中的密钥</span>
-            </label>
+            {agent === "oh-my-pi" ? (
+              <p className="oc-form-hint" style={{ marginTop: 12 }}>
+                OMP 的密钥保存在模型配置中，删除供应商时会一并清理旧版兼容密钥。
+              </p>
+            ) : (
+              <label className="ui-check" style={{ marginTop: 12 }}>
+                <input
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={deleteAuthToo}
+                  onChange={(e) => setDeleteAuthToo(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">同时删除 auth.json 中的密钥</span>
+              </label>
+            )}
           </div>
           <div className="modal-footer">
             <button
