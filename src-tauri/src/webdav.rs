@@ -3,6 +3,8 @@
 use crate::config;
 use crate::crypto;
 use crate::db;
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use reqwest::Method;
@@ -730,97 +732,120 @@ pub fn list_remote_dir(
 }
 
 fn parse_propfind_list(xml: &str, dir_url: &str) -> Vec<WebDavRemoteEntry> {
-    // Minimal multistatus parser — enough for common Nextcloud / Apache / nginx DAV.
-    let lower = xml.to_ascii_lowercase();
+    #[derive(Default)]
+    struct ResponseEntry {
+        href: String,
+        bytes: u64,
+        last_modified: String,
+        display_name: String,
+        is_collection: bool,
+    }
+
+    fn assign_text(entry: &mut ResponseEntry, field: &[u8], value: &str) {
+        let value = value.trim();
+        match field {
+            b"href" if entry.href.is_empty() => entry.href = value.to_string(),
+            b"getcontentlength" => {
+                if let Ok(bytes) = value.parse::<u64>() {
+                    entry.bytes = bytes;
+                }
+            }
+            b"getlastmodified" if entry.last_modified.is_empty() => {
+                entry.last_modified = value.to_string();
+            }
+            b"displayname" if entry.display_name.is_empty() => {
+                entry.display_name = value.to_string();
+            }
+            _ => {}
+        }
+    }
+
+    // WebDAV servers freely choose namespace prefixes (`d:`, `D:`, `lp1:`, `ns1:`...).
+    // Parse by XML local name so those wire-format differences do not erase metadata.
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
     let mut entries = Vec::new();
-    let mut search_from = 0usize;
-    while let Some(rel) = lower[search_from..].find("<d:response")
-        .or_else(|| lower[search_from..].find("<response"))
-    {
-        let start = search_from + rel;
-        let end_tag = lower[start..]
-            .find("</d:response>")
-            .or_else(|| lower[start..].find("</response>"));
-        let end = match end_tag {
-            Some(e) => start + e,
-            None => break,
-        };
-        let chunk = &xml[start..end];
-        let chunk_l = &lower[start..end];
-        search_from = end + 1;
+    let mut current: Option<ResponseEntry> = None;
+    let mut text_field: Option<Vec<u8>> = None;
 
-        let href = extract_xml_text(chunk, chunk_l, "href").unwrap_or_default();
-        if href.is_empty() {
-            continue;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(tag)) => {
+                let local = tag.local_name();
+                match local.as_ref() {
+                    b"response" => current = Some(ResponseEntry::default()),
+                    b"collection" => {
+                        if let Some(entry) = current.as_mut() {
+                            entry.is_collection = true;
+                        }
+                    }
+                    b"href" | b"getcontentlength" | b"getlastmodified" | b"displayname"
+                        if current.is_some() =>
+                    {
+                        text_field = Some(local.as_ref().to_vec());
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(tag)) => {
+                if tag.local_name().as_ref() == b"collection" {
+                    if let Some(entry) = current.as_mut() {
+                        entry.is_collection = true;
+                    }
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if let (Some(entry), Some(field)) = (current.as_mut(), text_field.as_deref()) {
+                    if let Ok(decoded) = text.decode() {
+                        if let Ok(unescaped) = quick_xml::escape::unescape(&decoded) {
+                            assign_text(entry, field, &unescaped);
+                        }
+                    }
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if let (Some(entry), Some(field)) = (current.as_mut(), text_field.as_deref()) {
+                    if let Ok(decoded) = text.decode() {
+                        assign_text(entry, field, &decoded);
+                    }
+                }
+            }
+            Ok(Event::End(tag)) => {
+                let local = tag.local_name();
+                if local.as_ref() == b"response" {
+                    text_field = None;
+                    if let Some(entry) = current.take() {
+                        let href = entry.href.trim().to_string();
+                        let display = entry.display_name.trim();
+                        let name = if !display.is_empty() && !display.contains('/') {
+                            display.to_string()
+                        } else {
+                            href_file_name(&href)
+                        };
+                        if !href.is_empty()
+                            && !name.is_empty()
+                            && name != "."
+                            && name != ".."
+                            && !is_self_href(&href, dir_url)
+                        {
+                            entries.push(WebDavRemoteEntry {
+                                name,
+                                href,
+                                bytes: entry.bytes,
+                                last_modified: entry.last_modified,
+                                is_collection: entry.is_collection,
+                            });
+                        }
+                    }
+                } else if text_field.as_deref() == Some(local.as_ref()) {
+                    text_field = None;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
         }
-        let is_collection = chunk_l.contains("<d:collection")
-            || chunk_l.contains("<collection")
-            || chunk_l.contains("<d:collection/>")
-            || chunk_l.contains("<collection/>");
-        let bytes = extract_xml_text(chunk, chunk_l, "getcontentlength")
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(0);
-        let last_modified =
-            extract_xml_text(chunk, chunk_l, "getlastmodified").unwrap_or_default();
-        let display = extract_xml_text(chunk, chunk_l, "displayname").unwrap_or_default();
-
-        let name = if !display.trim().is_empty() && !display.contains('/') {
-            display.trim().to_string()
-        } else {
-            href_file_name(&href)
-        };
-        if name.is_empty() || name == "." || name == ".." {
-            continue;
-        }
-
-        // Skip the directory resource itself (href equals dir or ends with dir path only).
-        if is_self_href(&href, dir_url) {
-            continue;
-        }
-
-        entries.push(WebDavRemoteEntry {
-            name,
-            href,
-            bytes,
-            last_modified,
-            is_collection,
-        });
     }
     entries
-}
-
-fn extract_xml_text(chunk: &str, chunk_lower: &str, local_name: &str) -> Option<String> {
-    // Match <…:local> or <local> (case-insensitive on tag name).
-    let patterns = [
-        format!(":{}", local_name),
-        format!("<{}", local_name),
-    ];
-    let mut pos = None;
-    for p in &patterns {
-        if let Some(i) = chunk_lower.find(p) {
-            // find '<' before this match
-            let abs = i;
-            let open = chunk_lower[..abs].rfind('<')?;
-            let gt = chunk_lower[open..].find('>')? + open;
-            pos = Some(gt + 1);
-            break;
-        }
-    }
-    let start = pos?;
-    let close_patterns = [
-        format!("</d:{}>", local_name),
-        format!("</{}>", local_name),
-        format!("</D:{}>", local_name),
-    ];
-    let rest_l = &chunk_lower[start..];
-    let rest = &chunk[start..];
-    for cp in &close_patterns {
-        if let Some(i) = rest_l.find(&cp.to_ascii_lowercase()) {
-            return Some(rest[..i].trim().to_string());
-        }
-    }
-    // self-closing or empty
-    None
 }
 
 fn href_file_name(href: &str) -> String {
@@ -1115,5 +1140,34 @@ mod tests {
         assert_eq!(entries[0].name, "agentbuddy-backup-20260721120000.zip");
         assert_eq!(entries[0].bytes, 1234);
         assert!(!entries[0].is_collection);
+    }
+
+    #[test]
+    fn propfind_list_accepts_mixed_namespace_prefixes_and_attributes() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:lp1="DAV:">
+  <D:response id="directory">
+    <D:href>/dav/AgentBuddy/</D:href>
+    <D:propstat><D:prop><D:resourcetype><D:collection /></D:resourcetype></D:prop></D:propstat>
+  </D:response>
+  <D:response id="backup">
+    <D:href>/dav/AgentBuddy/agentbuddy-backup-20260819102722.abenc</D:href>
+    <D:propstat><D:prop>
+      <lp1:getcontentlength unit="bytes">25794969</lp1:getcontentlength>
+      <lp1:getlastmodified>Wed, 19 Aug 2026 02:27:22 GMT</lp1:getlastmodified>
+      <lp1:displayname>agentbuddy-backup-20260819102722.abenc</lp1:displayname>
+    </D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_list(xml, "https://dav.example.com/dav/AgentBuddy/");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "agentbuddy-backup-20260819102722.abenc");
+        assert_eq!(entries[0].bytes, 25_794_969);
+        assert_eq!(
+            entries[0].last_modified,
+            "Wed, 19 Aug 2026 02:27:22 GMT"
+        );
     }
 }

@@ -138,6 +138,13 @@ fn emit_backup_progress(app: &AppHandle, event: BackupProgressEvent) {
     let _ = app.emit("backup-progress", &event);
 }
 
+fn order_upload_results(
+    mut completed: Vec<(usize, BackupUploadTargetResult)>,
+) -> Vec<BackupUploadTargetResult> {
+    completed.sort_by_key(|(index, _)| *index);
+    completed.into_iter().map(|(_, target)| target).collect()
+}
+
 // ===== Manifest (internal + serialized into zip) =====
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1270,6 +1277,7 @@ pub fn run_backup_upload(
     let total_targets = upload_ids.len() as u32;
     let (tx, rx) = mpsc::channel::<(usize, BackupUploadTargetResult, Vec<String>)>();
     let next = std::sync::Mutex::new(0usize);
+    let mut completed_targets = Vec::with_capacity(upload_ids.len());
     std::thread::scope(|s| {
         let worker_n = UPLOAD_CONCURRENCY.min(upload_ids.len());
         for _ in 0..worker_n {
@@ -1359,18 +1367,12 @@ pub fn run_backup_upload(
                     connection_id: Some(upload_ids[idx].clone()),
                 },
             );
+            completed_targets.push((idx, target));
         }
     });
 
-    let mut targets: Vec<BackupUploadTargetResult> = rx
-        .try_iter()
-        .map(|(_, t, _)| t)
-        .collect();
-    targets.sort_by(|a, b| {
-        let pa = upload_ids.iter().position(|id| *id == a.connection_id);
-        let pb = upload_ids.iter().position(|id| *id == b.connection_id);
-        pa.cmp(&pb)
-    });
+    // 接收进度时通道中的结果已被消费；直接使用当时保存的结果生成最终汇总。
+    let targets = order_upload_results(completed_targets);
     debug_assert_eq!(targets.len(), upload_ids.len());
 
     let any_ok = targets.iter().any(|t| t.ok);
@@ -2396,5 +2398,29 @@ mod tests {
         assert!(e.contains("app:agentbuddy:config"));
         assert!(e.contains("app:agentbuddy:db"));
         assert!(e.contains("app:agentbuddy:skills"));
+    }
+
+    #[test]
+    fn upload_results_are_preserved_and_restored_to_request_order() {
+        let target = |connection_id: &str, ok: bool| BackupUploadTargetResult {
+            connection_id: connection_id.into(),
+            name: connection_id.into(),
+            ok,
+            message: if ok { "上传成功" } else { "上传失败" }.into(),
+            remote_path: String::new(),
+        };
+
+        // 并发上传可能乱序完成，最终结果仍应完整且与请求顺序一致。
+        let results = order_upload_results(vec![
+            (2, target("third", true)),
+            (0, target("first", true)),
+            (1, target("second", false)),
+        ]);
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].connection_id, "first");
+        assert_eq!(results[1].connection_id, "second");
+        assert_eq!(results[2].connection_id, "third");
+        assert_eq!(results.iter().filter(|result| result.ok).count(), 2);
     }
 }

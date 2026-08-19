@@ -22,7 +22,7 @@ import type {
   RestoreBackupResult,
   WebDAVConnectionLite,
 } from "./backup-manage/types";
-import { ChevronDown, CloudUpload, Radar } from "lucide-react";
+import { ChevronDown, CloudUpload, Eye, EyeOff, Radar } from "lucide-react";
 
 const PHASE_LABEL: Record<string, string> = {
   collect: "收集",
@@ -315,6 +315,8 @@ export default function BackupManage() {
   const [uploadDir, setUploadDir] = useState("AgentBuddy");
   const [passphrase, setPassphrase] = useState("");
   const [passphrase2, setPassphrase2] = useState("");
+  const [passphraseVisible, setPassphraseVisible] = useState(false);
+  const [passphrase2Visible, setPassphrase2Visible] = useState(false);
   const [ackPlaintext, setAckPlaintext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -791,27 +793,55 @@ export default function BackupManage() {
                 <div className="backup-field-row">
                   <label className="backup-field">
                     <span className="backup-field-label">备份口令（可选）</span>
-                    <input
-                      type="password"
-                      className="form-input"
-                      autoComplete="new-password"
-                      value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                      placeholder="留空则生成明文 zip"
-                      disabled={running}
-                    />
+                    <div className="form-input-with-action">
+                      <input
+                        type={passphraseVisible ? "text" : "password"}
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={passphrase}
+                        onChange={(e) => setPassphrase(e.target.value)}
+                        placeholder="留空则生成明文 zip"
+                        disabled={running}
+                      />
+                      <button
+                        type="button"
+                        className="form-input-action"
+                        data-tooltip={passphraseVisible ? "隐藏备份口令" : "显示备份口令"}
+                        aria-label={passphraseVisible ? "隐藏备份口令" : "显示备份口令"}
+                        aria-pressed={passphraseVisible}
+                        onClick={() => setPassphraseVisible((visible) => !visible)}
+                        disabled={running}
+                      >
+                        {passphraseVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </label>
                   <label className="backup-field">
                     <span className="backup-field-label">确认口令</span>
-                    <input
-                      type="password"
-                      className="form-input"
-                      autoComplete="new-password"
-                      value={passphrase2}
-                      onChange={(e) => setPassphrase2(e.target.value)}
-                      placeholder="再次输入"
-                      disabled={running || !passphrase}
-                    />
+                    <div className="form-input-with-action">
+                      <input
+                        type={passphrase2Visible ? "text" : "password"}
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={passphrase2}
+                        onChange={(e) => setPassphrase2(e.target.value)}
+                        placeholder="再次输入"
+                        disabled={running || !passphrase}
+                      />
+                      <button
+                        type="button"
+                        className="form-input-action"
+                        data-tooltip={passphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
+                        aria-label={passphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
+                        aria-pressed={passphrase2Visible}
+                        onClick={() => setPassphrase2Visible((visible) => !visible)}
+                        disabled={running || !passphrase}
+                      >
+                        {passphrase2Visible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </label>
                 </div>
 
