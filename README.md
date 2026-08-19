@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-PolyForm_Noncommercial-blue)
 ![Platform](https://img.shields.io/badge/platform-desktop-lightgrey)
-![Version](https://img.shields.io/badge/version-0.1.7-green)
+![Version](https://img.shields.io/badge/version-0.1.8-green)
 
 AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统一管理常见 AI Agent 生态配置。
 
@@ -176,7 +176,7 @@ src-tauri/src/                Rust 后端
 打 tag 前请保证 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本号一致：
 
 ```bash
-git tag v0.1.7
+git tag v0.1.8
 git push origin main --tags
 ```
 
