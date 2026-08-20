@@ -18,6 +18,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_ENV_ID: &str = "default";
+/// Internal provider sentinel for Codex CLI's first-party OAuth login.
+/// It is intentionally not an AI-provider DB row and must never be used for API routing.
+pub const OFFICIAL_OAUTH_PROVIDER_ID: &str = "__codex_official_oauth__";
 const MARKER_BEGIN: &str = "# >>> AgentBuddy Codex Env (managed) >>>";
 const MARKER_END: &str = "# <<< AgentBuddy Codex Env (managed) <<<";
 
@@ -786,6 +789,27 @@ fn apply_config_overrides(
         non_empty(base_url),
         non_empty(api_key),
     )
+}
+
+/// Switch an environment to Codex's official OAuth mode.  Keep auth.json intact
+/// (it may contain OAuth credentials), but remove AgentBuddy-managed API/config
+/// overrides so the CLI can perform its own login and endpoint selection.
+fn apply_official_oauth_config(config_dir: &Path) -> Result<Vec<String>, String> {
+    let mut changed = apply_managed_config_edit(config_dir, Some(""), Some(""), Some(""), Some(""))?;
+    let path = env_config_path(config_dir);
+    if path.is_file() {
+        let raw = fs::read_to_string(&path).map_err(|e| format!("读取 config.toml 失败: {}", e))?;
+        let mut doc = raw
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|e| format!("解析 config.toml 失败: {}", e))?;
+        if doc.remove("model_providers").is_some() {
+            let create_mode = platform::current_mode(&path);
+            atomic_write(&path, &doc.to_string())?;
+            platform::restore_or_private_file(&path, create_mode);
+            changed.push("供应商配置".into());
+        }
+    }
+    Ok(changed)
 }
 
 /* ===== MCP (toml [mcp_servers]) ===== */
@@ -1681,13 +1705,19 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
         return Err(e);
     }
 
-    let override_fields = match apply_config_overrides(
-        &dst,
-        payload.model.as_deref(),
-        payload.model_provider.as_deref(),
-        payload.base_url.as_deref(),
-        payload.api_key.as_deref(),
-    ) {
+    let official_oauth = payload.provider_id.as_deref().map(str::trim)
+        == Some(OFFICIAL_OAUTH_PROVIDER_ID);
+    let override_fields = match if official_oauth {
+        apply_official_oauth_config(&dst)
+    } else {
+        apply_config_overrides(
+            &dst,
+            payload.model.as_deref(),
+            payload.model_provider.as_deref(),
+            payload.base_url.as_deref(),
+            payload.api_key.as_deref(),
+        )
+    } {
         Ok(fields) => fields,
         Err(e) => {
             let _ = fs::remove_dir_all(&dst);
@@ -1723,7 +1753,9 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
     if !skipped.is_empty() {
         message.push_str(&format!("已按选择跳过 {} 的复制。", skipped.join("、")));
     }
-    if override_fields.is_empty() {
+    if official_oauth {
+        message.push_str("已切换为官方 OAuth 登录；请通过该环境的 Codex 命令执行登录。");
+    } else if override_fields.is_empty() {
         message
             .push_str("model / provider / base_url / Token 沿用源环境（Token 不会从源环境复制）。");
     } else {
@@ -1804,6 +1836,12 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         move_outcome = move_environment_dir(&src, &dst)?;
     }
 
+    let provider_id = payload
+        .provider_id
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| existing.provider_id.clone());
+    let official_oauth = provider_id == OFFICIAL_OAUTH_PROVIDER_ID;
     let now = now_secs();
     let row = CodexEnvironmentRow {
         id: id.clone(),
@@ -1815,14 +1853,47 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         source,
         notes,
         alias_installed: existing.alias_installed,
-        provider_id: payload
-            .provider_id
-            .as_ref()
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|| existing.provider_id.clone()),
+        provider_id,
         created_at: existing.created_at,
         updated_at: now,
     };
+    let dir = PathBuf::from(&row.config_dir);
+    let changed = (|| -> Result<Vec<String>, String> {
+        if dir.is_dir() {
+            if official_oauth {
+                apply_official_oauth_config(&dir)
+            } else {
+                apply_managed_config_edit(
+                    &dir,
+                    payload.model.as_deref(),
+                    payload.model_provider.as_deref(),
+                    payload.base_url.as_deref(),
+                    payload.api_key.as_deref(),
+                )
+            }
+        } else if official_oauth {
+            Err(format!("环境目录不存在，无法切换官方 OAuth：{}", dir.display()))
+        } else {
+            Ok(Vec::new())
+        }
+    })()
+    .map_err(|e| {
+        if move_outcome != EnvMoveOutcome::NoMove {
+            let src = PathBuf::from(&previous_config_dir);
+            let dst = PathBuf::from(&config_dir);
+            if fs::rename(&dst, &src).is_err() {
+                return format!(
+                    "配置更新失败: {}。注意：目录可能已迁移到 {}，请手工核对 {} 与 {}",
+                    e,
+                    dst.display(),
+                    src.display(),
+                    dst.display()
+                );
+            }
+        }
+        format!("配置更新失败: {}", e)
+    })?;
+
     db::upsert_codex_environment_row(&row).map_err(|e| {
         if move_outcome != EnvMoveOutcome::NoMove {
             let src = PathBuf::from(&previous_config_dir);
@@ -1859,58 +1930,20 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         }
     }
 
-    if !is_default {
-        let dir = PathBuf::from(&row.config_dir);
-        if dir.is_dir() {
-            match apply_managed_config_edit(
-                &dir,
-                payload.model.as_deref(),
-                payload.model_provider.as_deref(),
-                payload.base_url.as_deref(),
-                payload.api_key.as_deref(),
-            ) {
-                Ok(changed) if !changed.is_empty() => {
-                    // Token 写 auth.json；其余写 config.toml —— 统一列出字段名即可
-                    message.push_str(&format!("；已更新 {}", changed.join("、")));
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    message.push_str(&format!("；但配置更新失败：{}", e));
-                }
-            }
-        } else if payload.model.is_some()
+    if !changed.is_empty() {
+        let target = if is_default { "默认 config.toml / auth.json" } else { "配置" };
+        message.push_str(&format!("；已更新 {} 的 {}", target, changed.join("、")));
+    } else if !dir.is_dir()
+        && (payload.model.is_some()
             || payload.model_provider.is_some()
             || payload.base_url.is_some()
-            || payload.api_key.is_some()
-        {
-            message.push_str("；环境目录不存在，未写入 model / provider / base_url / Token");
-        }
-    } else {
-        // 默认环境：也写入 ~/.codex/config.toml 与 auth.json
-        let dir = PathBuf::from(&row.config_dir);
-        if dir.is_dir() {
-            match apply_managed_config_edit(
-                &dir,
-                payload.model.as_deref(),
-                payload.model_provider.as_deref(),
-                payload.base_url.as_deref(),
-                payload.api_key.as_deref(),
-            ) {
-                Ok(changed) if !changed.is_empty() => {
-                    message.push_str(&format!("；已更新默认 config.toml / auth.json 的 {}", changed.join("、")));
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    message.push_str(&format!("；但默认 config.toml 更新失败：{}", e));
-                }
-            }
-        } else if payload.model.is_some()
-            || payload.model_provider.is_some()
-            || payload.base_url.is_some()
-            || payload.api_key.is_some()
-        {
-            message.push_str("；默认环境目录不存在，未写入 model / provider / base_url / Token");
-        }
+            || payload.api_key.is_some())
+    {
+        message.push_str("；环境目录不存在，未写入 model / provider / base_url / Token");
+    }
+
+    if official_oauth {
+        message.push_str("；已切换为官方 OAuth 登录，请通过该环境的 Codex 命令执行登录");
     }
 
     Ok(CodexEnvActionResult {
@@ -2674,5 +2707,45 @@ experimental_bearer_token = "legacy-token"
         assert_eq!(managed.bearer_token, "auth-token");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn official_oauth_clears_managed_fields_but_preserves_oauth_auth() {
+        let dir = std::env::temp_dir().join(format!("agentbuddy-codex-oauth-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("auth.json"), r#"{"tokens":{"id_token":"oauth"},"OPENAI_API_KEY":"managed"}"#).unwrap();
+        fs::write(dir.join("config.toml"), "model = \"gpt\"\nmodel_provider = \"custom\"\nopenai_base_url = \"https://example.invalid/v1\"\n\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"https://example.invalid/v1\"\n").unwrap();
+        let changed = apply_official_oauth_config(&dir).unwrap();
+        assert!(changed.contains(&"Token".to_string()));
+        let auth: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
+        assert_eq!(auth["tokens"]["id_token"], "oauth");
+        assert!(auth.get("OPENAI_API_KEY").is_none());
+        let doc: toml_edit::DocumentMut = fs::read_to_string(dir.join("config.toml")).unwrap().parse().unwrap();
+        assert!(doc.get("model").is_none());
+        assert!(doc.get("model_provider").is_none());
+        assert!(doc.get("openai_base_url").is_none());
+        assert!(doc.get("model_providers").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clone_official_oauth_removes_source_provider_table() {
+        let base = std::env::temp_dir().join(format!("agentbuddy-codex-clone-oauth-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let source = base.join("source");
+        let target = base.join("target");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("config.toml"),
+            "model_provider = \"my_codex\"\n\n[model_providers.my_codex]\nname = \"My Codex\"\nbase_url = \"https://example.invalid/v1\"\n",
+        )
+        .unwrap();
+        copy_core(&source, &target, false, false).unwrap();
+        apply_official_oauth_config(&target).unwrap();
+        let doc: toml_edit::DocumentMut = fs::read_to_string(target.join("config.toml")).unwrap().parse().unwrap();
+        assert!(doc.get("model_provider").is_none());
+        assert!(doc.get("model_providers").is_none());
+        let _ = fs::remove_dir_all(&base);
     }
 }

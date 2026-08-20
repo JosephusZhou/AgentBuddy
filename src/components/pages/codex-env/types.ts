@@ -1,5 +1,8 @@
 /** CodexEnv 页的类型定义（从页面组件抽出，供页面与 api 层共享）。 */
 
+/** 特殊供应商哨兵：让 Codex CLI 使用官方 OAuth 登录，不写第三方 API 配置。 */
+export const OFFICIAL_OAUTH_PROVIDER_ID = "__codex_official_oauth__";
+
 export interface CodexEnvironment {
   id: string;
   name: string;

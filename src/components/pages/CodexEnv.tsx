@@ -38,6 +38,7 @@ import {
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
 import type { AiProvider, ProviderType } from "./ai-providers/types";
+import { OFFICIAL_OAUTH_PROVIDER_ID } from "./codex-env/types";
 import { Blocks, ChevronDown, Copy, Download, Eye, EyeOff, FileJson, Folder, FolderOpen, Pencil, Radar, Sparkles, Terminal, Trash2, X } from "lucide-react";
 
 /* ===== Icons ===== */
@@ -107,6 +108,24 @@ const IconChevron = ({ open }: { open?: boolean }) => (
 );
 
 /* ===== AI 供应商选择下拉（Codex 环境专用：仅 OpenAI / 通用类型） ===== */
+
+const OFFICIAL_OAUTH_PROVIDER: AiProvider = {
+  id: OFFICIAL_OAUTH_PROVIDER_ID,
+  name: "官方 OAuth（Codex 登录）",
+  providerType: "openai",
+  baseUrl: "",
+  openaiBaseUrl: "",
+  defaultModel: "",
+  openaiDefaultModel: "",
+  models: {},
+  hasApiKey: false,
+  apiKeyCount: 0,
+  customModels: [],
+  notes: "使用 Codex CLI 官方账号登录",
+  createdAt: 0,
+  updatedAt: 0,
+  sortOrder: -1,
+};
 
 const CodexProviderSelect = ({
   id,
@@ -194,7 +213,8 @@ const CodexProviderSelect = ({
             </button>
           )}
           {providers.map((p) => {
-            const baseUrl = openaiProviderBaseUrl(p);
+            const isOfficialOauth = p.id === OFFICIAL_OAUTH_PROVIDER_ID;
+            const baseUrl = isOfficialOauth ? "Codex 官方登录" : openaiProviderBaseUrl(p);
             return (
               <button
                 key={p.id}
@@ -209,7 +229,7 @@ const CodexProviderSelect = ({
               >
                 <span className="app-select-option-title">{p.name}</span>
                 <span className="app-select-option-sub">
-                  {typeLabel(p.providerType)} · {baseUrl}
+                  {isOfficialOauth ? "官方 OAuth · 启动后登录账号" : `${typeLabel(p.providerType)} · ${baseUrl}`}
                 </span>
               </button>
             );
@@ -424,6 +444,8 @@ export default function CodexEnv() {
     () => envs.find((e) => e.id === cloneSourceId) ?? null,
     [envs, cloneSourceId],
   );
+  const cloneUsesOfficialOAuth = cloneSelectedProvider?.id === OFFICIAL_OAUTH_PROVIDER_ID;
+  const editUsesOfficialOAuth = editSelectedProvider?.id === OFFICIAL_OAUTH_PROVIDER_ID;
 
   const openClone = useCallback((source?: CodexEnvironment) => {
     const src = source ?? envs.find((e) => e.isDefault) ?? envs[0];
@@ -455,7 +477,7 @@ export default function CodexEnv() {
     void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
       const routeAgg = await fetchRouteAggregationProvider();
-      setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
+      setCloneProviders([OFFICIAL_OAUTH_PROVIDER, ...(routeAgg ? [routeAgg, ...eligible] : eligible)]);
     }).catch(() => setCloneProviders([]));
   }, [envs]);
 
@@ -576,6 +598,7 @@ providerId: cloneSelectedProvider?.id || undefined,
     cloneSyncSkills,
     cloneSyncAgents,
     cloneInstallAlias,
+    cloneSelectedProvider,
     refresh,
   ]);
 
@@ -618,9 +641,9 @@ providerId: cloneSelectedProvider?.id || undefined,
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
       const routeAgg = await fetchRouteAggregationProvider();
       const all = routeAgg ? [routeAgg, ...eligible] : eligible;
-      setEditProviders(all);
+      setEditProviders([OFFICIAL_OAUTH_PROVIDER, ...all]);
       // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
-      const linked = all.find((p) => p.id === env.providerId) ?? null;
+      const linked = [OFFICIAL_OAUTH_PROVIDER, ...all].find((p) => p.id === env.providerId) ?? null;
       setEditSelectedProvider(linked);
       setEditRemoteModels(customModelOptionsOf(linked));
     }).catch(() => setEditProviders([]));
@@ -1317,6 +1340,14 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   onChange={async (p) => {
                     setCloneSelectedProvider(p);
                     if (p) {
+                      if (p.id === OFFICIAL_OAUTH_PROVIDER_ID) {
+                        setCloneBaseUrl("");
+                        setCloneApiKey("");
+                        setCloneModel("");
+                        setCloneModelProvider("");
+                        setCloneRemoteModels([]);
+                        return;
+                      }
                       const baseUrl = openaiProviderBaseUrl(p);
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setCloneBaseUrl(baseUrl);
@@ -1341,11 +1372,11 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   allowClear
                 />
                 <div className="claude-env-form-hint">
-                  选择后自动填入供应商的 Base URL、默认模型与 API Key；也可跳过自行填写。
+                  选择官方 OAuth 会清除第三方连接配置；保存后通过该环境的 Codex 命令登录官方账号。
                 </div>
               </div>
             )}
-            <div className="form-group">
+            {!cloneUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-base-url">Base URL（可选）</label>
               <input
                 id="xe-base-url"
@@ -1358,8 +1389,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 autoComplete="off"
                 spellCheck={false}
               />
-            </div>
-            <div className="form-group">
+            </div>}
+            {!cloneUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-api-key">Token（可选）</label>
               <div className="form-input-with-action">
                 <input
@@ -1386,8 +1417,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   {showCloneApiKey ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
-            </div>
-            <div className="form-group">
+            </div>}
+            {!cloneUsesOfficialOAuth && <div className="form-group">
               <div className="claude-env-model-label-row">
                 <label className="form-label" htmlFor="xe-model">模型（可选）</label>
                 <button
@@ -1409,8 +1440,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 disabled={busy}
                 placeholder="留空则复用源环境 model"
               />
-            </div>
-            <div className="form-group">
+            </div>}
+            {!cloneUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-provider">Provider（可选）</label>
               <input
                 id="xe-provider"
@@ -1422,7 +1453,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 autoComplete="off"
                 spellCheck={false}
               />
-            </div>
+            </div>}
             <div className="form-group">
               <label className="ui-check" htmlFor="xe-sync-skills">
                 <input
@@ -1575,6 +1606,14 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   onChange={async (p) => {
                     setEditSelectedProvider(p);
                     if (p) {
+                      if (p.id === OFFICIAL_OAUTH_PROVIDER_ID) {
+                        setEditBaseUrl("");
+                        setEditApiKey("");
+                        setEditModel("");
+                        setEditModelProvider("");
+                        setEditRemoteModels([]);
+                        return;
+                      }
                       const baseUrl = openaiProviderBaseUrl(p);
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setEditBaseUrl(baseUrl);
@@ -1600,7 +1639,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 />
               </div>
             )}
-            <div className="form-group">
+            {!editUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-edit-base-url">Base URL</label>
               <input
                 id="xe-edit-base-url"
@@ -1613,8 +1652,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 autoComplete="off"
                 spellCheck={false}
               />
-            </div>
-            <div className="form-group">
+            </div>}
+            {!editUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-edit-api-key">Token</label>
               <div className="form-input-with-action">
                 <input
@@ -1641,8 +1680,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   {editApiKeyVisible ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
-            </div>
-            <div className="form-group">
+            </div>}
+            {!editUsesOfficialOAuth && <div className="form-group">
               <div className="claude-env-model-label-row">
                 <label className="form-label" htmlFor="xe-edit-model">模型</label>
                 <button
@@ -1664,8 +1703,8 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 disabled={busy}
                 placeholder="留空即删除 model 键"
               />
-            </div>
-            <div className="form-group">
+            </div>}
+            {!editUsesOfficialOAuth && <div className="form-group">
               <label className="form-label" htmlFor="xe-edit-provider">Provider</label>
               <input
                 id="xe-edit-provider"
@@ -1682,7 +1721,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                 Token 读写 <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>
                 （与 provider 类型无关）；留空并保存即删除该键。
               </div>
-            </div>
+            </div>}
             {editIsDefault && (
               <div className="claude-env-form-hint">
                 默认环境路径固定为 <code>~/.codex</code>，直接运行 <code>codex</code> 使用；该配置将写入默认 config.toml / auth.json。

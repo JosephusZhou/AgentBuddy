@@ -267,6 +267,9 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
     if id.is_empty() {
         return Err("供应商 ID 不能为空".to_string());
     }
+    if id == crate::codex_env::OFFICIAL_OAUTH_PROVIDER_ID {
+        return Err("该供应商 ID 保留给 Codex 官方 OAuth 登录，不能用于 AI 供应商".to_string());
+    }
     if name.is_empty() {
         return Err("名称不能为空".to_string());
     }
@@ -700,6 +703,15 @@ mod tests {
         let mut bad_type = payload(&id, Some("sk-x"));
         bad_type.provider_type = "gemini".to_string();
         assert!(upsert_provider(bad_type).is_err());
+    }
+
+    #[test]
+    fn official_oauth_provider_id_is_reserved() {
+        let mut pl = payload(crate::codex_env::OFFICIAL_OAUTH_PROVIDER_ID, Some("sk-x"));
+        pl.provider_type = "openai".to_string();
+        assert!(upsert_provider(pl)
+            .unwrap_err()
+            .contains("保留给 Codex 官方 OAuth"));
     }
 
     #[test]
