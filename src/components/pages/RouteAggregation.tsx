@@ -33,6 +33,35 @@ import {
 import { invokeList } from "./ai-providers/api";
 import type { AiProvider } from "./ai-providers/types";
 
+/**
+ * 收起供应商列表时展示的模型 ID。
+ *
+ * 与后端 `effective_custom_model_ids` 保持一致：别名优先，按供应商和模型原有
+ * 顺序去重。没有状态记录的供应商按后端默认值视为已启用。
+ */
+function getSelectedProviderModelIds(
+  providers: AiProvider[],
+  providerStatuses: ProviderRouteStatus[],
+): string[] {
+  const enabledById = new Map(providerStatuses.map((provider) => [provider.id, provider.enabled]));
+  const modelIds = new Set<string>();
+
+  for (const provider of providers) {
+    if (!isRouteableProviderType(provider.providerType) || enabledById.get(provider.id) === false) {
+      continue;
+    }
+
+    for (const customModel of provider.customModels) {
+      const modelId = customModel.aliasId.trim() || customModel.model.trim();
+      if (modelId) {
+        modelIds.add(modelId);
+      }
+    }
+  }
+
+  return [...modelIds];
+}
+
 export default function RouteAggregation() {
   const [config, setConfig] = useState<RouteAggregationConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<RouteAggregationStatus | null>(null);
@@ -40,6 +69,7 @@ export default function RouteAggregation() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [providersExpanded, setProvidersExpanded] = useState(true);
 
   // 进出日志状态：列表 + 选中的详情弹窗
   const [logs, setLogs] = useState<RouteLogEntry[]>([]);
@@ -48,6 +78,11 @@ export default function RouteAggregation() {
   const [selectedLog, setSelectedLog] = useState<RouteLogEntry | null>(null);
   const [logAutoRefresh, setLogAutoRefresh] = useState(true);
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
+
+  const selectedProviderModels = useMemo(
+    () => getSelectedProviderModelIds(providers, status?.providers ?? []),
+    [providers, status],
+  );
 
   const loadData = useCallback(async () => {
     try {
@@ -474,9 +509,17 @@ export default function RouteAggregation() {
             <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}>
               {providers.length > 0 ? `${providers.length} 个` : ""}
             </span>
-          </div>
-          <div className="pref-section-desc" style={{ marginTop: 4, marginBottom: 8 }}>
-            勾选参与聚合的供应商；勾选即使用该供应商的全部模型（自定义模型优先，未配置时使用远程模型列表）。
+            <button
+              type="button"
+              className="btn-icon-action"
+              onClick={() => setProvidersExpanded((expanded) => !expanded)}
+              data-tooltip={providersExpanded ? "收起供应商列表" : "展开供应商列表"}
+              aria-label={providersExpanded ? "收起供应商列表" : "展开供应商列表"}
+              aria-expanded={providersExpanded}
+              style={{ marginLeft: "auto" }}
+            >
+              {providersExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
           </div>
           {providers.length === 0 ? (
             <div className="empty-state" style={{ minHeight: 120, padding: "24px 12px" }}>
@@ -486,19 +529,26 @@ export default function RouteAggregation() {
                 请先在「AI 供应商」中添加供应商
               </div>
             </div>
+          ) : providersExpanded ? (
+            <>
+              <div className="pref-section-desc" style={{ marginTop: 4, marginBottom: 8 }}>
+                勾选参与聚合的供应商；勾选即使用该供应商配置的全部自定义模型。
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                {providers.map((p) => (
+                  <ProviderSelectRow
+                    key={p.id}
+                    provider={p}
+                    routeStatus={statusById.get(p.id)}
+                    onToggle={(en) => handleToggleProvider(p.id, en)}
+                    onResetCircuitBreaker={() => handleResetCircuitBreaker(p.id)}
+                    actionLoading={actionLoading}
+                  />
+                ))}
+              </div>
+            </>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-              {providers.map((p) => (
-                <ProviderSelectRow
-                  key={p.id}
-                  provider={p}
-                  routeStatus={statusById.get(p.id)}
-                  onToggle={(en) => handleToggleProvider(p.id, en)}
-                  onResetCircuitBreaker={() => handleResetCircuitBreaker(p.id)}
-                  actionLoading={actionLoading}
-                />
-              ))}
-            </div>
+            <SelectedProviderModels models={selectedProviderModels} />
           )}
         </div>
 
@@ -565,6 +615,48 @@ export default function RouteAggregation() {
         </div>
       </div>
     </>
+  );
+}
+
+/* ===== Collapsed Provider Models ===== */
+
+function SelectedProviderModels({ models }: { models: string[] }) {
+  const [copiedModel, setCopiedModel] = useState<string | null>(null);
+
+  if (models.length === 0) {
+    return (
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", marginTop: 8 }}>
+        已选供应商暂无自定义模型
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+      {models.map((model) => (
+        <code
+          key={model}
+          onClick={() => {
+            navigator.clipboard.writeText(model);
+            setCopiedModel(model);
+            setTimeout(() => setCopiedModel((current) => (current === model ? null : current)), 2000);
+          }}
+          data-tooltip={copiedModel === model ? "已复制" : "点击复制"}
+          style={{
+            fontSize: "var(--text-xs)",
+            padding: "3px 8px",
+            borderRadius: 4,
+            background: "var(--seed-surface-alt)",
+            border: "1px solid var(--seed-border)",
+            color: "var(--seed-primary)",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {model}
+        </code>
+      ))}
+    </div>
   );
 }
 
