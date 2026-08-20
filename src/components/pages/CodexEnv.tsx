@@ -34,6 +34,7 @@ invokeList as invokeProviderList,
 } from "./ai-providers/api";
 import {
   fetchRouteAggregationProvider,
+  openaiProviderBaseUrl,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
 import type { AiProvider, ProviderType } from "./ai-providers/types";
@@ -193,7 +194,7 @@ const CodexProviderSelect = ({
             </button>
           )}
           {providers.map((p) => {
-            const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+            const baseUrl = openaiProviderBaseUrl(p);
             return (
               <button
                 key={p.id}
@@ -453,7 +454,7 @@ export default function CodexEnv() {
     // 加载供应商列表（Codex 环境只展示 OpenAI / 通用供应商）；路由聚合运行时置顶虚拟供应商
     void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
-      const routeAgg = await fetchRouteAggregationProvider("openai");
+      const routeAgg = await fetchRouteAggregationProvider();
       setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
     }).catch(() => setCloneProviders([]));
   }, [envs]);
@@ -615,7 +616,7 @@ providerId: cloneSelectedProvider?.id || undefined,
     // 加载供应商列表；路由聚合运行时置顶虚拟供应商
     void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "openai" || p.providerType === "universal");
-      const routeAgg = await fetchRouteAggregationProvider("openai");
+      const routeAgg = await fetchRouteAggregationProvider();
       const all = routeAgg ? [routeAgg, ...eligible] : eligible;
       setEditProviders(all);
       // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项
@@ -1316,7 +1317,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   onChange={async (p) => {
                     setCloneSelectedProvider(p);
                     if (p) {
-                      const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+                      const baseUrl = openaiProviderBaseUrl(p);
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setCloneBaseUrl(baseUrl);
                       setCloneModel(defaultModel);
@@ -1574,7 +1575,7 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   onChange={async (p) => {
                     setEditSelectedProvider(p);
                     if (p) {
-                      const baseUrl = p.providerType === "openai" ? p.baseUrl : p.openaiBaseUrl || p.baseUrl;
+                      const baseUrl = openaiProviderBaseUrl(p);
                       const defaultModel = p.providerType === "openai" ? p.defaultModel : p.openaiDefaultModel || p.defaultModel;
                       setEditBaseUrl(baseUrl);
                       setEditModel(defaultModel);

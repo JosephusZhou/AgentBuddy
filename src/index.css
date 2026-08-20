@@ -4595,6 +4595,10 @@ a[href]:focus-visible {
 .oc-provider-card .mcp-card-header {
   margin-bottom: 10px;
 }
+/* 模型配置页的供应商操作始终可见，便于直接发现添加/编辑/删除入口。 */
+.oc-provider-card .mcp-card-actions {
+  opacity: 1;
+}
 .oc-provider-meta {
   display: flex;
   flex-wrap: wrap;
@@ -4688,15 +4692,11 @@ a[href]:focus-visible {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  opacity: 1;
 }
 /* .btn-delete 全局默认 opacity:0（仅 webdav 行 hover 显现）；
    这里父级控制显隐，子按钮必须恢复为 1，否则编辑可见、删除永远看不见 */
 .oc-model-chip-actions .btn-delete {
-  opacity: 1;
-}
-.oc-model-chip:hover .oc-model-chip-actions {
   opacity: 1;
 }
 .oc-model-chip-ref {

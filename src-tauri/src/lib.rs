@@ -1621,6 +1621,14 @@ pub fn run() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
             }
 
+            // Models.dev 目录由后端统一维护：启动时优先使用 7 天内的磁盘缓存，
+            // 过期或缺失时后台刷新一次，避免各页面首次打开时重复请求。
+            tauri::async_runtime::spawn_blocking(|| {
+                if let Err(err) = opencode_config::fetch_models_dev_catalog(false) {
+                    eprintln!("[agent-buddy] Models.dev catalog refresh failed: {}", err);
+                }
+            });
+
             // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
             // 否则 Agent 管理页会一直展示 kiro / codebuddy / deveco-code 等已下线的 agent）。
             if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy", "deveco-code"]) {

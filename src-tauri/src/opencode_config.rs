@@ -2,7 +2,7 @@
 //!
 //! - 配置：`~/.config/opencode/opencode.json(c)`（与 MCP 路径解析一致）
 //! - 密钥：`~/.local/share/opencode/auth.json`（`{ providerId: { type, key } }`）
-//! - 目录：Models.dev `https://models.dev/api.json`（精简后返回，进程内缓存）
+//! - 目录：Models.dev `https://models.dev/api.json`（精简后返回，磁盘 + 进程缓存）
 //!
 //! 列表 DTO **永不**回传明文 API Key；编辑时用 `get_provider_secret` 按需拉取。
 //! Pi / Oh-My-Pi 后端见 `pi_model_config`，共用本模块的 DTO 与 IO helper。
@@ -14,11 +14,11 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const SCHEMA_URL: &str = "https://opencode.ai/config.json";
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
-const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+const CATALOG_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /* ===== DTOs ===== */
 
@@ -1277,17 +1277,25 @@ pub fn reveal_config() -> Result<AgentActionResult, String> {
 /* ===== Models.dev catalog ===== */
 
 struct CatalogCache {
-    at: Instant,
     catalog: ModelsDevCatalog,
 }
 
 static CATALOG_CACHE: Mutex<Option<CatalogCache>> = Mutex::new(None);
+/// 防止启动预热与页面首次打开同时触发重复网络请求。
+static CATALOG_FETCH_LOCK: Mutex<()> = Mutex::new(());
 
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+fn catalog_cache_is_fresh(cached_at: Option<u64>, now: u64) -> bool {
+    let Some(cached_at) = cached_at else {
+        return false;
+    };
+    cached_at <= now && now - cached_at <= CATALOG_TTL.as_secs()
 }
 
 fn parse_catalog_json(raw: &Value) -> Result<ModelsDevCatalog, String> {
@@ -1390,54 +1398,62 @@ fn build_http_client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn catalog_cache_file() -> Result<PathBuf, String> {
-    Ok(crate::config::app_dir()?.join("cache").join("models-dev.json"))
+    Ok(crate::config::app_dir()?.join("Models.dev.json"))
 }
 
 fn load_file_cache() -> Option<ModelsDevCatalog> {
-    let path = catalog_cache_file().ok()?;
-    let meta = fs::metadata(&path).ok()?;
-    let modified = meta.modified().ok()?;
-    if modified.elapsed().ok()? > CATALOG_TTL {
-        return None;
-    }
+    let primary = catalog_cache_file().ok()?;
+    let is_legacy = !primary.is_file();
+    let path = if !is_legacy {
+        primary
+    } else {
+        // 兼容旧版本的缓存位置；成功读取后会写入新位置。
+        crate::config::app_dir().ok()?.join("cache").join("models-dev.json")
+    };
     let raw = fs::read_to_string(&path).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
     // Stored as already-slim catalog
     let mut cat: ModelsDevCatalog = serde_json::from_value(v).ok()?;
     cat.from_cache = true;
+    if is_legacy {
+        let _ = save_file_cache(&cat);
+    }
     Some(cat)
 }
 
-fn save_file_cache(cat: &ModelsDevCatalog) {
-    if let Ok(path) = catalog_cache_file() {
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if let Ok(text) = serde_json::to_string(cat) {
-            let _ = atomic_write(&path, &text);
-        }
+fn save_file_cache(cat: &ModelsDevCatalog) -> Result<(), String> {
+    let path = catalog_cache_file()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建 Models.dev 缓存目录失败: {e}"))?;
     }
+    let text = serde_json::to_string(cat)
+        .map_err(|e| format!("序列化 Models.dev 缓存失败: {e}"))?;
+    atomic_write(&path, &text)
 }
 
 pub fn fetch_models_dev_catalog(force: bool) -> Result<ModelsDevCatalog, String> {
+    let _fetch_guard = CATALOG_FETCH_LOCK
+        .lock()
+        .map_err(|_| "Models.dev 目录锁已损坏".to_string())?;
     if !force {
-        if let Ok(guard) = CATALOG_CACHE.lock() {
-            if let Some(c) = guard.as_ref() {
-                if c.at.elapsed() < CATALOG_TTL {
+        let cached_at = crate::config::load_models_dev_cached_at()?;
+        let fresh = catalog_cache_is_fresh(cached_at, now_unix());
+        if fresh {
+            if let Ok(guard) = CATALOG_CACHE.lock() {
+                if let Some(c) = guard.as_ref() {
                     let mut cat = c.catalog.clone();
                     cat.from_cache = true;
                     return Ok(cat);
                 }
             }
-        }
-        if let Some(cat) = load_file_cache() {
-            if let Ok(mut guard) = CATALOG_CACHE.lock() {
-                *guard = Some(CatalogCache {
-                    at: Instant::now(),
-                    catalog: cat.clone(),
-                });
+            if let Some(cat) = load_file_cache() {
+                if let Ok(mut guard) = CATALOG_CACHE.lock() {
+                    *guard = Some(CatalogCache {
+                        catalog: cat.clone(),
+                    });
+                }
+                return Ok(cat);
             }
-            return Ok(cat);
         }
     }
 
@@ -1454,10 +1470,11 @@ pub fn fetch_models_dev_catalog(force: bool) -> Result<ModelsDevCatalog, String>
         .map_err(|e| format!("解析 models.dev JSON 失败: {e}"))?;
     let mut catalog = parse_catalog_json(&raw)?;
     catalog.from_cache = false;
-    save_file_cache(&catalog);
+    // 只有目录文件安全写入后，才更新配置中的缓存时间。
+    save_file_cache(&catalog)?;
+    crate::config::save_models_dev_cached_at(catalog.fetched_at)?;
     if let Ok(mut guard) = CATALOG_CACHE.lock() {
         *guard = Some(CatalogCache {
-            at: Instant::now(),
             catalog: catalog.clone(),
         });
     }
@@ -1761,6 +1778,16 @@ mod tests {
         assert_eq!(m.limit_context, Some(200000.0));
         assert_eq!(m.modalities_input, vec!["text", "image"]);
         assert_eq!(m.reasoning_options.len(), 2);
+    }
+
+    #[test]
+    fn catalog_cache_ttl_is_7_days_and_rejects_future_timestamps() {
+        let now = 1_000_000;
+        assert!(catalog_cache_is_fresh(Some(now), now));
+        assert!(catalog_cache_is_fresh(Some(now - 7 * 24 * 60 * 60), now));
+        assert!(!catalog_cache_is_fresh(Some(now - 7 * 24 * 60 * 60 - 1), now));
+        assert!(!catalog_cache_is_fresh(Some(now + 1), now));
+        assert!(!catalog_cache_is_fresh(None, now));
     }
 
     #[test]

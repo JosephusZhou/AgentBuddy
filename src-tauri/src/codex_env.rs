@@ -96,7 +96,7 @@ pub struct CodexEnvUpsertPayload {
     pub model_provider: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
-    /// 关联的 AI 供应商 ID。空串或 None = 取消关联。
+    /// 关联的 AI 供应商 ID。None = 不改动，空串 = 取消关联。
     pub provider_id: Option<String>,
 }
 
@@ -1815,7 +1815,11 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
         source,
         notes,
         alias_installed: existing.alias_installed,
-        provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
+        provider_id: payload
+            .provider_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| existing.provider_id.clone()),
         created_at: existing.created_at,
         updated_at: now,
     };

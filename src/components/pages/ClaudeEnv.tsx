@@ -452,7 +452,7 @@ export default function ClaudeEnv() {
     void invokeProviderList().then(async (rows) => {
       // Claude 环境只展示 Anthropic / 通用供应商
       const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
-      const routeAgg = await fetchRouteAggregationProvider("universal");
+      const routeAgg = await fetchRouteAggregationProvider();
       setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
     }).catch(() => setCloneProviders([]));
   }, [envs]);
@@ -625,7 +625,7 @@ providerId: cloneSelectedProvider?.id || undefined,
     // 加载供应商列表用于选择；路由聚合运行时将虚拟供应商「路由聚合」置顶
     void invokeProviderList().then(async (rows) => {
       const eligible = rows.filter((p) => p.providerType === "anthropic" || p.providerType === "universal");
-      const routeAgg = await fetchRouteAggregationProvider("universal");
+      const routeAgg = await fetchRouteAggregationProvider();
       const all = routeAgg ? [routeAgg, ...eligible] : eligible;
       setEditProviders(all);
       // 预选关联的供应商；其自定义模型列表直接作为模型下拉选项

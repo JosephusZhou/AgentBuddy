@@ -37,6 +37,7 @@ import type { AiProvider } from "./ai-providers/types";
 import {
   fetchRouteAggregationProvider,
   isRouteAggregationProvider,
+  openaiProviderBaseUrl,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
 import { ChevronDown, Code, Eye, EyeOff, FolderOpen, Key, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
@@ -330,11 +331,8 @@ function applyCatalogLimits(
 }
 
 const NPM_PRESETS = [
-  { value: "", label: "默认（内置）" },
-  { value: "@ai-sdk/openai-compatible", label: "OpenAI Compatible" },
   { value: "@ai-sdk/openai", label: "OpenAI" },
   { value: "@ai-sdk/anthropic", label: "Anthropic" },
-  { value: "@ai-sdk/google", label: "Google" },
 ];
 
 type AppSelectOption = {
@@ -457,16 +455,15 @@ const NPM_SELECT_OPTIONS: AppSelectOption[] = [
     label: p.label,
     sub: p.value || undefined,
   })),
-  { value: "__custom__", label: "自定义…" },
 ];
 
-/** Pi / Oh-My-Pi 原生支持的三种 HTTP API 格式。 */
+/** OpenCode 旧配置可能使用其它 SDK 包；编辑时归一到当前支持的两种包。 */
+function normalizeOpenCodeNpm(npm: string | null | undefined): string {
+  return npm === "@ai-sdk/anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai";
+}
+
+/** Pi / Oh-My-Pi 供应商允许配置的 HTTP API 格式。 */
 const PI_API_OPTIONS: AppSelectOption[] = [
-  {
-    value: "openai-completions",
-    label: "OpenAI Chat Completions",
-    sub: "/v1/chat/completions",
-  },
   {
     value: "openai-responses",
     label: "OpenAI Responses",
@@ -480,7 +477,79 @@ const PI_API_OPTIONS: AppSelectOption[] = [
 ];
 
 function piApiLabel(api: string): string {
-  return PI_API_OPTIONS.find((option) => option.value === api)?.label ?? api;
+  const normalized = normalizePiApi(api);
+  return PI_API_OPTIONS.find((option) => option.value === normalized)?.label ?? normalized;
+}
+
+/** 旧版本可能保存了 Chat Completions；编辑时迁移到当前允许的 Responses。 */
+function normalizePiApi(api: string | null | undefined): string {
+  return api === "anthropic-messages" ? "anthropic-messages" : "openai-responses";
+}
+
+/** Pi/OMP 的 OpenAI 接口约定 Base URL 以 /v1 结尾。 */
+function ensureOpenAiV1(baseUrl: string): string {
+  const value = baseUrl.trim();
+  if (!value) return value;
+  try {
+    const url = new URL(value);
+    if (!url.pathname.replace(/\/+$/, "").endsWith("/v1")) {
+      url.pathname = `${url.pathname.replace(/\/+$/, "")}/v1`;
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    const clean = value.replace(/\/+$/, "");
+    return /\/v1$/i.test(clean) ? clean : `${clean}/v1`;
+  }
+}
+
+/** Anthropic 兼容入口使用根地址，去掉仅位于末尾的 /v1。 */
+function ensureAnthropicBaseUrl(baseUrl: string): string {
+  const value = baseUrl.trim();
+  if (!value) return value;
+  try {
+    const url = new URL(value);
+    const path = url.pathname.replace(/\/+$/, "");
+    url.pathname = path.replace(/\/v1$/i, "") || "/";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return value.replace(/\/+$/, "").replace(/\/v1$/i, "");
+  }
+}
+
+type ProviderProtocol = "openai" | "anthropic";
+
+function normalizeBaseUrlForProtocol(baseUrl: string, protocol: ProviderProtocol): string {
+  return protocol === "openai" ? ensureOpenAiV1(baseUrl) : ensureAnthropicBaseUrl(baseUrl);
+}
+
+function protocolForNpm(
+  providerType: AiProvider["providerType"] | undefined,
+  npm: string,
+  providerId?: string,
+): ProviderProtocol {
+  if (isRouteAggregationProvider(providerId)) {
+    return npm === "@ai-sdk/anthropic" ? "anthropic" : "openai";
+  }
+  if (providerType === "anthropic") return "anthropic";
+  if (providerType === "openai") return "openai";
+  return npm === "@ai-sdk/anthropic" ? "anthropic" : "openai";
+}
+
+function protocolForApi(
+  providerType: AiProvider["providerType"] | undefined,
+  api: string,
+  providerId?: string,
+): ProviderProtocol {
+  if (isRouteAggregationProvider(providerId)) {
+    return api === "anthropic-messages" ? "anthropic" : "openai";
+  }
+  if (providerType === "anthropic") return "anthropic";
+  if (providerType === "openai") return "openai";
+  return api === "anthropic-messages" ? "anthropic" : "openai";
+}
+
+function providerBaseUrlForProtocol(p: AiProvider, protocol: ProviderProtocol): string {
+  return protocol === "openai" ? openaiProviderBaseUrl(p) : p.baseUrl;
 }
 
 const THINKING_TYPE_OPTIONS: AppSelectOption[] = [
@@ -491,7 +560,7 @@ const THINKING_TYPE_OPTIONS: AppSelectOption[] = [
 
 /** AI 供应商（OpenAI / 通用类型）面向 OpenAI 兼容端点的 Base URL。 */
 function aiProviderOpenaiBaseUrl(p: AiProvider): string {
-  return p.providerType === "universal" ? p.openaiBaseUrl : p.baseUrl;
+  return openaiProviderBaseUrl(p);
 }
 
 type ProviderForm = {
@@ -538,8 +607,8 @@ function emptyProviderForm(): ProviderForm {
     id: "",
     previousId: null,
     name: "",
-    npm: "@ai-sdk/openai-compatible",
-    api: "openai-completions",
+    npm: "@ai-sdk/openai",
+    api: "openai-responses",
     baseUrl: "",
     timeout: "",
     chunkTimeout: "",
@@ -932,11 +1001,16 @@ export default function ModelConfig() {
       const eligible = rows.filter(
         (p) => p.providerType === "openai" || p.providerType === "universal",
       );
-      const routeAgg = await fetchRouteAggregationProvider("openai");
+      const routeAgg = await fetchRouteAggregationProvider();
       const all = routeAgg ? [routeAgg, ...eligible] : eligible;
       setAiProviders(all);
       if (presetBaseUrl) {
-        const match = all.find((p) => aiProviderOpenaiBaseUrl(p) === presetBaseUrl);
+        const normalizedPreset = presetBaseUrl.replace(/\/+$/, "");
+        const match = all.find((p) =>
+          [p.baseUrl, aiProviderOpenaiBaseUrl(p)]
+            .filter(Boolean)
+            .some((url) => url.replace(/\/+$/, "") === normalizedPreset),
+        );
         setFormAiProviderId(match?.id ?? "");
       }
     } catch {
@@ -965,10 +1039,13 @@ export default function ModelConfig() {
     if (!v) return;
     const p = aiProviders.find((x) => x.id === v);
     if (!p) return;
+    const protocol = isOpenCode
+      ? protocolForNpm(p.providerType, providerForm.npm, p.id)
+      : protocolForApi(p.providerType, providerForm.api, p.id);
     setProviderForm({
       ...providerForm,
       name: p.name || providerForm.name,
-      baseUrl: aiProviderOpenaiBaseUrl(p),
+      baseUrl: normalizeBaseUrlForProtocol(providerBaseUrlForProtocol(p, protocol), protocol),
     });
     if (p.hasApiKey) {
       try {
@@ -993,13 +1070,16 @@ export default function ModelConfig() {
   const openEditProvider = async (p: AgentProviderView) => {
     setFormError("");
     setShowApiKey(false);
+    const npm = normalizeOpenCodeNpm(p.npm);
+    const api = normalizePiApi(p.api);
+    const protocol = isOpenCode ? protocolForNpm(undefined, npm) : protocolForApi(undefined, api);
     const form: ProviderForm = {
       id: p.id,
       previousId: p.id,
       name: p.name ?? "",
-      npm: p.npm ?? "",
-      api: p.api ?? "openai-completions",
-      baseUrl: p.baseUrl ?? "",
+      npm,
+      api,
+      baseUrl: normalizeBaseUrlForProtocol(p.baseUrl ?? "", protocol),
       timeout: p.timeout != null ? String(p.timeout) : "",
       chunkTimeout: p.chunkTimeout != null ? String(p.chunkTimeout) : "",
       whitelist: tagsToCsv(p.whitelist),
@@ -1661,30 +1741,19 @@ export default function ModelConfig() {
                     <AppSelect
                       id="oc-npm"
                       labelId="oc-npm-label"
-                      value={
-                        NPM_PRESETS.some((x) => x.value === providerForm.npm)
-                          ? providerForm.npm
-                          : "__custom__"
-                      }
+                      value={providerForm.npm}
                       options={NPM_SELECT_OPTIONS}
                       onChange={(v) => {
-                        // 「自定义…」只切换展示态，不改写当前 npm 值，由下方输入框编辑
-                        if (v === "__custom__") return;
-                        setProviderForm({ ...providerForm, npm: v });
+                        const selected = aiProviders.find((p) => p.id === formAiProviderId);
+                        const protocol = protocolForNpm(selected?.providerType, v, selected?.id);
+                        setProviderForm({
+                          ...providerForm,
+                          npm: v,
+                          baseUrl: normalizeBaseUrlForProtocol(providerForm.baseUrl, protocol),
+                        });
                       }}
                       disabled={busy}
                       placeholder="选择 npm 包"
-                    />
-                    <input
-                      className="form-input"
-                      style={{ marginTop: 8 }}
-                      placeholder="@ai-sdk/…"
-                      value={providerForm.npm}
-                      onChange={(e) =>
-                        setProviderForm({ ...providerForm, npm: e.target.value })
-                      }
-                      disabled={busy}
-                      spellCheck={false}
                     />
                   </div>
                 )}
@@ -1698,7 +1767,20 @@ export default function ModelConfig() {
                       labelId="oc-api-format-label"
                       value={providerForm.api}
                       options={PI_API_OPTIONS}
-                      onChange={(api) => setProviderForm({ ...providerForm, api })}
+                      onChange={(api) =>
+                        setProviderForm({
+                          ...providerForm,
+                          api,
+                          baseUrl: normalizeBaseUrlForProtocol(
+                            providerForm.baseUrl,
+                            protocolForApi(
+                              aiProviders.find((p) => p.id === formAiProviderId)?.providerType,
+                              api,
+                              formAiProviderId,
+                            ),
+                          ),
+                        })
+                      }
                       disabled={busy}
                       placeholder="请选择 API 格式"
                     />

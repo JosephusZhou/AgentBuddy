@@ -106,7 +106,7 @@ pub struct ClaudeEnvUpsertPayload {
     pub model_sonnet: Option<String>,
     pub model_opus: Option<String>,
     pub model_fable: Option<String>,
-    /// 关联的 AI 供应商 ID。空串或 None = 取消关联。
+    /// 关联的 AI 供应商 ID。None = 不改动，空串 = 取消关联。
     pub provider_id: Option<String>,
 }
 
@@ -1861,7 +1861,11 @@ pub fn upsert_environment(
         source,
         notes,
         alias_installed: existing.alias_installed,
-        provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
+        provider_id: payload
+            .provider_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| existing.provider_id.clone()),
         created_at: existing.created_at,
         updated_at: now,
     };

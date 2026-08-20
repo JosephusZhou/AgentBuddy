@@ -6,11 +6,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 
 /// 后端兜底默认主题。精确的“是否属于主题注册表”判断由前端 `lib/theme.ts`
 /// 唯一维护（启动时检测遗留/非法值并回写还原）；后端此常量仅需是一个合法注册 id，
 /// 用于配置文件损坏、theme 字段缺失/形状非法时的安全兜底。
 const DEFAULT_THEME: &str = "qoder-light";
+
+/// 串行化进程内对 config.json 的所有读改写操作。
+///
+/// Models.dev 启动刷新在后台任务中运行，界面同时可能保存主题、代理、备份或路由设置。
+/// 如果没有统一锁，两个写入者可能各自读取旧快照，后写入的一方会静默覆盖前一方的字段。
+static CONFIG_FILE_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config_file() -> Result<MutexGuard<'static, ()>, String> {
+    CONFIG_FILE_LOCK
+        .lock()
+        .map_err(|_| "config.json 锁已损坏".to_string())
+}
 
 /// Public config returned to the frontend — never includes secretsKey.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +36,9 @@ pub struct AppConfig {
     pub network: NetworkSettings,
     #[serde(default)]
     pub route_aggregation: crate::route_aggregation::RouteAggregationConfig,
+    /// Models.dev 目录最近一次成功缓存的 Unix 时间戳。
+    #[serde(default)]
+    pub models_dev_cached_at: Option<u64>,
 }
 
 /// Backup-related preferences stored in config.json (no secrets).
@@ -155,6 +171,7 @@ impl Default for AppConfig {
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
             route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
+            models_dev_cached_at: None,
         }
     }
 }
@@ -198,6 +215,11 @@ fn is_valid_secrets_key(value: &str) -> bool {
 /// - Missing / invalid theme → write default theme
 /// - Missing / invalid secretsKey → generate a fresh 32-byte key
 pub fn ensure_app_config() -> Result<AppConfig, String> {
+    let _config_guard = lock_config_file()?;
+    ensure_app_config_locked()
+}
+
+fn ensure_app_config_locked() -> Result<AppConfig, String> {
     let dir = app_dir()?;
     if !dir.exists() {
         fs::create_dir_all(&dir)
@@ -221,6 +243,7 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
             route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
+            models_dev_cached_at: None,
         });
     }
 
@@ -244,6 +267,7 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
                 backup: BackupSettings::default(),
                 network: NetworkSettings::default(),
                 route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
+                models_dev_cached_at: None,
             });
         }
     };
@@ -282,6 +306,7 @@ pub fn ensure_app_config() -> Result<AppConfig, String> {
         backup: parse_backup_settings(obj.get("backup")),
         network: parse_network_settings(obj.get("network")),
         route_aggregation: parse_route_aggregation(obj.get("routeAggregation")),
+        models_dev_cached_at: parse_models_dev_cached_at(obj.get("modelsDevCachedAt")),
     })
 }
 
@@ -290,6 +315,10 @@ fn parse_route_aggregation(value: Option<&Value>) -> crate::route_aggregation::R
         return crate::route_aggregation::RouteAggregationConfig::default();
     };
     serde_json::from_value(v.clone()).unwrap_or_default()
+}
+
+fn parse_models_dev_cached_at(value: Option<&Value>) -> Option<u64> {
+    value.and_then(|v| v.as_u64())
 }
 
 fn parse_backup_settings(value: Option<&Value>) -> BackupSettings {
@@ -316,6 +345,24 @@ pub fn load_backup_settings() -> Result<BackupSettings, String> {
 
 pub fn load_network_settings() -> Result<NetworkSettings, String> {
     Ok(load_app_config()?.network)
+}
+
+pub fn load_models_dev_cached_at() -> Result<Option<u64>, String> {
+    Ok(load_app_config()?.models_dev_cached_at)
+}
+
+/// 记录 Models.dev 最近一次成功写入本地缓存的时间，不改动其它配置项。
+pub fn save_models_dev_cached_at(timestamp: u64) -> Result<(), String> {
+    let _config_guard = lock_config_file()?;
+    let path = config_path()?;
+    let _ = ensure_app_config_locked()?;
+    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| "config.json 格式无效".to_string())?;
+    obj.insert("modelsDevCachedAt".to_string(), Value::from(timestamp));
+    write_raw(&path, &root)
 }
 
 /// Normalize + validate proxy settings before write.
@@ -352,8 +399,9 @@ pub fn normalize_network_settings(mut settings: NetworkSettings) -> Result<Netwo
 pub fn save_network_settings(settings: NetworkSettings) -> Result<NetworkSettings, String> {
     let settings = normalize_network_settings(settings)?;
 
+    let _config_guard = lock_config_file()?;
     let path = config_path()?;
-    let _ = ensure_app_config()?;
+    let _ = ensure_app_config_locked()?;
     let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
     let obj = root
@@ -370,8 +418,9 @@ pub fn save_network_settings(settings: NetworkSettings) -> Result<NetworkSetting
 pub fn save_route_aggregation_config(
     config: &crate::route_aggregation::RouteAggregationConfig,
 ) -> Result<(), String> {
+    let _config_guard = lock_config_file()?;
     let path = config_path()?;
-    let _ = ensure_app_config()?;
+    let _ = ensure_app_config_locked()?;
     let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
     let obj = root
@@ -395,8 +444,9 @@ pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, 
         remote
     };
 
+    let _config_guard = lock_config_file()?;
     let path = config_path()?;
-    let _ = ensure_app_config()?;
+    let _ = ensure_app_config_locked()?;
     let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
     let obj = root.as_object_mut().ok_or_else(|| "config.json 格式无效".to_string())?;
@@ -409,7 +459,8 @@ pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, 
 
 /// Load the master secrets key for encryption. Never expose this via Tauri commands.
 pub fn load_secrets_key() -> Result<[u8; 32], String> {
-    ensure_app_config()?;
+    let _config_guard = lock_config_file()?;
+    ensure_app_config_locked()?;
     let path = config_path()?;
     let raw = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read config.json: {}", e))?;
@@ -423,10 +474,11 @@ pub fn load_secrets_key() -> Result<[u8; 32], String> {
 
 pub fn set_theme(theme: String) -> Result<AppConfig, String> {
     let theme = normalize_theme(&theme);
+    let _config_guard = lock_config_file()?;
     let path = config_path()?;
 
     // Make sure dir + file baseline (incl. secretsKey) exist first.
-    let _ = ensure_app_config()?;
+    let _ = ensure_app_config_locked()?;
 
     let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
@@ -447,6 +499,7 @@ pub fn set_theme(theme: String) -> Result<AppConfig, String> {
         backup: parse_backup_settings(root.get("backup")),
         network: parse_network_settings(root.get("network")),
         route_aggregation: parse_route_aggregation(root.get("routeAggregation")),
+        models_dev_cached_at: parse_models_dev_cached_at(root.get("modelsDevCachedAt")),
     })
 }
 
