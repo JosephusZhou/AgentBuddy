@@ -8,7 +8,7 @@ use crate::config;
 use crate::crypto;
 use crate::db;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const TYPE_ANTHROPIC: &str = "anthropic";
@@ -35,6 +35,27 @@ pub struct EncryptedKey {
 pub struct CustomModel {
     pub model: String,
     pub alias_id: String,
+}
+
+/// 返回供应商模型对外展示/路由使用的最终 ID。
+///
+/// `alias_id` 有值时覆盖原始 `model`，并按首次出现顺序去重。这样同一供应商
+/// 的多个原始模型映射到同一个别名时，不会在 UI 或路由池中产生重复条目。
+pub fn effective_custom_model_ids(models: impl IntoIterator<Item = CustomModel>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    models
+        .into_iter()
+        .map(|model| {
+            let alias = model.alias_id.trim();
+            if alias.is_empty() {
+                model.model.trim().to_string()
+            } else {
+                alias.to_string()
+            }
+        })
+        .filter(|id| !id.is_empty())
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
 }
 
 /// Public list item — never includes API key material.
@@ -522,6 +543,34 @@ pub fn reorder_providers(ids: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_custom_model_ids_prefers_alias_and_deduplicates() {
+        let models = vec![
+            CustomModel {
+                model: "A1".to_string(),
+                alias_id: "".to_string(),
+            },
+            CustomModel {
+                model: "A2".to_string(),
+                alias_id: "A1".to_string(),
+            },
+            CustomModel {
+                model: "A3".to_string(),
+                alias_id: " A1 ".to_string(),
+            },
+            CustomModel {
+                model: " A4 ".to_string(),
+                alias_id: "  ".to_string(),
+            },
+            CustomModel {
+                model: "  ".to_string(),
+                alias_id: "".to_string(),
+            },
+        ];
+
+        assert_eq!(effective_custom_model_ids(models), vec!["A1", "A4"]);
+    }
 
     fn unique_id(tag: &str) -> String {
         format!(

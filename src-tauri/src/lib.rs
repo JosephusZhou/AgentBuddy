@@ -1366,17 +1366,7 @@ async fn get_route_provider_models(
         // 唯一来源：custom_models_json。alias_id 优先于 model；空列表直接返回空。
         let custom: Vec<ai_provider::CustomModel> =
             serde_json::from_str(&row.custom_models_json).unwrap_or_default();
-        Ok(custom
-            .into_iter()
-            .map(|m| {
-                if m.alias_id.trim().is_empty() {
-                    m.model
-                } else {
-                    m.alias_id
-                }
-            })
-            .filter(|id| !id.trim().is_empty())
-            .collect())
+        Ok(ai_provider::effective_custom_model_ids(custom))
     })
     .await
     .map_err(|e| format!("获取供应商模型列表任务失败: {e}"))?

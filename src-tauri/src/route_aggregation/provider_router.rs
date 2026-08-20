@@ -125,21 +125,12 @@ impl ProviderRouter {
 
             // Effective model IDs from the provider's custom model list.
             // Each entry is {model, aliasId}; aliasId takes precedence.
-            let model_ids: Vec<String> =
+            let model_ids = crate::ai_provider::effective_custom_model_ids(
                 serde_json::from_str::<Vec<crate::ai_provider::CustomModel>>(
                     &row.custom_models_json,
                 )
-                .unwrap_or_default()
-                .into_iter()
-                .map(|m| {
-                    if m.alias_id.trim().is_empty() {
-                        m.model
-                    } else {
-                        m.alias_id
-                    }
-                })
-                .filter(|id| !id.trim().is_empty())
-                .collect();
+                .unwrap_or_default(),
+            );
 
             // For universal type in Codex group, append /v1 so the upstream OpenAI Responses
             // endpoint at `{base}/v1/responses` is reachable. In ClaudeCode group the
