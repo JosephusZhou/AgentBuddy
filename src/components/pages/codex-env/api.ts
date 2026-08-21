@@ -44,6 +44,8 @@ export async function invokeClone(payload: {
   syncMcp?: boolean;
   syncSkills?: boolean;
   syncAgents?: boolean;
+  syncOtherData?: boolean;
+  syncMode?: "full" | "symlink";
   installAlias?: boolean;
   providerId?: string;
 }): Promise<CodexEnvActionResult> {

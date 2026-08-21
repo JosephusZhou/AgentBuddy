@@ -158,6 +158,11 @@ pub struct ClaudeEnvClonePayload {
     /// When true (default if omitted), copy the source environment's agents/ directory
     /// into the new environment.
     pub sync_agents: Option<bool>,
+    /// When true, copy all remaining regular files/directories from the source
+    /// environment, excluding files/directories controlled by the other clone options.
+    pub sync_other_data: Option<bool>,
+    /// full（默认）或 symlink。
+    pub sync_mode: Option<String>,
     /// When true, immediately write the shell alias into ~/.zshrc after creation.
     /// Defaults to false — alias管理默认保持独立一步，避免擅自改写 ~/.zshrc。
     pub install_alias: Option<bool>,
@@ -449,7 +454,8 @@ fn skills_snapshot(skills_dir: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, Stri
                 .to_path_buf();
             files.insert(
                 relative,
-                fs::read(path).map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
+                fs::read(path)
+                    .map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
             );
         }
     }
@@ -686,6 +692,67 @@ fn sync_mcp_servers_to_dir(config_dir: &Path) -> Result<(u32, Vec<String>), Stri
     Ok((count, names))
 }
 
+/// Copy Claude state while leaving the top-level `mcpServers` field to the
+/// dedicated MCP synchronization option.
+fn copy_claude_state_without_mcp(
+    source_config_dir: &Path,
+    source_is_default: bool,
+    dest_config_dir: &Path,
+) -> Result<(), String> {
+    let source_path = if source_is_default {
+        shared_mcp_path()
+    } else {
+        env_mcp_path(source_config_dir)
+    };
+    if !source_path.is_file() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&source_path)
+        .map_err(|e| format!("读取 {} 失败: {}", source_path.display(), e))?;
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    let source_doc: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("解析 {} 失败: {}", source_path.display(), e))?;
+    let source_obj = source_doc
+        .as_object()
+        .ok_or_else(|| format!("{} 根节点必须是 JSON 对象", source_path.display()))?;
+
+    let dest_path = env_mcp_path(dest_config_dir);
+    let mut dest_doc = if dest_path.is_file() {
+        let raw = fs::read_to_string(&dest_path)
+            .map_err(|e| format!("读取 {} 失败: {}", dest_path.display(), e))?;
+        if raw.trim().is_empty() {
+            Value::Object(Map::new())
+        } else {
+            serde_json::from_str(&raw)
+                .map_err(|e| format!("解析 {} 失败: {}", dest_path.display(), e))?
+        }
+    } else {
+        Value::Object(Map::new())
+    };
+    let dest_obj = dest_doc
+        .as_object_mut()
+        .ok_or_else(|| format!("{} 根节点必须是 JSON 对象", dest_path.display()))?;
+    for (key, value) in source_obj {
+        if key != "mcpServers" {
+            dest_obj.insert(key.clone(), value.clone());
+        }
+    }
+    let content = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&dest_doc).map_err(|e| format!(
+            "序列化 {} 失败: {}",
+            dest_path.display(),
+            e
+        ))?
+    );
+    let create_mode = platform::current_mode(&dest_path);
+    atomic_write(&dest_path, &content)?;
+    platform::restore_or_private_file(&dest_path, create_mode);
+    Ok(())
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("创建目录 {} 失败: {}", dst.display(), e))?;
     for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
@@ -709,7 +776,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Result<(), String> {
+fn copy_core(
+    src: &Path,
+    dst: &Path,
+    sync_skills: bool,
+    sync_agents: bool,
+    symlink_mode: bool,
+) -> Result<(), String> {
     if !src.is_dir() {
         return Err(format!("源环境目录不存在: {}", src.display()));
     }
@@ -734,7 +807,51 @@ fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Re
         let from = src.join(name);
         if from.is_dir() {
             let to = dst.join(name);
-            copy_dir_recursive(&from, &to)?;
+            if symlink_mode {
+                platform::symlink_dir(&from, &to)?;
+            } else {
+                copy_dir_recursive(&from, &to)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Copy data not covered by dedicated clone switches. This explicit opt-in may
+/// include authentication and session state.
+fn copy_other_data(src: &Path, dst: &Path, symlink_mode: bool) -> Result<(), String> {
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if matches!(
+            name.as_ref(),
+            "settings.json" | "CLAUDE.md" | "skills" | "agents" | ".claude.json"
+        ) {
+            continue;
+        }
+        if entry
+            .file_type()
+            .map_err(|e| format!("读取文件类型失败: {}", e))?
+            .is_symlink()
+        {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            if symlink_mode {
+                platform::symlink_dir(&from, &to)?;
+            } else {
+                copy_dir_recursive(&from, &to)?;
+            }
+        } else if from.is_file() {
+            if symlink_mode {
+                platform::symlink_any(&from, &to)?;
+            } else {
+                fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+            }
         }
     }
     Ok(())
@@ -910,13 +1027,28 @@ fn apply_settings_overrides(
 fn read_settings_env(config_dir: &Path) -> (String, String, String, ModelTierOverrides) {
     let path = config_dir.join("settings.json");
     if !path.is_file() {
-        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
+        return (
+            String::new(),
+            String::new(),
+            String::new(),
+            ModelTierOverrides::default(),
+        );
     }
     let Ok(raw) = fs::read_to_string(&path) else {
-        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
+        return (
+            String::new(),
+            String::new(),
+            String::new(),
+            ModelTierOverrides::default(),
+        );
     };
     let Ok(root) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return (String::new(), String::new(), String::new(), ModelTierOverrides::default());
+        return (
+            String::new(),
+            String::new(),
+            String::new(),
+            ModelTierOverrides::default(),
+        );
     };
     let get = |key: &str| -> String {
         root.get("env")
@@ -1124,20 +1256,20 @@ fn ensure_default_environment() -> Result<(), String> {
     let home = home_dir()?;
     let config_dir = home.join(".claude");
     let now = now_secs();
-let row = ClaudeEnvironmentRow {
-id: DEFAULT_ENV_ID.into(),
-name: "默认环境".into(),
-slug: "default".into(),
-config_dir: config_dir.to_string_lossy().to_string(),
-alias_name: "claude".into(),
-is_default: true,
-source: "default".into(),
-notes: "直接运行 claude 使用此环境（不写入 shell 别名块）".into(),
-alias_installed: false,
-provider_id: String::new(),
-created_at: now,
-updated_at: now,
-};
+    let row = ClaudeEnvironmentRow {
+        id: DEFAULT_ENV_ID.into(),
+        name: "默认环境".into(),
+        slug: "default".into(),
+        config_dir: config_dir.to_string_lossy().to_string(),
+        alias_name: "claude".into(),
+        is_default: true,
+        source: "default".into(),
+        notes: "直接运行 claude 使用此环境（不写入 shell 别名块）".into(),
+        alias_installed: false,
+        provider_id: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
     db::upsert_claude_environment_row(&row)
 }
 
@@ -1627,23 +1759,23 @@ pub fn import_environment(
     ensure_unique_fields(&id, &slug, &config_dir_str, &alias)?;
 
     let now = now_secs();
-let mut row = ClaudeEnvironmentRow {
-id: id.clone(),
-name: name.clone(),
-slug,
-config_dir: config_dir_str,
-alias_name: alias,
-is_default: false,
-source: "imported".into(),
-notes,
-alias_installed: false,
-provider_id: String::new(),
-created_at: now,
-updated_at: now,
-};
-db::upsert_claude_environment_row(&row)?;
+    let mut row = ClaudeEnvironmentRow {
+        id: id.clone(),
+        name: name.clone(),
+        slug,
+        config_dir: config_dir_str,
+        alias_name: alias,
+        is_default: false,
+        source: "imported".into(),
+        notes,
+        alias_installed: false,
+        provider_id: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
+    db::upsert_claude_environment_row(&row)?;
 
-let mut message = format!("已导入环境「{}」", name);
+    let mut message = format!("已导入环境「{}」", name);
     let (alias_installed, alias_msg) =
         install_alias_after_create(&row, payload.install_alias.unwrap_or(false));
     row.alias_installed = alias_installed;
@@ -1690,10 +1822,22 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
 
     let sync_skills = payload.sync_skills.unwrap_or(true);
     let sync_agents = payload.sync_agents.unwrap_or(true);
-    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents) {
+    let sync_other_data = payload.sync_other_data.unwrap_or(false);
+    let symlink_mode = payload.sync_mode.as_deref() == Some("symlink");
+    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents, symlink_mode) {
         // best-effort cleanup
         let _ = fs::remove_dir_all(&dst);
         return Err(e);
+    }
+    if sync_other_data {
+        if let Err(e) = copy_other_data(&src_path, &dst, symlink_mode) {
+            let _ = fs::remove_dir_all(&dst);
+            return Err(e);
+        }
+        if let Err(e) = copy_claude_state_without_mcp(&src_path, source.is_default, &dst) {
+            let _ = fs::remove_dir_all(&dst);
+            return Err(e);
+        }
     }
 
     let clone_tiers = tier_overrides_from(
@@ -1725,23 +1869,27 @@ pub fn clone_environment(payload: ClaudeEnvClonePayload) -> Result<ClaudeEnvActi
     };
 
     let now = now_secs();
-let mut row = ClaudeEnvironmentRow {
-id: id.clone(),
-name: name.clone(),
-slug,
-config_dir: dst_str,
-alias_name: alias,
-is_default: false,
-source: "managed".into(),
-notes,
-alias_installed: false,
-provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
-created_at: now,
-updated_at: now,
-};
-db::upsert_claude_environment_row(&row)?;
+    let mut row = ClaudeEnvironmentRow {
+        id: id.clone(),
+        name: name.clone(),
+        slug,
+        config_dir: dst_str,
+        alias_name: alias,
+        is_default: false,
+        source: "managed".into(),
+        notes,
+        alias_installed: false,
+        provider_id: payload
+            .provider_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        created_at: now,
+        updated_at: now,
+    };
+    db::upsert_claude_environment_row(&row)?;
 
-let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+    let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     let mut skipped: Vec<&str> = Vec::new();
     if !sync_skills {
         skipped.push("skills");
@@ -1751,6 +1899,11 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
     }
     if !skipped.is_empty() {
         message.push_str(&format!("已按选择跳过 {} 的复制。", skipped.join("、")));
+    }
+    if symlink_mode {
+        message.push_str("已使用软链接同步所选数据。");
+    } else {
+        message.push_str("已使用全量同步所选数据。");
     }
     if override_fields.is_empty() {
         message.push_str("Base URL / API Key 沿用源环境。");
@@ -1766,7 +1919,25 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
 
     let sync_mcp = payload.sync_mcp.unwrap_or(true);
     if sync_mcp {
-        match sync_mcp_servers_to_dir(&dst) {
+        match if symlink_mode {
+            let src_mcp = shared_mcp_path();
+            let dst_mcp = env_mcp_path(&dst);
+            if src_mcp.is_file() {
+                let _ = fs::remove_file(&dst_mcp);
+                platform::symlink_any(&src_mcp, &dst_mcp).map(|_| {
+                    (
+                        read_mcp_servers(&src_mcp)
+                            .map(|s| s.len() as u32)
+                            .unwrap_or(0),
+                        Vec::new(),
+                    )
+                })
+            } else {
+                sync_mcp_servers_to_dir(&dst)
+            }
+        } else {
+            sync_mcp_servers_to_dir(&dst)
+        } {
             Ok((count, _)) => {
                 if count == 0 {
                     message.push_str(" 已尝试同步全局 MCP（当前全局无 mcpServers）。");
@@ -1785,7 +1956,11 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
     row.alias_installed = alias_installed;
     message.push_str(&alias_msg);
 
-    message.push_str("新环境不含会话历史，首次启动可能需要重新登录。");
+    if sync_other_data {
+        message.push_str("已同步会话、历史、记忆等其他数据。");
+    } else {
+        message.push_str("新环境不含会话历史，首次启动可能需要重新登录。");
+    }
 
     let env = row_to_public(row);
     Ok(ClaudeEnvActionResult {
@@ -1963,7 +2138,10 @@ pub fn upsert_environment(
                 Some(&edit_tiers),
             ) {
                 Ok(changed) if !changed.is_empty() => {
-                    message.push_str(&format!("；已更新默认 settings.json 的 {}", changed.join("、")));
+                    message.push_str(&format!(
+                        "；已更新默认 settings.json 的 {}",
+                        changed.join("、")
+                    ));
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -2712,7 +2890,10 @@ mod tests {
         fs::write(copied_root.join("SKILL.md"), "demo").unwrap();
 
         assert_eq!(skill_count(base.join("linked").as_path()), 1);
-        assert_eq!(skills_snapshot(&linked_root).unwrap(), skills_snapshot(&base.join("copied/skills")).unwrap());
+        assert_eq!(
+            skills_snapshot(&linked_root).unwrap(),
+            skills_snapshot(&base.join("copied/skills")).unwrap()
+        );
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -2963,7 +3144,8 @@ mod tests {
 
         // Setting the same value again → no change reported.
         let changed =
-            apply_settings_env_edit(&dir, Some("https://new.example/v1"), None, None, None).unwrap();
+            apply_settings_env_edit(&dir, Some("https://new.example/v1"), None, None, None)
+                .unwrap();
         assert!(changed.is_empty());
 
         // Deleting an absent key → no change reported.
@@ -3139,5 +3321,98 @@ mod tests {
         assert!(v3["mcpServers"]["demo"].is_object());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_claude_state_preserves_non_mcp_fields() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-claude-state-copy-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let source = base.join("source");
+        let target = base.join("target");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(
+            source.join(".claude.json"),
+            r#"{
+  "numStartups": 12,
+  "projects": {"/tmp/demo": {"allowedTools": ["Read"]}},
+  "mcpServers": {"source-only": {"command": "demo"}}
+}"#,
+        )
+        .unwrap();
+        fs::write(
+            target.join(".claude.json"),
+            r#"{"mcpServers":{"target-only":{"command":"keep"}}}"#,
+        )
+        .unwrap();
+
+        copy_claude_state_without_mcp(&source, false, &target).unwrap();
+        let value: Value =
+            serde_json::from_str(&fs::read_to_string(target.join(".claude.json")).unwrap())
+                .unwrap();
+        assert_eq!(value["numStartups"], 12);
+        assert_eq!(value["projects"]["/tmp/demo"]["allowedTools"][0], "Read");
+        assert_eq!(value["mcpServers"]["target-only"]["command"], "keep");
+        assert!(value["mcpServers"].get("source-only").is_none());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clone_copy_modes_produce_expected_links_and_copies() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-claude-copy-modes-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let source = base.join("source");
+        let full = base.join("full");
+        let links = base.join("links");
+        fs::create_dir_all(source.join("skills")).unwrap();
+        fs::create_dir_all(source.join("agents")).unwrap();
+        fs::write(source.join("settings.json"), "{}").unwrap();
+        fs::write(source.join("skills/demo.md"), "skill").unwrap();
+        fs::write(source.join("agents/demo.md"), "agent").unwrap();
+        fs::write(source.join("session.json"), "session").unwrap();
+
+        copy_core(&source, &full, true, true, false).unwrap();
+        copy_other_data(&source, &full, false).unwrap();
+        assert!(!fs::symlink_metadata(full.join("skills"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::symlink_metadata(full.join("session.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_to_string(full.join("session.json")).unwrap(),
+            "session"
+        );
+
+        copy_core(&source, &links, true, true, true).unwrap();
+        copy_other_data(&source, &links, true).unwrap();
+        assert!(fs::symlink_metadata(links.join("skills"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::symlink_metadata(links.join("agents"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::symlink_metadata(links.join("session.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_to_string(links.join("session.json")).unwrap(),
+            "session"
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

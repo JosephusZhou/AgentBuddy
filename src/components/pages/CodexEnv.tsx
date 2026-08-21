@@ -319,6 +319,8 @@ export default function CodexEnv() {
   const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
   const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
   const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
+  const [cloneSyncOtherData, setCloneSyncOtherData] = useState(false);
+  const [cloneSyncMode, setCloneSyncMode] = useState<"full" | "symlink">("full");
   const [cloneInstallAlias, setCloneInstallAlias] = useState(true);
   const [cloneError, setCloneError] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
@@ -466,6 +468,8 @@ export default function CodexEnv() {
     setCloneSyncMcp(true);
     setCloneSyncSkills(true);
     setCloneSyncAgents(true);
+    setCloneSyncOtherData(false);
+    setCloneSyncMode("full");
     setCloneInstallAlias(true);
     setCloneError("");
     setSlugTouched(false);
@@ -568,6 +572,8 @@ modelProvider: cloneModelProvider.trim() || undefined,
 syncMcp: cloneSyncMcp,
 syncSkills: cloneSyncSkills,
 syncAgents: cloneSyncAgents,
+syncOtherData: cloneSyncOtherData,
+syncMode: cloneSyncMode,
 installAlias: cloneInstallAlias,
 providerId: cloneSelectedProvider?.id || undefined,
 });
@@ -597,6 +603,8 @@ providerId: cloneSelectedProvider?.id || undefined,
     cloneSyncMcp,
     cloneSyncSkills,
     cloneSyncAgents,
+    cloneSyncOtherData,
+    cloneSyncMode,
     cloneInstallAlias,
     cloneSelectedProvider,
     refresh,
@@ -1497,6 +1505,50 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
                   同步默认环境 MCP（将 <code>~/.codex/config.toml</code> 的 [mcp_servers] 写入新环境）
                 </span>
               </label>
+              <label className="ui-check" htmlFor="xe-sync-other-data">
+                <input
+                  id="xe-sync-other-data"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncOtherData}
+                  onChange={(e) => setCloneSyncOtherData(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步会话、历史、记忆等其他数据（复制源环境中除上述选项外的目录和文件）
+                </span>
+              </label>
+              <div className="claude-env-sync-mode" role="radiogroup" aria-label="同步方式">
+                <label className="claude-env-sync-mode-option" htmlFor="xe-sync-mode-full">
+                  <input
+                    id="xe-sync-mode-full"
+                    type="radio"
+                    name="xe-sync-mode"
+                    checked={cloneSyncMode === "full"}
+                    onChange={() => setCloneSyncMode("full")}
+                    disabled={busy}
+                  />
+                  <span className="claude-env-sync-radio" aria-hidden="true">
+                    <span className="claude-env-sync-radio-dot" />
+                  </span>
+                  <span>全量同步</span>
+                </label>
+                <label className="claude-env-sync-mode-option" htmlFor="xe-sync-mode-symlink">
+                  <input
+                    id="xe-sync-mode-symlink"
+                    type="radio"
+                    name="xe-sync-mode"
+                    checked={cloneSyncMode === "symlink"}
+                    onChange={() => setCloneSyncMode("symlink")}
+                    disabled={busy}
+                  />
+                  <span className="claude-env-sync-radio" aria-hidden="true">
+                    <span className="claude-env-sync-radio-dot" />
+                  </span>
+                  <span>软链接同步</span>
+                </label>
+              </div>
               <label className="ui-check" htmlFor="xe-install-alias">
                 <input
                   id="xe-install-alias"
@@ -1514,12 +1566,13 @@ providerId: diffField(editSelectedProvider?.id ?? "", orig.providerId),
               </label>
             </div>
             <div className="claude-env-form-hint">
-              始终复制 config.toml；AGENTS.md、skills/ 按上方勾选决定是否复制。不会复制 auth.json、会话与历史。
-              model / provider / Base URL 留空时沿用源环境 config.toml；填写后写入目标 config.toml。
-              Token 留空不写 auth.json；填写后写入目标环境{" "}
-              <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>。
-              勾选同步 MCP 会以默认环境 <code>[mcp_servers]</code> 覆盖新环境。
-              勾选写入别名会把启动别名追加进当前 shell 配置，需 source 或新开终端后生效。
+              <span className="claude-env-form-hint-line">* 始终复制 config.toml；AGENTS.md、skills/ 按上方勾选决定是否复制。其他数据默认不复制；勾选后会复制源环境中除上述选项外的目录和文件。</span>
+              <span className="claude-env-form-hint-line">* model / provider / Base URL 留空时沿用源环境 config.toml；填写后写入目标 config.toml。</span>
+              <span className="claude-env-form-hint-line">* Token 留空不写 auth.json；填写后写入目标环境 <code>auth.json</code> 的 <code>OPENAI_API_KEY</code>。</span>
+              <span className="claude-env-form-hint-line">* 勾选同步 MCP 会以默认环境 <code>[mcp_servers]</code> 覆盖新环境。</span>
+              <span className="claude-env-form-hint-line">* 软链接同步会使已选的 skills、AGENTS.md 与其他数据跟随源环境变化；全量同步会创建独立副本。</span>
+              <span className="claude-env-form-hint-line">* 由于 Codex MCP 与供应商配置共同位于 <code>config.toml</code>，软链接模式无法对 MCP 单独建立双向同步，Codex MCP 仍会按配置内容复制到新环境。</span>
+              <span className="claude-env-form-hint-line">* 勾选写入别名会把启动别名追加进当前 shell 配置，需 source 或新开终端后生效。</span>
             </div>
             {cloneError && <div className="mcp-form-error">{cloneError}</div>}
           </div>

@@ -4406,9 +4406,70 @@ a[href]:focus-visible {
   font-size: var(--text-xs);
   color: var(--seed-fg);
 }
+.claude-env-form-hint-line {
+  display: block;
+}
 /* Stacked checkboxes inside one env-modal form group: tighten spacing. */
 .claude-env-modal-body .ui-check + .ui-check {
   margin-top: 10px;
+}
+.claude-env-sync-mode {
+  display: flex;
+  gap: 18px;
+  margin: 12px 0 2px 28px;
+}
+.claude-env-sync-mode-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--seed-fg);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.claude-env-sync-mode-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+.claude-env-sync-radio {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--seed-input-border);
+  border-radius: 50%;
+  transition: border-color 0.15s ease;
+}
+.claude-env-sync-radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--seed-primary);
+  transform: scale(0);
+  transition: transform 0.15s ease;
+}
+.claude-env-sync-mode-option:hover .claude-env-sync-radio {
+  border-color: var(--seed-input-focus);
+}
+.claude-env-sync-mode-option input:checked + .claude-env-sync-radio {
+  border-color: var(--seed-primary);
+}
+.claude-env-sync-mode-option input:checked + .claude-env-sync-radio .claude-env-sync-radio-dot {
+  transform: scale(1);
+}
+.claude-env-sync-mode-option input:focus-visible + .claude-env-sync-radio {
+  outline: 2px solid color-mix(in srgb, var(--seed-primary) 45%, transparent);
+  outline-offset: 2px;
+}
+.claude-env-sync-mode-option input:disabled + .claude-env-sync-radio,
+.claude-env-sync-mode-option input:disabled ~ span {
+  opacity: 0.5;
 }
 .claude-env-scan-list {
   display: flex;

@@ -294,6 +294,8 @@ export default function ClaudeEnv() {
   const [cloneSyncMcp, setCloneSyncMcp] = useState(true);
   const [cloneSyncSkills, setCloneSyncSkills] = useState(true);
   const [cloneSyncAgents, setCloneSyncAgents] = useState(true);
+  const [cloneSyncOtherData, setCloneSyncOtherData] = useState(false);
+  const [cloneSyncMode, setCloneSyncMode] = useState<"full" | "symlink">("full");
   const [cloneInstallAlias, setCloneInstallAlias] = useState(true);
   const [cloneError, setCloneError] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
@@ -440,6 +442,8 @@ export default function ClaudeEnv() {
     setCloneSyncMcp(true);
     setCloneSyncSkills(true);
     setCloneSyncAgents(true);
+    setCloneSyncOtherData(false);
+    setCloneSyncMode("full");
     setCloneInstallAlias(true);
     setCloneError("");
     setSlugTouched(false);
@@ -553,6 +557,8 @@ modelFable: tiers.fable || undefined,
 syncMcp: cloneSyncMcp,
 syncSkills: cloneSyncSkills,
 syncAgents: cloneSyncAgents,
+syncOtherData: cloneSyncOtherData,
+syncMode: cloneSyncMode,
 installAlias: cloneInstallAlias,
 providerId: cloneSelectedProvider?.id || undefined,
 });
@@ -582,6 +588,8 @@ providerId: cloneSelectedProvider?.id || undefined,
     cloneSyncMcp,
     cloneSyncSkills,
     cloneSyncAgents,
+    cloneSyncOtherData,
+    cloneSyncMode,
     cloneInstallAlias,
     refresh,
   ]);
@@ -1508,6 +1516,50 @@ return (
                   同步全局 MCP（将 <code>~/.claude.json</code> 顶层 mcpServers 写入新环境）
                 </span>
               </label>
+              <label className="ui-check" htmlFor="ce-sync-other-data">
+                <input
+                  id="ce-sync-other-data"
+                  type="checkbox"
+                  className="ui-check-input"
+                  checked={cloneSyncOtherData}
+                  onChange={(e) => setCloneSyncOtherData(e.target.checked)}
+                  disabled={busy}
+                />
+                <CheckGlyph />
+                <span className="ui-check-label">
+                  同步会话、历史、记忆等其他数据（复制源环境中除上述选项外的目录和文件）
+                </span>
+              </label>
+              <div className="claude-env-sync-mode" role="radiogroup" aria-label="同步方式">
+                <label className="claude-env-sync-mode-option" htmlFor="ce-sync-mode-full">
+                  <input
+                    id="ce-sync-mode-full"
+                    type="radio"
+                    name="ce-sync-mode"
+                    checked={cloneSyncMode === "full"}
+                    onChange={() => setCloneSyncMode("full")}
+                    disabled={busy}
+                  />
+                  <span className="claude-env-sync-radio" aria-hidden="true">
+                    <span className="claude-env-sync-radio-dot" />
+                  </span>
+                  <span>全量同步</span>
+                </label>
+                <label className="claude-env-sync-mode-option" htmlFor="ce-sync-mode-symlink">
+                  <input
+                    id="ce-sync-mode-symlink"
+                    type="radio"
+                    name="ce-sync-mode"
+                    checked={cloneSyncMode === "symlink"}
+                    onChange={() => setCloneSyncMode("symlink")}
+                    disabled={busy}
+                  />
+                  <span className="claude-env-sync-radio" aria-hidden="true">
+                    <span className="claude-env-sync-radio-dot" />
+                  </span>
+                  <span>软链接同步</span>
+                </label>
+              </div>
               <label className="ui-check" htmlFor="ce-install-alias">
                 <input
                   id="ce-install-alias"
@@ -1525,12 +1577,12 @@ return (
               </label>
             </div>
             <div className="claude-env-form-hint">
-              始终复制 settings.json、CLAUDE.md；skills/、agents/ 按上方勾选决定是否复制。不会复制会话与历史。
-              Base URL / API Key 留空时沿用源环境；填写后会写入新环境 settings.json 的
-              env.ANTHROPIC_BASE_URL / env.ANTHROPIC_AUTH_TOKEN。
-              自定义模型留空则不指定，填写后同步写入 env.ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。
-              勾选同步 MCP 会以全局配置覆盖新环境的 mcpServers（权威覆盖）。
-              勾选写入别名会把该环境的启动别名追加进当前 shell 配置文件，需 source 或新开终端后生效。
+              <span className="claude-env-form-hint-line">* 始终复制 settings.json、CLAUDE.md；skills/、agents/ 按上方勾选决定是否复制。其他数据默认不复制；勾选后会复制源环境中除上述选项外的目录和文件。</span>
+              <span className="claude-env-form-hint-line">* Base URL / API Key 留空时沿用源环境；填写后会写入新环境 settings.json 的 env.ANTHROPIC_BASE_URL / env.ANTHROPIC_AUTH_TOKEN。</span>
+              <span className="claude-env-form-hint-line">* 自定义模型留空则不指定，填写后同步写入 env.ANTHROPIC_MODEL 与各档 DEFAULT_*_MODEL / *_MODEL_NAME。</span>
+              <span className="claude-env-form-hint-line">* 勾选同步 MCP 会以全局配置覆盖新环境的 mcpServers（权威覆盖）。</span>
+              <span className="claude-env-form-hint-line">* 软链接同步会使已选的 skills、agents 与其他数据跟随源环境变化；全量同步会创建独立副本。</span>
+              <span className="claude-env-form-hint-line">* 勾选写入别名会把该环境的启动别名追加进当前 shell 配置文件，需 source 或新开终端后生效。</span>
             </div>
             {cloneError && <div className="mcp-form-error">{cloneError}</div>}
           </div>

@@ -124,6 +124,11 @@ pub struct CodexEnvClonePayload {
     /// When true (default if omitted), copy the source environment's AGENTS.md file
     /// into the new environment.
     pub sync_agents: Option<bool>,
+    /// When true, copy all remaining regular files/directories from the source
+    /// environment, excluding files/directories controlled by the other clone options.
+    pub sync_other_data: Option<bool>,
+    /// full（默认）或 symlink。
+    pub sync_mode: Option<String>,
     /// When true, write shell alias after creation. Defaults to false.
     pub install_alias: Option<bool>,
     /// 关联的 AI 供应商 ID。空串或 None = 不关联。
@@ -387,7 +392,8 @@ fn skills_snapshot(skills_dir: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, Stri
                 .to_path_buf();
             files.insert(
                 relative,
-                fs::read(path).map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
+                fs::read(path)
+                    .map_err(|e| format!("读取 skills 文件 {} 失败: {}", path.display(), e))?,
             );
         }
     }
@@ -795,7 +801,8 @@ fn apply_config_overrides(
 /// (it may contain OAuth credentials), but remove AgentBuddy-managed API/config
 /// overrides so the CLI can perform its own login and endpoint selection.
 fn apply_official_oauth_config(config_dir: &Path) -> Result<Vec<String>, String> {
-    let mut changed = apply_managed_config_edit(config_dir, Some(""), Some(""), Some(""), Some(""))?;
+    let mut changed =
+        apply_managed_config_edit(config_dir, Some(""), Some(""), Some(""), Some(""))?;
     let path = env_config_path(config_dir);
     if path.is_file() {
         let raw = fs::read_to_string(&path).map_err(|e| format!("读取 config.toml 失败: {}", e))?;
@@ -1013,7 +1020,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Result<(), String> {
+fn copy_core(
+    src: &Path,
+    dst: &Path,
+    sync_skills: bool,
+    sync_agents: bool,
+    symlink_mode: bool,
+) -> Result<(), String> {
     if !src.is_dir() {
         return Err(format!("源环境目录不存在: {}", src.display()));
     }
@@ -1027,7 +1040,11 @@ fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Re
         let from = src.join(name);
         if from.is_file() {
             let to = dst.join(name);
-            fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+            if *name == "AGENTS.md" && symlink_mode {
+                platform::symlink_any(&from, &to)?;
+            } else {
+                fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+            }
         }
     }
     for name in CORE_DIRS {
@@ -1037,10 +1054,51 @@ fn copy_core(src: &Path, dst: &Path, sync_skills: bool, sync_agents: bool) -> Re
         let from = src.join(name);
         if from.is_dir() {
             let to = dst.join(name);
-            copy_dir_recursive(&from, &to)?;
+            if symlink_mode {
+                platform::symlink_dir(&from, &to)?;
+            } else {
+                copy_dir_recursive(&from, &to)?;
+            }
         }
     }
     // Official requirement: CODEX_HOME must exist before use.
+    Ok(())
+}
+
+/// Copy data not covered by dedicated clone switches. This explicit opt-in may
+/// include authentication and session state.
+fn copy_other_data(src: &Path, dst: &Path, symlink_mode: bool) -> Result<(), String> {
+    for entry in fs::read_dir(src).map_err(|e| format!("读取目录 {} 失败: {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if matches!(name.as_ref(), "config.toml" | "AGENTS.md" | "skills") {
+            continue;
+        }
+        if entry
+            .file_type()
+            .map_err(|e| format!("读取文件类型失败: {}", e))?
+            .is_symlink()
+        {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            if symlink_mode {
+                platform::symlink_dir(&from, &to)?;
+            } else {
+                copy_dir_recursive(&from, &to)?;
+            }
+        } else if from.is_file() {
+            if symlink_mode {
+                platform::symlink_any(&from, &to)?;
+            } else {
+                fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1153,20 +1211,20 @@ fn ensure_default_environment() -> Result<(), String> {
     }
     let config_dir = default_codex_home()?;
     let now = now_secs();
-let row = CodexEnvironmentRow {
-id: DEFAULT_ENV_ID.into(),
-name: "默认环境".into(),
-slug: "default".into(),
-config_dir: config_dir.to_string_lossy().to_string(),
-alias_name: "codex".into(),
-is_default: true,
-source: "default".into(),
-notes: "直接运行 codex 使用此环境（不写入 shell 别名块）".into(),
-alias_installed: false,
-provider_id: String::new(),
-created_at: now,
-updated_at: now,
-};
+    let row = CodexEnvironmentRow {
+        id: DEFAULT_ENV_ID.into(),
+        name: "默认环境".into(),
+        slug: "default".into(),
+        config_dir: config_dir.to_string_lossy().to_string(),
+        alias_name: "codex".into(),
+        is_default: true,
+        source: "default".into(),
+        notes: "直接运行 codex 使用此环境（不写入 shell 别名块）".into(),
+        alias_installed: false,
+        provider_id: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
     db::upsert_codex_environment_row(&row)
 }
 
@@ -1638,23 +1696,23 @@ pub fn import_environment(payload: CodexEnvImportPayload) -> Result<CodexEnvActi
     ensure_unique_fields(&id, &slug, &config_dir_str, &alias)?;
 
     let now = now_secs();
-let mut row = CodexEnvironmentRow {
-id: id.clone(),
-name: name.clone(),
-slug,
-config_dir: config_dir_str,
-alias_name: alias,
-is_default: false,
-source: "imported".into(),
-notes,
-alias_installed: false,
-provider_id: String::new(),
-created_at: now,
-updated_at: now,
-};
-db::upsert_codex_environment_row(&row)?;
+    let mut row = CodexEnvironmentRow {
+        id: id.clone(),
+        name: name.clone(),
+        slug,
+        config_dir: config_dir_str,
+        alias_name: alias,
+        is_default: false,
+        source: "imported".into(),
+        notes,
+        alias_installed: false,
+        provider_id: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
+    db::upsert_codex_environment_row(&row)?;
 
-let mut message = format!("已导入环境「{}」", name);
+    let mut message = format!("已导入环境「{}」", name);
     let (alias_installed, alias_msg) =
         install_alias_after_create(&row, payload.install_alias.unwrap_or(false));
     row.alias_installed = alias_installed;
@@ -1700,13 +1758,32 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
 
     let sync_skills = payload.sync_skills.unwrap_or(true);
     let sync_agents = payload.sync_agents.unwrap_or(true);
-    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents) {
+    let sync_other_data = payload.sync_other_data.unwrap_or(false);
+    let symlink_mode = payload.sync_mode.as_deref() == Some("symlink");
+    if let Err(e) = copy_core(&src_path, &dst, sync_skills, sync_agents, symlink_mode) {
         let _ = fs::remove_dir_all(&dst);
         return Err(e);
     }
+    if sync_other_data {
+        if let Err(e) = copy_other_data(&src_path, &dst, symlink_mode) {
+            let _ = fs::remove_dir_all(&dst);
+            return Err(e);
+        }
+    }
 
-    let official_oauth = payload.provider_id.as_deref().map(str::trim)
-        == Some(OFFICIAL_OAUTH_PROVIDER_ID);
+    let official_oauth =
+        payload.provider_id.as_deref().map(str::trim) == Some(OFFICIAL_OAUTH_PROVIDER_ID);
+    // auth.json may be a symlink in symlink mode. Detach it before an explicit
+    // token/OAuth change so writes cannot modify the source environment.
+    if symlink_mode && (official_oauth || payload.api_key.is_some()) {
+        let auth_path = dst.join("auth.json");
+        if fs::symlink_metadata(&auth_path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            fs::remove_file(&auth_path).map_err(|e| format!("解除 auth.json 软链接失败: {}", e))?;
+        }
+    }
     let override_fields = match if official_oauth {
         apply_official_oauth_config(&dst)
     } else {
@@ -1726,23 +1803,27 @@ pub fn clone_environment(payload: CodexEnvClonePayload) -> Result<CodexEnvAction
     };
 
     let now = now_secs();
-let mut row = CodexEnvironmentRow {
-id: id.clone(),
-name: name.clone(),
-slug,
-config_dir: dst_str,
-alias_name: alias,
-is_default: false,
-source: "managed".into(),
-notes,
-alias_installed: false,
-provider_id: payload.provider_id.as_ref().map(|s| s.trim().to_string()).unwrap_or_default(),
-created_at: now,
-updated_at: now,
-};
-db::upsert_codex_environment_row(&row)?;
+    let mut row = CodexEnvironmentRow {
+        id: id.clone(),
+        name: name.clone(),
+        slug,
+        config_dir: dst_str,
+        alias_name: alias,
+        is_default: false,
+        source: "managed".into(),
+        notes,
+        alias_installed: false,
+        provider_id: payload
+            .provider_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        created_at: now,
+        updated_at: now,
+    };
+    db::upsert_codex_environment_row(&row)?;
 
-let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
+    let mut message = format!("已从「{}」复制核心配置到「{}」。", source.name, name);
     let mut skipped: Vec<&str> = Vec::new();
     if !sync_skills {
         skipped.push("skills");
@@ -1752,6 +1833,11 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
     }
     if !skipped.is_empty() {
         message.push_str(&format!("已按选择跳过 {} 的复制。", skipped.join("、")));
+    }
+    if symlink_mode {
+        message.push_str("已使用软链接同步所选数据。");
+    } else {
+        message.push_str("已使用全量同步所选数据。");
     }
     if official_oauth {
         message.push_str("已切换为官方 OAuth 登录；请通过该环境的 Codex 命令执行登录。");
@@ -1782,7 +1868,11 @@ let mut message = format!("已从「{}」复制核心配置到「{}」。", sour
         install_alias_after_create(&row, payload.install_alias.unwrap_or(false));
     row.alias_installed = alias_installed;
     message.push_str(&alias_msg);
-    message.push_str("新环境不含 auth / 会话历史，首次启动可能需要重新登录。");
+    if sync_other_data {
+        message.push_str("已同步 auth、会话、历史、记忆等其他数据。");
+    } else {
+        message.push_str("新环境不含 auth / 会话历史，首次启动可能需要重新登录。");
+    }
 
     Ok(CodexEnvActionResult {
         ok: true,
@@ -1872,7 +1962,10 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
                 )
             }
         } else if official_oauth {
-            Err(format!("环境目录不存在，无法切换官方 OAuth：{}", dir.display()))
+            Err(format!(
+                "环境目录不存在，无法切换官方 OAuth：{}",
+                dir.display()
+            ))
         } else {
             Ok(Vec::new())
         }
@@ -1931,7 +2024,11 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
     }
 
     if !changed.is_empty() {
-        let target = if is_default { "默认 config.toml / auth.json" } else { "配置" };
+        let target = if is_default {
+            "默认 config.toml / auth.json"
+        } else {
+            "配置"
+        };
         message.push_str(&format!("；已更新 {} 的 {}", target, changed.join("、")));
     } else if !dir.is_dir()
         && (payload.model.is_some()
@@ -1972,13 +2069,8 @@ pub fn sync_provider_to_envs(
             continue;
         }
         // model_provider 设为空串：让 Codex 使用顶层 model + base_url 而非自定义 provider 表。
-        match apply_managed_config_edit(
-            &dir,
-            Some(model),
-            Some(""),
-            Some(base_url),
-            Some(api_key),
-        ) {
+        match apply_managed_config_edit(&dir, Some(model), Some(""), Some(base_url), Some(api_key))
+        {
             Ok(_) => {
                 synced += 1;
             }
@@ -2711,17 +2803,26 @@ experimental_bearer_token = "legacy-token"
 
     #[test]
     fn official_oauth_clears_managed_fields_but_preserves_oauth_auth() {
-        let dir = std::env::temp_dir().join(format!("agentbuddy-codex-oauth-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("agentbuddy-codex-oauth-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("auth.json"), r#"{"tokens":{"id_token":"oauth"},"OPENAI_API_KEY":"managed"}"#).unwrap();
+        fs::write(
+            dir.join("auth.json"),
+            r#"{"tokens":{"id_token":"oauth"},"OPENAI_API_KEY":"managed"}"#,
+        )
+        .unwrap();
         fs::write(dir.join("config.toml"), "model = \"gpt\"\nmodel_provider = \"custom\"\nopenai_base_url = \"https://example.invalid/v1\"\n\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"https://example.invalid/v1\"\n").unwrap();
         let changed = apply_official_oauth_config(&dir).unwrap();
         assert!(changed.contains(&"Token".to_string()));
-        let auth: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
+        let auth: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
         assert_eq!(auth["tokens"]["id_token"], "oauth");
         assert!(auth.get("OPENAI_API_KEY").is_none());
-        let doc: toml_edit::DocumentMut = fs::read_to_string(dir.join("config.toml")).unwrap().parse().unwrap();
+        let doc: toml_edit::DocumentMut = fs::read_to_string(dir.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(doc.get("model").is_none());
         assert!(doc.get("model_provider").is_none());
         assert!(doc.get("openai_base_url").is_none());
@@ -2731,7 +2832,10 @@ experimental_bearer_token = "legacy-token"
 
     #[test]
     fn clone_official_oauth_removes_source_provider_table() {
-        let base = std::env::temp_dir().join(format!("agentbuddy-codex-clone-oauth-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-codex-clone-oauth-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&base);
         let source = base.join("source");
         let target = base.join("target");
@@ -2741,11 +2845,64 @@ experimental_bearer_token = "legacy-token"
             "model_provider = \"my_codex\"\n\n[model_providers.my_codex]\nname = \"My Codex\"\nbase_url = \"https://example.invalid/v1\"\n",
         )
         .unwrap();
-        copy_core(&source, &target, false, false).unwrap();
+        copy_core(&source, &target, false, false, false).unwrap();
         apply_official_oauth_config(&target).unwrap();
-        let doc: toml_edit::DocumentMut = fs::read_to_string(target.join("config.toml")).unwrap().parse().unwrap();
+        let doc: toml_edit::DocumentMut = fs::read_to_string(target.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(doc.get("model_provider").is_none());
         assert!(doc.get("model_providers").is_none());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clone_copy_modes_produce_expected_links_and_copies() {
+        let base = std::env::temp_dir().join(format!(
+            "agentbuddy-codex-copy-modes-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let source = base.join("source");
+        let full = base.join("full");
+        let links = base.join("links");
+        fs::create_dir_all(source.join("skills")).unwrap();
+        fs::write(source.join("config.toml"), "model = \"gpt\"\n").unwrap();
+        fs::write(source.join("AGENTS.md"), "agents").unwrap();
+        fs::write(source.join("skills/demo.md"), "skill").unwrap();
+        fs::write(source.join("auth.json"), "{\"token\":\"x\"}").unwrap();
+
+        copy_core(&source, &full, true, true, false).unwrap();
+        copy_other_data(&source, &full, false).unwrap();
+        assert!(!fs::symlink_metadata(full.join("skills"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::symlink_metadata(full.join("AGENTS.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::symlink_metadata(full.join("auth.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        copy_core(&source, &links, true, true, true).unwrap();
+        copy_other_data(&source, &links, true).unwrap();
+        assert!(fs::symlink_metadata(links.join("skills"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::symlink_metadata(links.join("AGENTS.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::symlink_metadata(links.join("auth.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
         let _ = fs::remove_dir_all(&base);
     }
 }
