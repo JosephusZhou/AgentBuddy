@@ -247,8 +247,8 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
         });
     }
 
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config.json: {}", e))?;
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read config.json: {}", e))?;
 
     let mut root: Value = if raw.trim().is_empty() {
         json!({})
@@ -277,7 +277,10 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
     match obj.get("theme").and_then(|v| v.as_str()) {
         Some(theme) if is_valid_theme_slug(theme) => {}
         Some(_) | None => {
-            obj.insert("theme".to_string(), Value::String(DEFAULT_THEME.to_string()));
+            obj.insert(
+                "theme".to_string(),
+                Value::String(DEFAULT_THEME.to_string()),
+            );
             needs_write = true;
         }
     }
@@ -310,7 +313,9 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
     })
 }
 
-fn parse_route_aggregation(value: Option<&Value>) -> crate::route_aggregation::RouteAggregationConfig {
+fn parse_route_aggregation(
+    value: Option<&Value>,
+) -> crate::route_aggregation::RouteAggregationConfig {
     let Some(v) = value else {
         return crate::route_aggregation::RouteAggregationConfig::default();
     };
@@ -366,7 +371,9 @@ pub fn save_models_dev_cached_at(timestamp: u64) -> Result<(), String> {
 }
 
 /// Normalize + validate proxy settings before write.
-pub fn normalize_network_settings(mut settings: NetworkSettings) -> Result<NetworkSettings, String> {
+pub fn normalize_network_settings(
+    mut settings: NetworkSettings,
+) -> Result<NetworkSettings, String> {
     settings.proxy.host = settings.proxy.host.trim().to_string();
     settings.proxy.username = settings.proxy.username.trim().to_string();
     // Keep password as-is except trim ends only if entirely whitespace → empty is fine.
@@ -407,8 +414,8 @@ pub fn save_network_settings(settings: NetworkSettings) -> Result<NetworkSetting
     let obj = root
         .as_object_mut()
         .ok_or_else(|| "config.json 格式无效".to_string())?;
-    let network_val = serde_json::to_value(&settings)
-        .map_err(|e| format!("序列化网络设置失败: {}", e))?;
+    let network_val =
+        serde_json::to_value(&settings).map_err(|e| format!("序列化网络设置失败: {}", e))?;
     obj.insert("network".to_string(), network_val);
     write_raw(&path, &root)?;
     Ok(settings)
@@ -426,8 +433,7 @@ pub fn save_route_aggregation_config(
     let obj = root
         .as_object_mut()
         .ok_or_else(|| "config.json 格式无效".to_string())?;
-    let val = serde_json::to_value(config)
-        .map_err(|e| format!("序列化路由聚合配置失败: {}", e))?;
+    let val = serde_json::to_value(config).map_err(|e| format!("序列化路由聚合配置失败: {}", e))?;
     obj.insert("routeAggregation".to_string(), val);
     write_raw(&path, &root)?;
     Ok(())
@@ -437,7 +443,11 @@ pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, 
     let mut settings = settings;
     settings.cliproxyapi_conf_path = settings.cliproxyapi_conf_path.trim().to_string();
     settings.sub2api_root_path = settings.sub2api_root_path.trim().to_string();
-    let remote = settings.default_remote_dir.trim().trim_matches('/').to_string();
+    let remote = settings
+        .default_remote_dir
+        .trim()
+        .trim_matches('/')
+        .to_string();
     settings.default_remote_dir = if remote.is_empty() {
         default_remote_dir()
     } else {
@@ -449,7 +459,9 @@ pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, 
     let _ = ensure_app_config_locked()?;
     let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
-    let obj = root.as_object_mut().ok_or_else(|| "config.json 格式无效".to_string())?;
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| "config.json 格式无效".to_string())?;
     let backup_val =
         serde_json::to_value(&settings).map_err(|e| format!("序列化备份设置失败: {}", e))?;
     obj.insert("backup".to_string(), backup_val);
@@ -462,8 +474,8 @@ pub fn load_secrets_key() -> Result<[u8; 32], String> {
     let _config_guard = lock_config_file()?;
     ensure_app_config_locked()?;
     let path = config_path()?;
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config.json: {}", e))?;
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read config.json: {}", e))?;
     let root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
     let encoded = root
         .get("secretsKey")
@@ -527,7 +539,13 @@ mod tests {
 
     #[test]
     fn accepts_known_and_new_theme_slugs() {
-        for id in ["qoder-light", "qoder-dark", "claude", "catppuccin-mocha", "synthwave-84"] {
+        for id in [
+            "qoder-light",
+            "qoder-dark",
+            "claude",
+            "catppuccin-mocha",
+            "synthwave-84",
+        ] {
             assert!(is_valid_theme_slug(id), "should accept {id}");
             assert_eq!(normalize_theme(id), id);
         }

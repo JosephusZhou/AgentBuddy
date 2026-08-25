@@ -103,7 +103,9 @@ fn resolve_config_dir(name: &str) -> Option<PathBuf> {
 /// Only Claude Code today: MCP lives at `~/.claude.json`, settings at `~/.claude/settings.json`.
 fn resolve_settings_file(name: &str) -> Option<PathBuf> {
     if name == "claude-code" {
-        return home_dir().ok().map(|h| h.join(".claude").join("settings.json"));
+        return home_dir()
+            .ok()
+            .map(|h| h.join(".claude").join("settings.json"));
     }
     None
 }
@@ -159,9 +161,8 @@ fn open_existing_path(path: &Path, kind_label: &str) -> Result<AgentOpenResult, 
 }
 
 pub fn reveal_config_dir(name: String) -> Result<AgentOpenResult, String> {
-    let dir = resolve_config_dir(&name).ok_or_else(|| {
-        format!("Agent「{name}」没有可打开的配置目录")
-    })?;
+    let dir =
+        resolve_config_dir(&name).ok_or_else(|| format!("Agent「{name}」没有可打开的配置目录"))?;
     open_existing_path(&dir, "配置目录")
 }
 
@@ -228,7 +229,12 @@ mod tests {
         let targets = open_targets("codex");
         assert_eq!(
             targets.mcp_file.as_deref(),
-            Some(home.join(".codex").join("config.toml").to_string_lossy().as_ref())
+            Some(
+                home.join(".codex")
+                    .join("config.toml")
+                    .to_string_lossy()
+                    .as_ref()
+            )
         );
         assert!(targets.settings_file.is_none());
         assert_eq!(

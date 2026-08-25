@@ -2,6 +2,7 @@
 // (msg_send!, class! use `cfg!(feature = "cargo-clippy")` which is outdated).
 #![allow(unexpected_cfgs)]
 
+mod agent_model_config;
 mod agent_open;
 mod agents;
 mod ai_provider;
@@ -13,7 +14,6 @@ mod crypto;
 mod db;
 mod http_client;
 mod mcp_config;
-mod agent_model_config;
 mod opencode_config;
 mod pi_model_config;
 mod platform;
@@ -37,10 +37,7 @@ async fn set_theme(theme: String) -> Result<config::AppConfig, String> {
 /// render in the correct shade (gray for dark, light-gray for light).
 /// Called by the frontend after loading or switching themes.
 #[tauri::command]
-async fn set_window_appearance(
-    category: String,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
+async fn set_window_appearance(category: String, app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let dark = category == "dark";
@@ -158,13 +155,7 @@ async fn get_agent_detail(name: String) -> Result<AgentDetail, String> {
                 a.install_paths,
                 a.config_dirs,
             ),
-            None => (
-                name.clone(),
-                "?".to_string(),
-                false,
-                Vec::new(),
-                Vec::new(),
-            ),
+            None => (name.clone(), "?".to_string(), false, Vec::new(), Vec::new()),
         };
         install_paths.retain(|p| !sniff::is_shim_path(p));
 
@@ -756,11 +747,9 @@ async fn fetch_claude_env_remote_models(
     base_url: String,
     api_key: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        claude_env::fetch_remote_models(base_url, api_key)
-    })
-    .await
-    .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
+        .await
+        .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
 }
 
 /* ===== Agent 通用模型配置（OpenCode / Pi / Oh-My-Pi）===== */
@@ -1018,11 +1007,9 @@ async fn fetch_codex_env_remote_models(
     base_url: String,
     api_key: Option<String>,
 ) -> Result<claude_env::ClaudeEnvRemoteModelsResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        claude_env::fetch_remote_models(base_url, api_key)
-    })
-    .await
-    .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || claude_env::fetch_remote_models(base_url, api_key))
+        .await
+        .map_err(|e| format!("拉取 Codex 远端模型任务失败: {e}"))?
 }
 
 /* ===== AI providers (上游模型供应商库) ===== */
@@ -1041,10 +1028,7 @@ fn spawn_route_aggregation_pool_refresh(
     tauri::async_runtime::spawn(async move {
         for group in route_aggregation::RouteGroup::ALL {
             if let Err(e) = router.refresh_pool_fast(group).await {
-                eprintln!(
-                    "[ai-provider] 刷新路由聚合 {:?} pool 失败: {}",
-                    group, e
-                );
+                eprintln!("[ai-provider] 刷新路由聚合 {:?} pool 失败: {}", group, e);
                 continue;
             }
         }
@@ -1063,9 +1047,10 @@ async fn upsert_ai_provider(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
     payload: ai_provider::AiProviderUpsertPayload,
 ) -> Result<ai_provider::AiProviderActionResult, String> {
-    let result = tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
-        .await
-        .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))??;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
+            .await
+            .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))??;
     spawn_route_aggregation_pool_refresh(state.provider_router.clone());
     Ok(result)
 }
@@ -1141,8 +1126,8 @@ async fn update_route_aggregation_config(
     // handlers read the shared config on each request.
     let needs_restart = {
         let old = state.config.read().await;
-        let addr_changed = old.listen_address != config.listen_address
-            || old.listen_port != config.listen_port;
+        let addr_changed =
+            old.listen_address != config.listen_address || old.listen_port != config.listen_port;
         drop(old);
         addr_changed && state.server.read().await.is_some()
     };
@@ -1248,7 +1233,10 @@ async fn reset_circuit_breaker(
     provider_id: String,
 ) -> Result<(), String> {
     for group in route_aggregation::RouteGroup::ALL {
-        state.provider_router.reset_breaker(&provider_id, group).await;
+        state
+            .provider_router
+            .reset_breaker(&provider_id, group)
+            .await;
     }
     Ok(())
 }
@@ -1353,9 +1341,7 @@ fn reveal_route_aggregation_log_file(
 /// 模型列表）。即使该列表为空也**不**再向供应商远端 /v1/models 拉取——配置侧的
 /// 自定义列表即为对外暴露的全部模型。
 #[tauri::command]
-async fn get_route_provider_models(
-    provider_id: String,
-) -> Result<Vec<String>, String> {
+async fn get_route_provider_models(provider_id: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let rows = db::load_ai_provider_rows()?;
         let row = rows
@@ -1407,7 +1393,12 @@ async fn check_project_config_exists(
     skill_ids: Vec<String>,
 ) -> Result<project_config::CheckResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        project_config::check_project_config_exists(&target_dir, &selected_agents, &mode, &skill_ids)
+        project_config::check_project_config_exists(
+            &target_dir,
+            &selected_agents,
+            &mode,
+            &skill_ids,
+        )
     })
     .await
     .map_err(|e| format!("检查项目配置任务失败: {e}"))?
@@ -1447,8 +1438,15 @@ async fn init_project_config(
 #[cfg(target_os = "macos")]
 fn theme_is_dark(theme_id: &str) -> bool {
     const DARK_HINTS: &[&str] = &[
-        "dark", "night", "dracula", "monokai", "nord",
-        "palenight", "cobalt", "synthwave", "mocha",
+        "dark",
+        "night",
+        "dracula",
+        "monokai",
+        "nord",
+        "palenight",
+        "cobalt",
+        "synthwave",
+        "mocha",
     ];
     DARK_HINTS.iter().any(|h| theme_id.contains(h))
 }
@@ -1644,8 +1642,7 @@ pub fn run() {
             }
 
             // Route aggregation: load config and register global state.
-            let mut ra_config = route_aggregation::config::load_config()
-                .unwrap_or_default();
+            let mut ra_config = route_aggregation::config::load_config().unwrap_or_default();
             // Auto-generate the primary endpoint API key on first use.
             if ra_config.api_keys.is_empty() {
                 ra_config
@@ -1660,10 +1657,7 @@ pub fn run() {
             if let Ok(dir) = crate::platform::app_data_dir() {
                 let log_path = dir.join("logs").join("route_aggregation.log");
                 if let Some(file) = route_aggregation::LogFile::open(&log_path) {
-                    eprintln!(
-                        "[route-aggregation] logging to {}",
-                        file.path().display()
-                    );
+                    eprintln!("[route-aggregation] logging to {}", file.path().display());
                     ra_state.log_store.attach_file(file);
                 }
             }

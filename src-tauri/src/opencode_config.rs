@@ -253,15 +253,12 @@ pub(crate) fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = parent.join(format!(
         ".{}.agentbuddy-{}-{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("tmp"),
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         std::process::id(),
         TMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     {
-        let mut f =
-            fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {e}"))?;
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {e}"))?;
         f.write_all(content.as_bytes())
             .map_err(|e| format!("写入临时文件失败: {e}"))?;
         f.sync_all().ok();
@@ -403,11 +400,9 @@ pub(crate) fn string_list(v: &Value, key: &str) -> Vec<String> {
 }
 
 pub(crate) fn f64_opt(v: &Value, key: &str) -> Option<f64> {
-    v.get(key).and_then(|x| x.as_f64()).or_else(|| {
-        v.get(key)
-            .and_then(|x| x.as_i64())
-            .map(|n| n as f64)
-    })
+    v.get(key)
+        .and_then(|x| x.as_f64())
+        .or_else(|| v.get(key).and_then(|x| x.as_i64()).map(|n| n as f64))
 }
 
 pub(crate) fn bool_opt(v: &Value, key: &str) -> Option<bool> {
@@ -439,11 +434,7 @@ fn parse_model(id: &str, raw: &Value) -> AgentModelView {
     let thinking_budget_tokens = thinking
         .get("budgetTokens")
         .and_then(|b| b.as_u64())
-        .or_else(|| {
-            thinking
-                .get("budget_tokens")
-                .and_then(|b| b.as_u64())
-        });
+        .or_else(|| thinking.get("budget_tokens").and_then(|b| b.as_u64()));
 
     let reasoning_effort = options
         .get("reasoningEffort")
@@ -523,10 +514,7 @@ fn parse_provider(id: &str, raw: &Value, auth: &Map<String, Value>) -> AgentProv
         .get("models")
         .and_then(|m| m.as_object())
         .map(|obj| {
-            let mut list: Vec<_> = obj
-                .iter()
-                .map(|(mid, mv)| parse_model(mid, mv))
-                .collect();
+            let mut list: Vec<_> = obj.iter().map(|(mid, mv)| parse_model(mid, mv)).collect();
             list.sort_by(|a, b| a.id.cmp(&b.id));
             list
         })
@@ -586,9 +574,7 @@ pub fn get_config() -> Result<AgentModelConfigView, String> {
     let auth = load_auth().unwrap_or_default();
     let mut warnings = Vec::new();
     if exists && is_jsonc {
-        warnings.push(
-            "当前配置为 JSONC；保存后注释与部分格式会被规范化为标准 JSON。".into(),
-        );
+        warnings.push("当前配置为 JSONC；保存后注释与部分格式会被规范化为标准 JSON。".into());
     }
 
     // Not installed → still return path metadata so empty-state copy can mention it,
@@ -694,7 +680,10 @@ pub fn set_defaults(payload: SetDefaultsPayload) -> Result<AgentActionResult, St
     })
 }
 
-fn provider_object_mut<'a>(root: &'a mut Value, id: &str) -> Result<&'a mut Map<String, Value>, String> {
+fn provider_object_mut<'a>(
+    root: &'a mut Value,
+    id: &str,
+) -> Result<&'a mut Map<String, Value>, String> {
     let root_obj = root
         .as_object_mut()
         .ok_or_else(|| "配置根节点无效".to_string())?;
@@ -872,7 +861,10 @@ pub fn upsert_provider(payload: UpsertProviderPayload) -> Result<AgentActionResu
     })
 }
 
-pub fn delete_provider(provider_id: String, delete_auth: bool) -> Result<AgentActionResult, String> {
+pub fn delete_provider(
+    provider_id: String,
+    delete_auth: bool,
+) -> Result<AgentActionResult, String> {
     let id = provider_id.trim().to_string();
     if id.is_empty() {
         return Err("供应商 ID 不能为空".into());
@@ -1224,10 +1216,7 @@ pub fn get_provider_secret(provider_id: String) -> Result<String, String> {
     }
     // fallback config options.apiKey
     let (_, _, root, _) = load_or_empty_config()?;
-    if let Some(p) = root
-        .get("provider")
-        .and_then(|p| p.get(&id))
-    {
+    if let Some(p) = root.get("provider").and_then(|p| p.get(&id)) {
         if let Some(k) = config_get_key(p) {
             return Ok(k);
         }
@@ -1235,7 +1224,10 @@ pub fn get_provider_secret(provider_id: String) -> Result<String, String> {
     Ok(String::new())
 }
 
-pub fn set_provider_secret(provider_id: String, api_key: String) -> Result<AgentActionResult, String> {
+pub fn set_provider_secret(
+    provider_id: String,
+    api_key: String,
+) -> Result<AgentActionResult, String> {
     upsert_provider(UpsertProviderPayload {
         id: provider_id,
         previous_id: None,
@@ -1408,7 +1400,10 @@ fn load_file_cache() -> Option<ModelsDevCatalog> {
         primary
     } else {
         // 兼容旧版本的缓存位置；成功读取后会写入新位置。
-        crate::config::app_dir().ok()?.join("cache").join("models-dev.json")
+        crate::config::app_dir()
+            .ok()?
+            .join("cache")
+            .join("models-dev.json")
     };
     let raw = fs::read_to_string(&path).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
@@ -1426,8 +1421,8 @@ fn save_file_cache(cat: &ModelsDevCatalog) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建 Models.dev 缓存目录失败: {e}"))?;
     }
-    let text = serde_json::to_string(cat)
-        .map_err(|e| format!("序列化 Models.dev 缓存失败: {e}"))?;
+    let text =
+        serde_json::to_string(cat).map_err(|e| format!("序列化 Models.dev 缓存失败: {e}"))?;
     atomic_write(&path, &text)
 }
 
@@ -1505,9 +1500,7 @@ pub fn probe_models_endpoint(base_url: String) -> Result<ProbeModelsResult, Stri
             model_ids: vec![],
         });
     }
-    let v: Value = resp
-        .json()
-        .map_err(|e| format!("解析响应失败: {e}"))?;
+    let v: Value = resp.json().map_err(|e| format!("解析响应失败: {e}"))?;
     let mut ids = Vec::new();
     if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
         for item in arr {
@@ -1607,7 +1600,11 @@ mod tests {
                 }
             }
         });
-        fs::write(h.config_file(), serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+        fs::write(
+            h.config_file(),
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
 
         upsert_model(UpsertModelPayload {
             provider_id: "local".into(),
@@ -1663,11 +1660,7 @@ mod tests {
     #[test]
     fn auth_secret_roundtrip_not_in_view() {
         let h = TempHome::new();
-        fs::write(
-            h.config_file(),
-            r#"{"provider":{"demo":{"name":"Demo"}}}"#,
-        )
-        .unwrap();
+        fs::write(h.config_file(), r#"{"provider":{"demo":{"name":"Demo"}}}"#).unwrap();
 
         set_provider_secret("demo".into(), "sk-test-secret".into()).unwrap();
         let view = get_config().unwrap();
@@ -1711,7 +1704,8 @@ mod tests {
         delete_provider("b".into(), true).unwrap();
         let view = get_config().unwrap();
         assert_eq!(view.providers.len(), 1);
-        let raw: Value = serde_json::from_str(&fs::read_to_string(h.config_file()).unwrap()).unwrap();
+        let raw: Value =
+            serde_json::from_str(&fs::read_to_string(h.config_file()).unwrap()).unwrap();
         assert!(raw.get("mcp").is_some());
     }
 
@@ -1785,7 +1779,10 @@ mod tests {
         let now = 1_000_000;
         assert!(catalog_cache_is_fresh(Some(now), now));
         assert!(catalog_cache_is_fresh(Some(now - 7 * 24 * 60 * 60), now));
-        assert!(!catalog_cache_is_fresh(Some(now - 7 * 24 * 60 * 60 - 1), now));
+        assert!(!catalog_cache_is_fresh(
+            Some(now - 7 * 24 * 60 * 60 - 1),
+            now
+        ));
         assert!(!catalog_cache_is_fresh(Some(now + 1), now));
         assert!(!catalog_cache_is_fresh(None, now));
     }

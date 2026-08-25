@@ -406,8 +406,8 @@ impl Default for ProviderRouter {
 
 #[cfg(test)]
 mod resolve_tests {
-    use super::{CONTEXT_1M_SUFFIX, ProviderRouter};
     use super::super::types::RouteProvider;
+    use super::{ProviderRouter, CONTEXT_1M_SUFFIX};
 
     fn resolve(
         providers: Vec<RouteProvider>,

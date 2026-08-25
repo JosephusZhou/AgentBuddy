@@ -222,8 +222,8 @@ pub fn test_connection(id: String) -> Result<WebDavTestResult, String> {
         return Err("连接 ID 不能为空".to_string());
     }
 
-    let row = db::get_webdav_connection_row(&id)?
-        .ok_or_else(|| format!("WebDAV 连接不存在: {}", id))?;
+    let row =
+        db::get_webdav_connection_row(&id)?.ok_or_else(|| format!("WebDAV 连接不存在: {}", id))?;
 
     let master = config::load_secrets_key()?;
     let password = crypto::decrypt_secret(
@@ -297,8 +297,7 @@ fn build_client() -> Result<Client, String> {
 fn auth_header(username: &str, password: &str) -> Result<HeaderValue, String> {
     use base64::{engine::general_purpose::STANDARD as B64, Engine};
     let token = B64.encode(format!("{}:{}", username, password));
-    HeaderValue::from_str(&format!("Basic {}", token))
-        .map_err(|e| format!("无效的认证头: {}", e))
+    HeaderValue::from_str(&format!("Basic {}", token)).map_err(|e| format!("无效的认证头: {}", e))
 }
 
 fn send_propfind(
@@ -549,7 +548,10 @@ pub fn upload_file(
     file_name: &str,
     local_path: &Path,
 ) -> Result<String, String> {
-    if file_name.contains('/') || file_name.contains('\\') || file_name == ".." || file_name.is_empty()
+    if file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name == ".."
+        || file_name.is_empty()
     {
         return Err("非法的远程文件名".to_string());
     }
@@ -582,7 +584,8 @@ pub fn upload_file(
     headers.insert(AUTHORIZATION, auth_header(username, password)?);
     headers.insert(
         CONTENT_TYPE,
-        HeaderValue::from_str(content_type).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        HeaderValue::from_str(content_type)
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
 
     let response = client
@@ -655,7 +658,9 @@ fn build_transfer_client(timeout: Duration) -> Result<Client, String> {
         .map_err(|e| format!("无法创建 HTTP 客户端: {}", e))
 }
 
-fn resolve_connection_auth(connection_id: &str) -> Result<(String, String, String, String), String> {
+fn resolve_connection_auth(
+    connection_id: &str,
+) -> Result<(String, String, String, String), String> {
     // (name, base_url, username, password)
     let row = db::get_webdav_connection_row(connection_id)?
         .ok_or_else(|| format!("WebDAV 连接不存在: {}", connection_id))?;
@@ -886,7 +891,11 @@ fn is_self_href(href: &str, dir_url: &str) -> bool {
         return true;
     }
     // Relative href like /remote.php/dav/files/u/AgentBuddy
-    if let Some(path) = b.split("://").nth(1).and_then(|s| s.find('/').map(|i| &s[i..])) {
+    if let Some(path) = b
+        .split("://")
+        .nth(1)
+        .and_then(|s| s.find('/').map(|i| &s[i..]))
+    {
         let path = path.trim_end_matches('/');
         if a.trim_end_matches('/').eq_ignore_ascii_case(path) {
             return true;
@@ -931,7 +940,10 @@ pub fn download_file(
     file_name: &str,
     local_path: &Path,
 ) -> Result<u64, String> {
-    if file_name.contains('/') || file_name.contains('\\') || file_name == ".." || file_name.is_empty()
+    if file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name == ".."
+        || file_name.is_empty()
     {
         return Err("非法的远程文件名".to_string());
     }
@@ -1091,9 +1103,14 @@ mod tests {
 
     #[test]
     fn join_url_encodes_and_trims() {
-        let u = join_webdav_url("https://dav.example.com/remote.php/dav/files/u/", &["AgentBuddy/backups", "2026", "07", "a b.zip"])
-            .unwrap();
-        assert!(u.starts_with("https://dav.example.com/remote.php/dav/files/u/AgentBuddy/backups/2026/07/"));
+        let u = join_webdav_url(
+            "https://dav.example.com/remote.php/dav/files/u/",
+            &["AgentBuddy/backups", "2026", "07", "a b.zip"],
+        )
+        .unwrap();
+        assert!(u.starts_with(
+            "https://dav.example.com/remote.php/dav/files/u/AgentBuddy/backups/2026/07/"
+        ));
         assert!(u.contains("a%20b.zip"));
     }
 
@@ -1165,9 +1182,6 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "agentbuddy-backup-20260819102722.abenc");
         assert_eq!(entries[0].bytes, 25_794_969);
-        assert_eq!(
-            entries[0].last_modified,
-            "Wed, 19 Aug 2026 02:27:22 GMT"
-        );
+        assert_eq!(entries[0].last_modified, "Wed, 19 Aug 2026 02:27:22 GMT");
     }
 }

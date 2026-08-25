@@ -511,10 +511,7 @@ fn parse_command_field(command: Option<&Value>, args: Option<&Value>) -> (String
         let rest = parts[1..].to_vec();
         return (cmd, rest);
     }
-    let cmd = command
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let cmd = command.and_then(|v| v.as_str()).unwrap_or("").to_string();
     let arg_list = match args {
         Some(Value::Array(arr)) => arr
             .iter()
@@ -696,8 +693,8 @@ struct ResolvedTarget {
 
 fn resolve_target(agent: &str) -> Result<ResolvedTarget, OpError> {
     let h = home()?;
-    let spec = crate::agents::find(agent)
-        .ok_or_else(|| err(None, format!("未知 Agent: {agent}")))?;
+    let spec =
+        crate::agents::find(agent).ok_or_else(|| err(None, format!("未知 Agent: {agent}")))?;
     let dialect = spec.mcp.dialect;
     match spec.mcp.path {
         McpPath::Fixed(rel) => Ok(ResolvedTarget {
@@ -753,9 +750,7 @@ fn resolve_target(agent: &str) -> Result<ResolvedTarget, OpError> {
 /// Resolve the on-disk MCP config file path for an agent (no I/O beyond existence probes
 /// already used by dialect-specific path selection). Used by agent open/reveal helpers.
 pub(crate) fn resolve_mcp_path(agent: &str) -> Result<PathBuf, String> {
-    resolve_target(agent)
-        .map(|t| t.path)
-        .map_err(|e| e.message)
+    resolve_target(agent).map(|t| t.path).map_err(|e| e.message)
 }
 
 /// Write one MCP draft into an arbitrary config file using the given dialect.
@@ -787,7 +782,9 @@ fn resolve_claude_desktop_config(home: &Path) -> Result<PathBuf, OpError> {
     Ok(claude_desktop_config_paths(home)
         .into_iter()
         .next()
-        .unwrap_or_else(|| home.join("Library/Application Support/Claude/claude_desktop_config.json")))
+        .unwrap_or_else(|| {
+            home.join("Library/Application Support/Claude/claude_desktop_config.json")
+        }))
 }
 
 /// Return every existing Claude Desktop MCP configuration in a deterministic order.
@@ -873,9 +870,14 @@ fn apply_one(agent: &str, title: &str, draft: &McpDraft) -> Result<PathBuf, OpEr
     let target = resolve_target(agent)?;
     match target.dialect {
         Dialect::TomlMcpServers => apply_toml_mcp_servers(&target.path, title, draft),
-        Dialect::JsonMcpServers => {
-            apply_json_object_key(&target.path, "mcpServers", title, draft, false, target.jsonc)
-        }
+        Dialect::JsonMcpServers => apply_json_object_key(
+            &target.path,
+            "mcpServers",
+            title,
+            draft,
+            false,
+            target.jsonc,
+        ),
         Dialect::JsonMcp => {
             apply_json_object_key(&target.path, "mcp", title, draft, true, target.jsonc)
         }
@@ -908,7 +910,9 @@ fn remove_one(agent: &str, title: &str) -> Result<PathBuf, OpError> {
             remove_json_object_key(&target.path, "mcpServers", title, target.jsonc)
         }
         Dialect::JsonMcp => remove_json_object_key(&target.path, "mcp", title, target.jsonc),
-        Dialect::JsonGeminiMixed => remove_json_object_key(&target.path, "mcpServers", title, false),
+        Dialect::JsonGeminiMixed => {
+            remove_json_object_key(&target.path, "mcpServers", title, false)
+        }
         Dialect::ClaudeJsonUser => remove_claude_json(&target.path, title),
     }
 }
@@ -1225,12 +1229,7 @@ fn jsonc_locate_root_object_open(raw: &str, root_key: &str) -> Option<usize> {
 
 /// 保留注释地在 JSONC 文件的 `root_key` 对象内插入一个**新** key（`title`）。
 /// 插入后用 json5 重新校验；校验不过返回 None 交由调用方回退整体重写。
-fn jsonc_insert_new_key(
-    raw: &str,
-    root_key: &str,
-    title: &str,
-    entry: &Value,
-) -> Option<String> {
+fn jsonc_insert_new_key(raw: &str, root_key: &str, title: &str, entry: &Value) -> Option<String> {
     let open = jsonc_locate_root_object_open(raw, root_key)?;
     let entry_text = serde_json::to_string_pretty(entry).ok()?;
     // 对象内属性再缩进一层（首行紧跟 "title": 不加前缀，其余行 +4 空格）。
@@ -1596,10 +1595,9 @@ fn test_http(draft: &McpDraft) -> McpTestResult {
         let builder = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .user_agent("AgentBuddy/0.1 (MCP probe)");
-        match crate::http_client::apply_proxy(builder).and_then(|b| {
-            b.build()
-                .map_err(|e| format!("HTTP 客户端创建失败: {}", e))
-        }) {
+        match crate::http_client::apply_proxy(builder)
+            .and_then(|b| b.build().map_err(|e| format!("HTTP 客户端创建失败: {}", e)))
+        {
             Ok(c) => c,
             Err(e) => {
                 return McpTestResult {
@@ -1889,7 +1887,10 @@ mod tests {
             &std::fs::read_to_string(home.join(".gemini/settings.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(gm2["mcpServers"][title2]["httpUrl"], "https://example.com/mcp");
+        assert_eq!(
+            gm2["mcpServers"][title2]["httpUrl"],
+            "https://example.com/mcp"
+        );
 
         // cleanup
         let r3 = remove_mcp_from_agents(title, &agents);

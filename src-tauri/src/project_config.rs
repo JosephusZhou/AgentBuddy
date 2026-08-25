@@ -198,18 +198,19 @@ fn resolve_target_dir(target_dir: &str) -> Result<PathBuf, String> {
     }
     let base = PathBuf::from(trimmed);
     if !base.is_dir() {
-        return Err(format!(
-            "目标目录不存在或不是目录: {}",
-            base.display()
-        ));
+        return Err(format!("目标目录不存在或不是目录: {}", base.display()));
     }
     Ok(base)
 }
 
 fn root_file_template(root_file: &str) -> &'static str {
     match root_file {
-        "CLAUDE.md" => "# CLAUDE.md\n\nRead `AGENTS.md` for full project guidance before any work.\n",
-        "GEMINI.md" => "# gemini.md\n\nRead `AGENTS.md` for full project guidance before any work.\n",
+        "CLAUDE.md" => {
+            "# CLAUDE.md\n\nRead `AGENTS.md` for full project guidance before any work.\n"
+        }
+        "GEMINI.md" => {
+            "# gemini.md\n\nRead `AGENTS.md` for full project guidance before any work.\n"
+        }
         _ => "# Project AI Configuration\n",
     }
 }
@@ -239,14 +240,8 @@ fn remove_entry_for_overwrite(path: &Path) -> Result<(), String> {
     if ft.is_symlink() {
         // Unix: remove_file drops any symlink. Windows dir symlinks may need remove_dir.
         if let Err(e) = fs::remove_file(path) {
-            fs::remove_dir(path).map_err(|e2| {
-                format!(
-                    "删除软链接 {} 失败: {} / {}",
-                    path.display(),
-                    e,
-                    e2
-                )
-            })?;
+            fs::remove_dir(path)
+                .map_err(|e2| format!("删除软链接 {} 失败: {} / {}", path.display(), e, e2))?;
         }
         return Ok(());
     }
@@ -257,8 +252,8 @@ fn remove_entry_for_overwrite(path: &Path) -> Result<(), String> {
     }
 
     if ft.is_dir() {
-        let mut rd = fs::read_dir(path)
-            .map_err(|e| format!("读取目录 {} 失败: {}", path.display(), e))?;
+        let mut rd =
+            fs::read_dir(path).map_err(|e| format!("读取目录 {} 失败: {}", path.display(), e))?;
         if rd.next().is_some() {
             return Err(format!(
                 "拒绝删除非空目录 {}（可能含用户数据）；请手动处理后重试或选择「跳过已存在」",
@@ -289,10 +284,7 @@ fn write_file(
         if let Ok(meta) = fs::symlink_metadata(path) {
             let ft = meta.file_type();
             if ft.is_dir() && !ft.is_symlink() {
-                errors.push(format!(
-                    "路径 {} 是目录，无法覆盖为文件",
-                    path.display()
-                ));
+                errors.push(format!("路径 {} 是目录，无法覆盖为文件", path.display()));
                 return;
             }
             if let Err(e) = remove_entry_for_overwrite(path) {
@@ -399,10 +391,7 @@ pub fn check_project_config_exists(
     let mut push_existing = |path: PathBuf, is_dir: bool| {
         let key = path.to_string_lossy().to_string();
         if seen_paths.insert(key.clone()) && entry_present(&path) {
-            existing.push(ExistingItem {
-                path: key,
-                is_dir,
-            });
+            existing.push(ExistingItem { path: key, is_dir });
         }
     };
 
@@ -811,8 +800,16 @@ mod tests {
 
     #[test]
     fn rejects_empty_or_missing_target_dir() {
-        let err = init_project_config("", &[req("claude-code")], &InitMode::Full, false, &[], &[], SkillInstallMode::Link)
-            .unwrap_err();
+        let err = init_project_config(
+            "",
+            &[req("claude-code")],
+            &InitMode::Full,
+            false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap_err();
         assert!(err.contains("空"), "{err}");
 
         let missing = std::env::temp_dir().join("agentbuddy-projcfg-missing-nope");
@@ -834,13 +831,17 @@ mod tests {
     fn full_mode_creates_shared_guide_and_codebuddy_cn_dir() {
         let base = scratch("full-dedupe");
         let agents = vec![req("codebuddy-cn"), req("codex"), req("opencode")];
-        let result =
-            init_project_config(base.to_str().unwrap(), &agents, &InitMode::Full, false, &[], &[], SkillInstallMode::Link).unwrap();
-        assert!(
-            result.errors.is_empty(),
-            "errors: {:?}",
-            result.errors
-        );
+        let result = init_project_config(
+            base.to_str().unwrap(),
+            &agents,
+            &InitMode::Full,
+            false,
+            &[],
+            &[],
+            SkillInstallMode::Link,
+        )
+        .unwrap();
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
 
         assert!(base.join("AGENTS.md").is_file());
         let agents_md = fs::read_to_string(base.join("AGENTS.md")).unwrap();
@@ -1023,13 +1024,7 @@ mod tests {
         )
         .unwrap();
         let paths: Vec<_> = result.existing.iter().map(|e| e.path.clone()).collect();
-        assert_eq!(
-            paths
-                .iter()
-                .filter(|p| p.ends_with("AGENTS.md"))
-                .count(),
-            1
-        );
+        assert_eq!(paths.iter().filter(|p| p.ends_with("AGENTS.md")).count(), 1);
         assert!(paths.iter().any(|p| p.ends_with("CLAUDE.md")), "{paths:?}");
         assert!(paths.iter().any(|p| p.ends_with("AGENTS.md")), "{paths:?}");
         cleanup(&base);
@@ -1095,8 +1090,14 @@ mod tests {
 
         for config_dir in [".pi/agent", ".omp/agent"] {
             let link = base.join(config_dir).join("skills");
-            assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
-            assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../../.agents/skills"));
+            assert!(fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(
+                fs::read_link(&link).unwrap(),
+                PathBuf::from("../../.agents/skills")
+            );
             assert!(base.join(config_dir).join("../../.agents/skills").is_dir());
             assert!(!base.join(config_dir).join("commands").exists());
         }
@@ -1210,10 +1211,9 @@ mod tests {
         )
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
-        let doc: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(base.join(".gemini/settings.json")).unwrap(),
-        )
-        .unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(base.join(".gemini/settings.json")).unwrap())
+                .unwrap();
         assert_eq!(doc["theme"], "dark");
         assert_eq!(doc["mcpServers"]["keep"]["command"], "x");
         assert_eq!(doc["mcpServers"]["new-server"]["command"], "npx");
@@ -1279,7 +1279,10 @@ mod tests {
         for dir in [".claude", ".codebuddy"] {
             let link = base.join(dir).join("skills");
             assert!(
-                fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
                 "{dir}"
             );
             assert_eq!(

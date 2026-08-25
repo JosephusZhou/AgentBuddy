@@ -692,7 +692,11 @@ pub(crate) fn list_agent_skills(agent: &str) -> Vec<AgentSkillInfo> {
             by_id.entry(id.clone()).or_insert_with(|| {
                 let doc = read_skill_doc(&path);
                 AgentSkillInfo {
-                    title: if doc.name.is_empty() { id.clone() } else { doc.name },
+                    title: if doc.name.is_empty() {
+                        id.clone()
+                    } else {
+                        doc.name
+                    },
                     description: doc.description,
                     id,
                     path: path.to_string_lossy().to_string(),
@@ -1037,11 +1041,16 @@ pub fn check_skill_local_duplicate(path: String) -> Result<SkillDuplicateCheckRe
                 continue;
             }
             let doc = read_skill_doc(&path);
-            let meta = db::get_skill_meta(&id).unwrap_or_default().unwrap_or_default();
+            let meta = db::get_skill_meta(&id)
+                .unwrap_or_default()
+                .unwrap_or_default();
             let version = doc.version.clone();
             let source = meta.source.clone();
             // Index by dir id
-            existing_map.insert(id.trim().to_lowercase(), (id.clone(), version.clone(), source.clone()));
+            existing_map.insert(
+                id.trim().to_lowercase(),
+                (id.clone(), version.clone(), source.clone()),
+            );
             // Index by frontmatter name
             if !doc.name.trim().is_empty() {
                 existing_map.insert(doc.name.trim().to_lowercase(), (id, version, source));
@@ -1153,7 +1162,14 @@ pub fn add_skill_local(
                         .unwrap_or_default()
                 };
                 let overwrite_id = overwrite_map.get(&name_key).map(|s| s.as_str());
-                imported.push(import_skill_dir(&p, None, SkillSource::Local, None, &tag, overwrite_id)?);
+                imported.push(import_skill_dir(
+                    &p,
+                    None,
+                    SkillSource::Local,
+                    None,
+                    &tag,
+                    overwrite_id,
+                )?);
             }
         }
         if imported.is_empty() {
@@ -2904,8 +2920,7 @@ fn hash_skill_dir(dir: &Path) -> Result<String, String> {
             .strip_prefix(dir)
             .map_err(|e| format!("路径计算失败: {}", e))?;
         let rel_str = rel.to_string_lossy().replace('\\', "/");
-        let bytes = fs::read(path)
-            .map_err(|e| format!("读取文件 {} 失败: {}", rel_str, e))?;
+        let bytes = fs::read(path).map_err(|e| format!("读取文件 {} 失败: {}", rel_str, e))?;
         hasher.update(rel_str.as_bytes());
         hasher.update(b"\0");
         hasher.update(&bytes);
@@ -2967,7 +2982,9 @@ fn cleanup_clone_cache(keep: Option<&str>) {
     let Ok(rd) = fs::read_dir(&base) else {
         return;
     };
-    let keep_prefix = keep.and_then(|k| k.rsplit_once('-')).map(|(p, _)| p.to_string());
+    let keep_prefix = keep
+        .and_then(|k| k.rsplit_once('-'))
+        .map(|(p, _)| p.to_string());
     let now = now_secs();
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -2996,8 +3013,8 @@ fn cleanup_clone_cache(keep: Option<&str>) {
 fn cached_clone(repo_url: &str, owner: &str, repo: &str, sha: &str) -> Result<PathBuf, String> {
     cleanup_clone_cache(Some(&format!("{}-{}-{}", owner, repo, sha)));
     let dest = clone_cache_dir(owner, repo, sha);
-    let valid = dest.join(".git").exists()
-        && git_rev_parse(&dest).map(|h| h == sha).unwrap_or(false);
+    let valid =
+        dest.join(".git").exists() && git_rev_parse(&dest).map(|h| h == sha).unwrap_or(false);
     if valid {
         return Ok(dest);
     }
@@ -3160,7 +3177,10 @@ pub fn check_skill_updates() -> Result<SkillUpdateCheckResult, String> {
     let mut targets: Vec<Target> = Vec::new();
     let mut checked = 0usize;
     for skill in listed.skills {
-        if !skill.source.is_remote() || skill.github_owner.is_empty() || skill.github_repo.is_empty() {
+        if !skill.source.is_remote()
+            || skill.github_owner.is_empty()
+            || skill.github_repo.is_empty()
+        {
             continue;
         }
         checked += 1;
@@ -3182,10 +3202,9 @@ pub fn check_skill_updates() -> Result<SkillUpdateCheckResult, String> {
     }
 
     // Stage 1 (lightweight, concurrent): fetch each repo's remote HEAD.
-    let heads: Vec<Result<String, String>> =
-        map_bounded(&groups, 6, |g| {
-            remote_head_for_source(&g.source, &g.owner, &g.repo, &g.repo_url)
-        });
+    let heads: Vec<Result<String, String>> = map_bounded(&groups, 6, |g| {
+        remote_head_for_source(&g.source, &g.owner, &g.repo, &g.repo_url)
+    });
     let mut head_map: HashMap<String, Result<String, String>> = HashMap::new();
     for (g, h) in groups.iter().zip(heads) {
         head_map.insert(g.key.clone(), h);
@@ -3218,7 +3237,12 @@ pub fn check_skill_updates() -> Result<SkillUpdateCheckResult, String> {
             _ => return Err("缺少远端 HEAD".into()),
         };
         let url = if g.repo_url.is_empty() {
-            format!("https://{}/{}/{}", host_domain_for(&g.source), g.owner, g.repo)
+            format!(
+                "https://{}/{}/{}",
+                host_domain_for(&g.source),
+                g.owner,
+                g.repo
+            )
         } else {
             g.repo_url.clone()
         };
@@ -3859,7 +3883,12 @@ pub fn update_skill(skill_id: String) -> Result<SkillActionResult, String> {
         });
     }
 
-    let repo_url = repo_base_url(&meta.source, &meta.repo_url, &meta.github_owner, &meta.github_repo);
+    let repo_url = repo_base_url(
+        &meta.source,
+        &meta.repo_url,
+        &meta.github_owner,
+        &meta.github_repo,
+    );
     let clone_url = format!("{}.git", repo_url.trim_end_matches(".git"));
 
     // 优先内容寻址克隆缓存（与检查更新共享）；解析不到 HEAD 时退回一次性临时克隆。
@@ -3967,7 +3996,12 @@ pub fn update_skills_batch(ids: Vec<String>) -> Result<BatchSkillResult, String>
                 return invalid("缺少仓库信息，无法更新");
             }
             Ok(Item {
-                repo_url: repo_base_url(&meta.source, &meta.repo_url, &meta.github_owner, &meta.github_repo),
+                repo_url: repo_base_url(
+                    &meta.source,
+                    &meta.repo_url,
+                    &meta.github_owner,
+                    &meta.github_repo,
+                ),
                 id: id.clone(),
                 title: title_of(&lib, &id),
                 meta,
@@ -4015,8 +4049,7 @@ pub fn update_skills_batch(ids: Vec<String>) -> Result<BatchSkillResult, String>
                         Ok(clone_dir) => (|| -> Result<(), String> {
                             let src = locate_skill_in_clone(clone_dir, &item.meta.github_path)
                                 .ok_or_else(|| {
-                                    "远端仓库中未找到该技能目录（可能已被移动或删除）"
-                                        .to_string()
+                                    "远端仓库中未找到该技能目录（可能已被移动或删除）".to_string()
                                 })?;
                             let new_hash = replace_skill_from_clone(&lib, &item.id, &src)?;
                             finalize_skill_update(&item.id, clone_dir, new_hash);
@@ -4119,10 +4152,7 @@ body
         };
         let a = base.join("a");
         let b = base.join("b");
-        write(
-            &a,
-            &[("SKILL.md", "# demo"), ("scripts/run.sh", "echo hi")],
-        );
+        write(&a, &[("SKILL.md", "# demo"), ("scripts/run.sh", "echo hi")]);
         // Same content plus hidden noise (.git / .DS_Store) must hash equal.
         write(
             &b,

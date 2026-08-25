@@ -36,8 +36,8 @@ use tokio::sync::RwLock;
 pub use types::*;
 
 // Re-export key types used across modules and in lib.rs/config.rs.
-pub use config::RouteAggregationConfig;
 pub use circuit_breaker::CircuitBreakerSnapshot;
+pub use config::RouteAggregationConfig;
 pub use log::{LogEntry, LogStore};
 pub use logfile::LogFile;
 

@@ -210,7 +210,10 @@ fn normalize_provider_type(raw: &str) -> Result<String, String> {
 /// 过滤档位模型映射：仅保留允许的档位键、去除空值；仅 anthropic/universal 保留。
 /// OpenAI 类型没有 `haiku`/`sonnet`/`opus`/`fable` 这类档位概念，
 /// 无论前端是否误传都强制清空，避免在 Claude/Codex 环境回写时混入无效档位。
-fn normalize_models(provider_type: &str, models: &HashMap<String, String>) -> HashMap<String, String> {
+fn normalize_models(
+    provider_type: &str,
+    models: &HashMap<String, String>,
+) -> HashMap<String, String> {
     if provider_type == TYPE_OPENAI {
         return HashMap::new();
     }
@@ -247,11 +250,7 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
     let name = payload.name.trim().to_string();
     let provider_type = normalize_provider_type(&payload.provider_type)?;
     let base_url = payload.base_url.trim().to_string();
-    let default_model = payload
-        .default_model
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let default_model = payload.default_model.unwrap_or_default().trim().to_string();
     // OpenAI 默认模型仅通用类型保留
     let openai_default_model = if provider_type == TYPE_UNIVERSAL {
         payload
@@ -276,7 +275,10 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
     validate_base_url(&base_url)?;
 
     let empty_models = HashMap::new();
-    let models = normalize_models(&provider_type, payload.models.as_ref().unwrap_or(&empty_models));
+    let models = normalize_models(
+        &provider_type,
+        payload.models.as_ref().unwrap_or(&empty_models),
+    );
     let models_json = serde_json::to_string(&models).unwrap_or_else(|_| "{}".into());
 
     let existing = db::get_ai_provider_row(&id)?;
@@ -311,7 +313,11 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
             .collect()
     } else if let Some(single) = payload.api_key.as_ref() {
         let s = single.trim().to_string();
-        if s.is_empty() { Vec::new() } else { vec![s] }
+        if s.is_empty() {
+            Vec::new()
+        } else {
+            vec![s]
+        }
     } else {
         Vec::new()
     };
@@ -342,7 +348,12 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
             .collect::<Result<Vec<_>, _>>()?;
         let json = serde_json::to_string(&encrypted).unwrap_or_else(|_| "[]".into());
         if let Some(first) = encrypted.first() {
-            (first.salt.clone(), first.nonce.clone(), first.cipher.clone(), json)
+            (
+                first.salt.clone(),
+                first.nonce.clone(),
+                first.cipher.clone(),
+                json,
+            )
         } else {
             (String::new(), String::new(), String::new(), json)
         }
@@ -398,30 +409,31 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
             serde_json::from_str(&row.models_json).unwrap_or_default();
 
         // 根据 provider_type 决定写入 Claude 环境 / Codex 环境的值。
-        let (claude_base, claude_model, codex_base, codex_model): (String, String, String, String) = match row.provider_type.as_str() {
-            TYPE_UNIVERSAL => {
-                let openai_base = derive_openai_base_url(&row.provider_type, &row.base_url);
-                (
+        let (claude_base, claude_model, codex_base, codex_model): (String, String, String, String) =
+            match row.provider_type.as_str() {
+                TYPE_UNIVERSAL => {
+                    let openai_base = derive_openai_base_url(&row.provider_type, &row.base_url);
+                    (
+                        row.base_url.clone(),
+                        row.default_model.clone(),
+                        openai_base,
+                        row.openai_default_model.clone(),
+                    )
+                }
+                TYPE_ANTHROPIC => (
                     row.base_url.clone(),
                     row.default_model.clone(),
-                    openai_base,
-                    row.openai_default_model.clone(),
-                )
-            }
-            TYPE_ANTHROPIC => (
-                row.base_url.clone(),
-                row.default_model.clone(),
-                String::new(),
-                String::new(),
-            ),
-            TYPE_OPENAI => (
-                String::new(),
-                String::new(),
-                row.base_url.clone(),
-                row.default_model.clone(),
-            ),
-            _ => (String::new(), String::new(), String::new(), String::new()),
-        };
+                    String::new(),
+                    String::new(),
+                ),
+                TYPE_OPENAI => (
+                    String::new(),
+                    String::new(),
+                    row.base_url.clone(),
+                    row.default_model.clone(),
+                ),
+                _ => (String::new(), String::new(), String::new(), String::new()),
+            };
 
         let mut sync_parts: Vec<String> = Vec::new();
 
@@ -437,7 +449,11 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
                     let part = if errs.is_empty() {
                         format!("已同步 {} 个 Claude 环境", synced)
                     } else {
-                        format!("已同步 {} 个 Claude 环境（失败: {}）", synced, errs.join("、"))
+                        format!(
+                            "已同步 {} 个 Claude 环境（失败: {}）",
+                            synced,
+                            errs.join("、")
+                        )
                     };
                     sync_parts.push(part);
                 }
@@ -459,7 +475,11 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
                     let part = if errs.is_empty() {
                         format!("已同步 {} 个 Codex 环境", synced)
                     } else {
-                        format!("已同步 {} 个 Codex 环境（失败: {}）", synced, errs.join("、"))
+                        format!(
+                            "已同步 {} 个 Codex 环境（失败: {}）",
+                            synced,
+                            errs.join("、")
+                        )
                     };
                     sync_parts.push(part);
                 }
@@ -508,12 +528,10 @@ pub fn get_provider_secret(id: String) -> Result<String, String> {
 /// 按需读取全部明文 API Key（编辑表单用）。
 /// 优先返回多 Key JSON 中的所有密钥；为空时回退到旧的单 Key 列。
 pub fn get_provider_secrets(id: String) -> Result<Vec<String>, String> {
-    let row = db::get_ai_provider_row(id.trim())?
-        .ok_or_else(|| "供应商不存在".to_string())?;
+    let row = db::get_ai_provider_row(id.trim())?.ok_or_else(|| "供应商不存在".to_string())?;
     let master = config::load_secrets_key()?;
     // 优先解析多 Key JSON
-    let enc_keys: Vec<EncryptedKey> =
-        serde_json::from_str(&row.api_keys_json).unwrap_or_default();
+    let enc_keys: Vec<EncryptedKey> = serde_json::from_str(&row.api_keys_json).unwrap_or_default();
     if !enc_keys.is_empty() {
         return enc_keys
             .iter()
@@ -620,7 +638,10 @@ mod tests {
         assert_eq!(p.default_model, "claude-sonnet-x");
         // 只允许合法档位键、丢弃空值
         assert_eq!(p.models.len(), 1);
-        assert_eq!(p.models.get("haiku").map(|s| s.as_str()), Some("claude-haiku-x"));
+        assert_eq!(
+            p.models.get("haiku").map(|s| s.as_str()),
+            Some("claude-haiku-x")
+        );
 
         // Secret roundtrip
         let secret = get_provider_secret(id.clone()).expect("secret");
@@ -676,7 +697,10 @@ mod tests {
         assert_eq!(p.default_model, "claude-sonnet-x");
         assert_eq!(p.openai_default_model, "gpt-5");
         // 通用类型保留 Anthropic 档位模型
-        assert_eq!(p.models.get("haiku").map(|s| s.as_str()), Some("claude-haiku-x"));
+        assert_eq!(
+            p.models.get("haiku").map(|s| s.as_str()),
+            Some("claude-haiku-x")
+        );
         delete_provider(id).expect("cleanup");
 
         // 非通用类型的 openai_default_model 被清空

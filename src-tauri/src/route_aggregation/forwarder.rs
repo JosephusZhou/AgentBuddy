@@ -103,7 +103,9 @@ pub async fn forward(
 
     if providers.is_empty() {
         return Err(ForwardError::NoAvailableProvider(
-            body.get("model").and_then(|v| v.as_str()).map(str::to_string),
+            body.get("model")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         ));
     }
 
@@ -111,7 +113,10 @@ pub async fn forward(
     // 直接剔除，避免浪费 round-trip。未配置自定义模型的 provider 保留，以支持
     // 用户手动指定模型 ID。命中 [1m] 变体时返回重写值（CC 已把后缀转为 beta 头，
     // 中转渠道需要完整变体 ID 才能路由）。
-    let request_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
+    let request_model = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let candidates =
         ProviderRouter::resolve_providers_for_model(providers, request_model.as_deref());
 
@@ -751,10 +756,7 @@ mod tests {
             super::ProviderFormat::Anthropic,
             &axum::http::HeaderMap::new(),
         );
-        assert!(headers.contains(&(
-            "x-api-key".to_string(),
-            "sk-provider-key".to_string()
-        )));
+        assert!(headers.contains(&("x-api-key".to_string(), "sk-provider-key".to_string())));
         assert!(!headers.iter().any(|(n, _)| n == "authorization"));
     }
 }

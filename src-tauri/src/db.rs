@@ -126,12 +126,42 @@ fn get_connection() -> Result<Connection, String> {
     // ADD COLUMN` errors if the column is already present, so ignore that case.
     ensure_column(&conn, "skills", "tag", "TEXT NOT NULL DEFAULT ''");
     ensure_column(&conn, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
-    ensure_column(&conn, "ai_providers", "openai_default_model", "TEXT NOT NULL DEFAULT ''");
-    ensure_column(&conn, "ai_providers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
-    ensure_column(&conn, "ai_providers", "api_keys_json", "TEXT NOT NULL DEFAULT '[]'");
-    ensure_column(&conn, "ai_providers", "custom_models_json", "TEXT NOT NULL DEFAULT '[]'");
-    ensure_column(&conn, "claude_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
-    ensure_column(&conn, "codex_environments", "provider_id", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(
+        &conn,
+        "ai_providers",
+        "openai_default_model",
+        "TEXT NOT NULL DEFAULT ''",
+    );
+    ensure_column(
+        &conn,
+        "ai_providers",
+        "sort_order",
+        "INTEGER NOT NULL DEFAULT 0",
+    );
+    ensure_column(
+        &conn,
+        "ai_providers",
+        "api_keys_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    );
+    ensure_column(
+        &conn,
+        "ai_providers",
+        "custom_models_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    );
+    ensure_column(
+        &conn,
+        "claude_environments",
+        "provider_id",
+        "TEXT NOT NULL DEFAULT ''",
+    );
+    ensure_column(
+        &conn,
+        "codex_environments",
+        "provider_id",
+        "TEXT NOT NULL DEFAULT ''",
+    );
 
     // Migration: provider route toggles are now unified (no per-route-group
     // switch). Fold legacy 'claude_code'/'codex' rows into a single 'unified'
@@ -157,7 +187,10 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, decl: &str) {
         let msg = e.to_string();
         // rusqlite surfaces "duplicate column name" when the column already exists.
         if !msg.contains("duplicate column name") {
-            eprintln!("[agent-buddy] ensure_column {}.{} failed: {}", table, column, msg);
+            eprintln!(
+                "[agent-buddy] ensure_column {}.{} failed: {}",
+                table, column, msg
+            );
         }
     }
 }
@@ -170,10 +203,10 @@ pub fn save_agents(agents: &[SniffResult]) -> Result<(), String> {
         .as_secs() as i64;
 
     for agent in agents {
-        let install_paths_json = serde_json::to_string(&agent.install_paths)
-            .unwrap_or_else(|_| "[]".to_string());
-        let config_dirs_json = serde_json::to_string(&agent.config_dirs)
-            .unwrap_or_else(|_| "[]".to_string());
+        let install_paths_json =
+            serde_json::to_string(&agent.install_paths).unwrap_or_else(|_| "[]".to_string());
+        let config_dirs_json =
+            serde_json::to_string(&agent.config_dirs).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
             "INSERT INTO agents (name, display_name, icon, install_paths, config_dirs, found, scan_time)
@@ -231,10 +264,10 @@ pub fn load_agents() -> Result<Vec<SniffResult>, String> {
             let install_paths_raw: String = row.get(3)?;
             let config_dirs_raw: String = row.get(4)?;
 
-            let install_paths: Vec<String> = serde_json::from_str(&install_paths_raw)
-                .unwrap_or_default();
-            let config_dirs: Vec<String> = serde_json::from_str(&config_dirs_raw)
-                .unwrap_or_default();
+            let install_paths: Vec<String> =
+                serde_json::from_str(&install_paths_raw).unwrap_or_default();
+            let config_dirs: Vec<String> =
+                serde_json::from_str(&config_dirs_raw).unwrap_or_default();
 
             Ok(SniffResult {
                 name: row.get(0)?,
@@ -761,11 +794,8 @@ pub fn upsert_claude_environment_row(row: &ClaudeEnvironmentRow) -> Result<(), S
 
 pub fn delete_claude_environment_row(id: &str) -> Result<(), String> {
     let conn = get_connection()?;
-    conn.execute(
-        "DELETE FROM claude_environments WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| format!("Failed to delete claude_env {}: {}", id, e))?;
+    conn.execute("DELETE FROM claude_environments WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete claude_env {}: {}", id, e))?;
     Ok(())
 }
 
@@ -901,11 +931,8 @@ pub fn upsert_codex_environment_row(row: &CodexEnvironmentRow) -> Result<(), Str
 
 pub fn delete_codex_environment_row(id: &str) -> Result<(), String> {
     let conn = get_connection()?;
-    conn.execute(
-        "DELETE FROM codex_environments WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| format!("Failed to delete codex_env {}: {}", id, e))?;
+    conn.execute("DELETE FROM codex_environments WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete codex_env {}: {}", id, e))?;
     Ok(())
 }
 
@@ -946,7 +973,9 @@ pub fn set_codex_env_alias_installed_all(installed: bool) -> Result<(), String> 
 }
 
 /// Find all non-default Claude environments linked to the given provider_id.
-pub fn load_claude_envs_by_provider(provider_id: &str) -> Result<Vec<ClaudeEnvironmentRow>, String> {
+pub fn load_claude_envs_by_provider(
+    provider_id: &str,
+) -> Result<Vec<ClaudeEnvironmentRow>, String> {
     let conn = get_connection()?;
     let mut stmt = conn
         .prepare(
@@ -1139,7 +1168,8 @@ pub fn reorder_ai_provider_rows(orders: &[(String, i64)]) -> Result<(), String> 
 /* ===== Provider route toggles (route aggregation) ===== */
 
 /// Load all unified provider toggle rows.
-pub fn load_provider_route_toggles() -> Result<Vec<crate::route_aggregation::ProviderRouteToggle>, String> {
+pub fn load_provider_route_toggles(
+) -> Result<Vec<crate::route_aggregation::ProviderRouteToggle>, String> {
     let conn = get_connection()?;
     let mut stmt = conn
         .prepare(

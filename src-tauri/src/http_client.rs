@@ -28,8 +28,7 @@ fn apply_custom_proxy(
     settings: &ProxySettings,
 ) -> Result<ClientBuilder, String> {
     let url = build_custom_proxy_url(settings)?;
-    let proxy =
-        Proxy::all(&url).map_err(|e| format!("无效的自定义代理地址「{}」: {}", url, e))?;
+    let proxy = Proxy::all(&url).map_err(|e| format!("无效的自定义代理地址「{}」: {}", url, e))?;
     Ok(builder.proxy(proxy))
 }
 
@@ -162,10 +161,7 @@ fn env_proxy_url() -> Option<String> {
 /// SOCKS → HTTPS → HTTP.
 #[cfg(target_os = "macos")]
 fn macos_system_proxy_url() -> Option<String> {
-    let output = Command::new("scutil")
-        .arg("--proxy")
-        .output()
-        .ok()?;
+    let output = Command::new("scutil").arg("--proxy").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -257,10 +253,7 @@ mod tests {
             username: String::new(),
             password: String::new(),
         };
-        assert_eq!(
-            build_custom_proxy_url(&s).unwrap(),
-            "http://127.0.0.1:7890"
-        );
+        assert_eq!(build_custom_proxy_url(&s).unwrap(), "http://127.0.0.1:7890");
     }
 
     #[test]

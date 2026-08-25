@@ -179,7 +179,11 @@ impl CircuitBreaker {
             last_error: self.last_error.lock().unwrap().clone(),
             last_error_at: {
                 let ts = self.last_error_at.load(Ordering::Relaxed);
-                if ts == 0 { None } else { Some(ts) }
+                if ts == 0 {
+                    None
+                } else {
+                    Some(ts)
+                }
             },
         }
     }
@@ -233,14 +237,17 @@ impl CircuitBreakerManager {
                 // We need to get the snapshot synchronously — but CircuitBreaker.snapshot is async.
                 // For now, return a placeholder; the real snapshot is obtained via ProviderRouter.
                 // This synchronous path is only used for quick checks.
-                result.push((pid.clone(), CircuitBreakerSnapshot {
-                    state: "closed".to_string(),
-                    consecutive_failures: 0,
-                    request_count: 0,
-                    success_count: 0,
-                    last_error: None,
-                    last_error_at: None,
-                }));
+                result.push((
+                    pid.clone(),
+                    CircuitBreakerSnapshot {
+                        state: "closed".to_string(),
+                        consecutive_failures: 0,
+                        request_count: 0,
+                        success_count: 0,
+                        last_error: None,
+                        last_error_at: None,
+                    },
+                ));
             }
         }
         result

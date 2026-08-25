@@ -54,7 +54,10 @@ pub fn decode_master_key(encoded: &str) -> Result<[u8; MASTER_KEY_LEN], String> 
 }
 
 /// Encrypt plaintext with a fresh per-row salt and nonce.
-pub fn encrypt_secret(master_key: &[u8; MASTER_KEY_LEN], plaintext: &str) -> Result<EncryptedSecret, String> {
+pub fn encrypt_secret(
+    master_key: &[u8; MASTER_KEY_LEN],
+    plaintext: &str,
+) -> Result<EncryptedSecret, String> {
     let mut salt = [0u8; SALT_LEN];
     let mut nonce_bytes = [0u8; NONCE_LEN];
     let mut rng = rand::thread_rng();
@@ -62,8 +65,8 @@ pub fn encrypt_secret(master_key: &[u8; MASTER_KEY_LEN], plaintext: &str) -> Res
     rng.fill_bytes(&mut nonce_bytes);
 
     let key = derive_key(master_key, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to init cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to init cipher: {}", e))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_bytes())
@@ -97,22 +100,28 @@ pub fn decrypt_secret(
         return Err(format!("Invalid password salt length: {}", salt.len()));
     }
     if nonce_bytes.len() != NONCE_LEN {
-        return Err(format!("Invalid password nonce length: {}", nonce_bytes.len()));
+        return Err(format!(
+            "Invalid password nonce length: {}",
+            nonce_bytes.len()
+        ));
     }
 
     let key = derive_key(master_key, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to init cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to init cipher: {}", e))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| "Failed to decrypt password (secretsKey mismatch or data corrupted)".to_string())?;
+    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| {
+        "Failed to decrypt password (secretsKey mismatch or data corrupted)".to_string()
+    })?;
 
     String::from_utf8(plaintext)
         .map_err(|e| format!("Decrypted password is not valid UTF-8: {}", e))
 }
 
-fn derive_key(master_key: &[u8; MASTER_KEY_LEN], salt: &[u8]) -> Result<[u8; MASTER_KEY_LEN], String> {
+fn derive_key(
+    master_key: &[u8; MASTER_KEY_LEN],
+    salt: &[u8],
+) -> Result<[u8; MASTER_KEY_LEN], String> {
     derive_key_with_info(master_key, salt, HKDF_INFO)
 }
 
@@ -199,8 +208,14 @@ mod tests {
         let b = encrypt_secret(&master, "same-password").unwrap();
         assert_ne!(a.cipher, b.cipher);
         assert_ne!(a.salt, b.salt);
-        assert_eq!(decrypt_secret(&master, &a.salt, &a.nonce, &a.cipher).unwrap(), "same-password");
-        assert_eq!(decrypt_secret(&master, &b.salt, &b.nonce, &b.cipher).unwrap(), "same-password");
+        assert_eq!(
+            decrypt_secret(&master, &a.salt, &a.nonce, &a.cipher).unwrap(),
+            "same-password"
+        );
+        assert_eq!(
+            decrypt_secret(&master, &b.salt, &b.nonce, &b.cipher).unwrap(),
+            "same-password"
+        );
     }
 
     #[test]

@@ -316,9 +316,7 @@ fn build_cliproxy_unit(settings: &BackupSettings) -> BackupUnitNode {
     let auth_dir = conf
         .as_ref()
         .and_then(|p| read_auth_dir_from_conf(p))
-        .or_else(|| {
-            dirs::home_dir().map(|h| h.join(".cli-proxy-api"))
-        });
+        .or_else(|| dirs::home_dir().map(|h| h.join(".cli-proxy-api")));
 
     let conf_exists = conf.as_ref().map(|p| p.is_file()).unwrap_or(false);
     let auth_exists = auth_dir.as_ref().map(|p| p.is_dir()).unwrap_or(false);
@@ -420,9 +418,7 @@ fn build_agents_group() -> BackupUnitNode {
 
         let sniff = found.get(spec.name);
         let is_found = sniff.map(|s| s.found).unwrap_or(false)
-            || sniff
-                .map(|s| !s.config_dirs.is_empty())
-                .unwrap_or(false);
+            || sniff.map(|s| !s.config_dirs.is_empty()).unwrap_or(false);
 
         match spec.name {
             "claude-code" => {
@@ -454,7 +450,10 @@ fn build_agents_group() -> BackupUnitNode {
         selected_by_default: available,
         contains_secrets: children.iter().any(|c| c.contains_secrets),
         estimated_bytes,
-        path_summary: format!("{} 个可备份", children.iter().filter(|c| c.available).count()),
+        path_summary: format!(
+            "{} 个可备份",
+            children.iter().filter(|c| c.available).count()
+        ),
         warnings: vec![],
         children,
     }
@@ -471,11 +470,7 @@ fn build_claude_agent_unit(
     // default env
     let default_dir = home.as_ref().map(|h| h.join(".claude"));
     let global_mcp = home.as_ref().map(|h| h.join(".claude.json"));
-    let def_bytes = estimate_claude_env_bytes(
-        default_dir.as_deref(),
-        global_mcp.as_deref(),
-        true,
-    );
+    let def_bytes = estimate_claude_env_bytes(default_dir.as_deref(), global_mcp.as_deref(), true);
     children.push(leaf_unit(
         "agent:claude-code:env:default",
         "默认环境 (~/.claude + ~/.claude.json)",
@@ -1034,7 +1029,10 @@ fn path_allowed_for_custom(path: &Path) -> bool {
     {
         // Default deny system directories; allow nothing outside home/appdata unless
         // it is clearly under the user profile via env-expanded forms already covered.
-        let s = canon.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
+        let s = canon
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .replace('/', "\\");
         if s.starts_with("c:\\windows")
             || s.contains("\\windows\\")
             || s.starts_with("c:\\program files")
@@ -1100,34 +1098,25 @@ pub fn run_backup_upload(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     // Overall steps: collect + zip + [encrypt] + each upload + finalize
-    let total_steps: u32 = 2
-        + if passphrase_preview.is_some() { 1 } else { 0 }
-        + upload_ids.len() as u32
-        + 1;
+    let total_steps: u32 =
+        2 + if passphrase_preview.is_some() { 1 } else { 0 } + upload_ids.len() as u32 + 1;
     let mut step: u32 = 0;
-    let mut advance = |app: &AppHandle,
-                       phase: &str,
-                       message: String,
-                       connection_id: Option<String>| {
-        step = step.saturating_add(1);
-        emit_backup_progress(
-            app,
-            BackupProgressEvent {
-                phase: phase.to_string(),
-                current: step.min(total_steps),
-                total: total_steps,
-                message,
-                connection_id,
-            },
-        );
-    };
+    let mut advance =
+        |app: &AppHandle, phase: &str, message: String, connection_id: Option<String>| {
+            step = step.saturating_add(1);
+            emit_backup_progress(
+                app,
+                BackupProgressEvent {
+                    phase: phase.to_string(),
+                    current: step.min(total_steps),
+                    total: total_steps,
+                    message,
+                    connection_id,
+                },
+            );
+        };
 
-    advance(
-        &app,
-        "collect",
-        "正在收集备份文件…".into(),
-        None,
-    );
+    advance(&app, "collect", "正在收集备份文件…".into(), None);
 
     let mut warnings = Vec::new();
     let entries = collect_entries(&unit_ids, &settings, &mut warnings)?;
@@ -1137,9 +1126,7 @@ pub fn run_backup_upload(
 
     let contains_secrets = entries.iter().any(|e| e.secrets)
         || unit_ids.iter().any(|id| {
-            id.starts_with("app:agentbuddy")
-                || id.starts_with("tool:")
-                || id.starts_with("agent:")
+            id.starts_with("app:agentbuddy") || id.starts_with("tool:") || id.starts_with("agent:")
         });
 
     let passphrase = passphrase_preview;
@@ -1164,10 +1151,7 @@ pub fn run_backup_upload(
     advance(
         &app,
         "zip",
-        format!(
-            "正在打包 {} 个文件…",
-            entries.len()
-        ),
+        format!("正在打包 {} 个文件…", entries.len()),
         None,
     );
 
@@ -1198,12 +1182,7 @@ pub fn run_backup_upload(
     )?;
 
     let final_path = if let Some(ref pass) = passphrase {
-        advance(
-            &app,
-            "encrypt",
-            "正在加密备份包…".into(),
-            None,
-        );
+        advance(&app, "encrypt", "正在加密备份包…".into(), None);
         let zip_bytes = fs::read(&zip_path).map_err(|e| format!("读取 zip 失败: {}", e))?;
         let enc = crypto::encrypt_backup_blob(pass, &zip_bytes)?;
         let out = staging.join(&archive_file_name);
@@ -1230,7 +1209,11 @@ pub fn run_backup_upload(
         .map(|s| s.trim().trim_matches('/').to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            let s = settings.default_remote_dir.trim().trim_matches('/').to_string();
+            let s = settings
+                .default_remote_dir
+                .trim()
+                .trim_matches('/')
+                .to_string();
             if s.is_empty() {
                 None
             } else {
@@ -1447,7 +1430,11 @@ fn resolve_remote_prefix(
         .map(|s| s.trim().trim_matches('/').to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            let s = settings.default_remote_dir.trim().trim_matches('/').to_string();
+            let s = settings
+                .default_remote_dir
+                .trim()
+                .trim_matches('/')
+                .to_string();
             if s.is_empty() {
                 None
             } else {
@@ -1658,8 +1645,7 @@ pub fn restore_remote_backup(
 
 fn extract_backup_zip(zip_path: &Path) -> Result<(u32, u32, Vec<String>), String> {
     let file = File::open(zip_path).map_err(|e| format!("打开备份 zip 失败: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
 
     // Prefer manifest origins when present.
     let mut origin_map: HashMap<String, String> = HashMap::new();
@@ -1671,14 +1657,9 @@ fn extract_backup_zip(zip_path: &Path) -> Result<(u32, u32, Vec<String>), String
                     for src in sources {
                         if let Some(items) = src.get("items").and_then(|x| x.as_array()) {
                             for item in items {
-                                let path = item
-                                    .get("path")
-                                    .and_then(|p| p.as_str())
-                                    .unwrap_or("");
-                                let origin = item
-                                    .get("origin")
-                                    .and_then(|p| p.as_str())
-                                    .unwrap_or("");
+                                let path = item.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                                let origin =
+                                    item.get("origin").and_then(|p| p.as_str()).unwrap_or("");
                                 if !path.is_empty() && !origin.is_empty() {
                                     origin_map.insert(path.to_string(), origin.to_string());
                                 }
@@ -1696,8 +1677,7 @@ fn extract_backup_zip(zip_path: &Path) -> Result<(u32, u32, Vec<String>), String
 
     // Re-open archive after reading manifest (ZipFile borrows).
     let file = File::open(zip_path).map_err(|e| format!("打开备份 zip 失败: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
 
     for i in 0..archive.len() {
         let mut entry = match archive.by_index(i) {
@@ -1797,7 +1777,10 @@ fn collect_entries(
 
     for id in &expanded {
         match id.as_str() {
-            "app:agentbuddy:config" | "app:agentbuddy" if unit_ids.contains("app:agentbuddy") || unit_ids.contains("app:agentbuddy:config") => {
+            "app:agentbuddy:config" | "app:agentbuddy"
+                if unit_ids.contains("app:agentbuddy")
+                    || unit_ids.contains("app:agentbuddy:config") =>
+            {
                 // handled below via flags
             }
             _ => {}
@@ -1849,7 +1832,10 @@ fn collect_entries(
     if unit_selected(&expanded, "tool:cliproxyapi") {
         if let Some(conf) = resolve_cliproxy_conf(settings) {
             if !path_allowed_for_custom(&conf) && conf.exists() {
-                warnings.push(format!("cliproxy 配置路径不在允许范围内，已跳过: {}", display_path(&conf)));
+                warnings.push(format!(
+                    "cliproxy 配置路径不在允许范围内，已跳过: {}",
+                    display_path(&conf)
+                ));
             } else {
                 push_file(
                     &mut out,
@@ -1881,7 +1867,10 @@ fn collect_entries(
     if unit_selected(&expanded, "tool:sub2api") {
         if let Some(root) = resolve_sub2api_root(settings) {
             if !path_allowed_for_custom(&root) && root.exists() {
-                warnings.push(format!("sub2api 路径不在允许范围内，已跳过: {}", display_path(&root)));
+                warnings.push(format!(
+                    "sub2api 路径不在允许范围内，已跳过: {}",
+                    display_path(&root)
+                ));
             } else {
                 let conf = if root.join("config.yaml").is_file() {
                     root.join("config.yaml")
@@ -1975,13 +1964,21 @@ fn collect_agent_entries(
     warnings: &mut Vec<String>,
 ) -> Result<(), String> {
     // Claude envs
-    for id in expanded.iter().filter(|id| id.starts_with("agent:claude-code:env:")) {
-        let env_id = id.strip_prefix("agent:claude-code:env:").unwrap_or("default");
+    for id in expanded
+        .iter()
+        .filter(|id| id.starts_with("agent:claude-code:env:"))
+    {
+        let env_id = id
+            .strip_prefix("agent:claude-code:env:")
+            .unwrap_or("default");
         collect_claude_env(env_id, out, warnings);
     }
 
     // Codex envs
-    for id in expanded.iter().filter(|id| id.starts_with("agent:codex:env:")) {
+    for id in expanded
+        .iter()
+        .filter(|id| id.starts_with("agent:codex:env:"))
+    {
         let env_id = id.strip_prefix("agent:codex:env:").unwrap_or("default");
         collect_codex_env(env_id, out, warnings);
     }
@@ -2171,10 +2168,7 @@ fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Ve
             );
         }
         for f in agent_model_files(spec.name) {
-            let fname = f
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("models");
+            let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("models");
             push_file(
                 out,
                 &f,
@@ -2304,10 +2298,7 @@ fn build_zip(
             continue;
         }
         let hash = Sha256::digest(&data);
-        checksums.insert(
-            entry.archive_path.clone(),
-            format!("sha256:{:x}", hash),
-        );
+        checksums.insert(entry.archive_path.clone(), format!("sha256:{:x}", hash));
 
         zip.start_file(&entry.archive_path, opts)
             .map_err(|e| format!("写入 zip 条目失败: {}", e))?;
@@ -2353,15 +2344,14 @@ fn build_zip(
         checksums,
     };
 
-    let manifest_json = serde_json::to_vec_pretty(&manifest)
-        .map_err(|e| format!("序列化 manifest 失败: {}", e))?;
+    let manifest_json =
+        serde_json::to_vec_pretty(&manifest).map_err(|e| format!("序列化 manifest 失败: {}", e))?;
     zip.start_file("manifest.json", opts)
         .map_err(|e| format!("写入 manifest 失败: {}", e))?;
     zip.write_all(&manifest_json)
         .map_err(|e| format!("写入 manifest 失败: {}", e))?;
 
-    zip.finish()
-        .map_err(|e| format!("完成 zip 失败: {}", e))?;
+    zip.finish().map_err(|e| format!("完成 zip 失败: {}", e))?;
     Ok(())
 }
 

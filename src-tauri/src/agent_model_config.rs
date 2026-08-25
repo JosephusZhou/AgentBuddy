@@ -40,10 +40,19 @@ mod tests {
 
     #[test]
     fn parse_agent_ids() {
-        assert_eq!(ModelConfigAgent::parse("opencode").unwrap(), ModelConfigAgent::Opencode);
+        assert_eq!(
+            ModelConfigAgent::parse("opencode").unwrap(),
+            ModelConfigAgent::Opencode
+        );
         assert_eq!(ModelConfigAgent::parse("Pi").unwrap(), ModelConfigAgent::Pi);
-        assert_eq!(ModelConfigAgent::parse("oh-my-pi").unwrap(), ModelConfigAgent::OhMyPi);
-        assert_eq!(ModelConfigAgent::parse("omp").unwrap(), ModelConfigAgent::OhMyPi);
+        assert_eq!(
+            ModelConfigAgent::parse("oh-my-pi").unwrap(),
+            ModelConfigAgent::OhMyPi
+        );
+        assert_eq!(
+            ModelConfigAgent::parse("omp").unwrap(),
+            ModelConfigAgent::OhMyPi
+        );
         assert!(ModelConfigAgent::parse("codex").is_err());
     }
 }

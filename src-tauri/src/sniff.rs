@@ -56,7 +56,10 @@ pub(crate) fn is_shim_path(path: &str) -> bool {
         if candidate.starts_with(&tmp) {
             return true;
         }
-        let tmp_s = tmp.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+        let tmp_s = tmp
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
         if !tmp_s.is_empty()
             && (normalized == tmp_s || normalized.starts_with(&format!("{tmp_s}/")))
         {
@@ -315,7 +318,11 @@ mod tests {
         assert!(!is_shim_path("/Users/x/.local/bin/claude"));
         assert!(!is_shim_path("/opt/homebrew/bin/codex"));
         // A path that merely contains "cmux" but is not a shim dir must survive.
-        assert!(!is_shim_path("/Applications/cmux.app/Contents/Resources/bin"));
-        assert!(!is_shim_path(r"C:\Users\x\AppData\Local\Programs\Claude\Claude.exe"));
+        assert!(!is_shim_path(
+            "/Applications/cmux.app/Contents/Resources/bin"
+        ));
+        assert!(!is_shim_path(
+            r"C:\Users\x\AppData\Local\Programs\Claude\Claude.exe"
+        ));
     }
 }

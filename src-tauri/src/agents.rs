@@ -96,18 +96,36 @@ pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
     match spec.name {
         "codex" => {
             push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Codex"));
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Codex/Codex.exe"));
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/Codex/Codex.exe"),
+            );
             push(&mut out, windows_env_path("PROGRAMFILES", "Codex"));
-            push(&mut out, windows_env_path("PROGRAMFILES", "Codex/Codex.exe"));
+            push(
+                &mut out,
+                windows_env_path("PROGRAMFILES", "Codex/Codex.exe"),
+            );
         }
         "claude-desktop" => {
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Claude"));
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/Claude/Claude.exe"));
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/Claude"),
+            );
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/Claude/Claude.exe"),
+            );
             push(&mut out, windows_env_path("PROGRAMFILES", "Claude"));
-            push(&mut out, windows_env_path("PROGRAMFILES", "Claude/Claude.exe"));
+            push(
+                &mut out,
+                windows_env_path("PROGRAMFILES", "Claude/Claude.exe"),
+            );
         }
         "opencode" => {
-            push(&mut out, windows_env_path("LOCALAPPDATA", "Programs/OpenCode"));
+            push(
+                &mut out,
+                windows_env_path("LOCALAPPDATA", "Programs/OpenCode"),
+            );
             push(
                 &mut out,
                 windows_env_path("LOCALAPPDATA", "Programs/OpenCode/OpenCode.exe"),
@@ -149,7 +167,6 @@ pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
     }
     out
 }
-
 
 static AGENTS: &[AgentSpec] = &[
     // 1. Codex（CLI + App，共享 ~/.codex）

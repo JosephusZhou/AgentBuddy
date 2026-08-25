@@ -159,7 +159,10 @@ mod passthrough_tests {
         let mut headers = HeaderMap::new();
         headers.insert("user-agent", hv("claude-cli/2.1.237 (external, cli)"));
         headers.insert("authorization", hv("Bearer sk-local-route-key"));
-        headers.insert("anthropic-beta", hv("effort-2025-11-24,fallback-credit-2026-06-01"));
+        headers.insert(
+            "anthropic-beta",
+            hv("effort-2025-11-24,fallback-credit-2026-06-01"),
+        );
         headers.insert("x-app", hv("cli"));
         headers.insert("x-stainless-lang", hv("js"));
         headers.insert("x-stainless-package-version", hv("0.112.1"));
@@ -189,7 +192,10 @@ mod passthrough_tests {
             out_headers.get("user-agent").unwrap(),
             "claude-cli/2.1.237 (external, cli)"
         );
-        assert_eq!(out_headers.get("x-stainless-package-version").unwrap(), "0.112.1");
+        assert_eq!(
+            out_headers.get("x-stainless-package-version").unwrap(),
+            "0.112.1"
+        );
         assert!(out_headers.get("anthropic-beta").is_some());
         assert!(out_headers.get("authorization").is_none());
         assert!(out_headers.get("via").is_none());
@@ -235,9 +241,10 @@ mod passthrough_tests {
 
     #[test]
     fn count_tokens_genuine_client_passes_through_in_always_mode() {
-        let body: serde_json::Value =
-            serde_json::from_str(include_str!("../../../tests/fixtures/claude/count_tokens.json"))
-                .unwrap();
+        let body: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude/count_tokens.json"
+        ))
+        .unwrap();
         let client = genuine_client_headers();
 
         let (out_body, out_headers) =

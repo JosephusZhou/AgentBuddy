@@ -37,18 +37,16 @@ impl RouteAggregationServer {
         };
 
         let addr = format!("{}:{}", listen_addr, listen_port);
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AddrInUse {
-                    format!(
-                        "端口 {} 已被占用，请在路由聚合设置中更改监听端口",
-                        listen_port
-                    )
-                } else {
-                    format!("绑定地址 {} 失败: {}", addr, e)
-                }
-            })?;
+        let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                format!(
+                    "端口 {} 已被占用，请在路由聚合设置中更改监听端口",
+                    listen_port
+                )
+            } else {
+                format!("绑定地址 {} 失败: {}", addr, e)
+            }
+        })?;
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
