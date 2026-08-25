@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "postinstall": "lefthook install"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.4.0",
     "autoprefixer": "^10.4.20",
+    "lefthook": "^2.1.10",
     "postcss": "^8.5.0",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",

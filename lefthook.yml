@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    prettier:
+      glob: "*.{ts,tsx,css,json,html,cjs}"
+      run: pnpm exec prettier --write {staged_files}
+      stage_fixed: true
+    cargo-fmt:
+      glob: "*.rs"
+      run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
