@@ -1,6 +1,6 @@
 [package]
 name = "agent-buddy"
-version = "0.1.9"
+version = "0.2.0"
 description = "AI Agents Configuration Manager"
 authors = ["senfeng"]
 edition = "2021"
