@@ -66,6 +66,9 @@ export interface RouteLogEntry {
   inboundBody: unknown | null;
   inboundBodyTruncated: boolean;
   inboundModel: string | null;
+  /** 实际转发给上游的模型 ID。与 inboundModel 不同说明发生了 [1m] 变体回写；
+   *  转发失败未发起上游请求时为 null。 */
+  upstreamModel: string | null;
   providerId: string | null;
   providerName: string | null;
   upstreamUrl: string | null;

@@ -169,6 +169,7 @@ async fn handle_with_log(
             inbound_body: inbound_body.clone(),
             inbound_body_truncated,
             inbound_model: inbound_model.clone(),
+            upstream_model: None,
             provider_id: None,
             provider_name: None,
             upstream_url: None,
@@ -218,6 +219,7 @@ async fn handle_with_log(
                 inbound_body,
                 inbound_body_truncated,
                 inbound_model,
+                upstream_model: result.effective_model,
                 provider_id: Some(result.provider_id),
                 provider_name: Some(result.provider_name),
                 upstream_url: Some(sanitize_url_for_log(&result.upstream_url)),
@@ -244,6 +246,7 @@ async fn handle_with_log(
                 inbound_body,
                 inbound_body_truncated,
                 inbound_model,
+                upstream_model: None,
                 provider_id: None,
                 provider_name: None,
                 upstream_url: None,
@@ -264,7 +267,10 @@ async fn handle_with_log(
 
 fn error_label(err: &forwarder::ForwardError) -> String {
     match err {
-        forwarder::ForwardError::NoAvailableProvider => "没有可用的供应商".to_string(),
+        forwarder::ForwardError::NoAvailableProvider(Some(model)) => {
+            format!("没有可用的供应商支持模型 {model}")
+        }
+        forwarder::ForwardError::NoAvailableProvider(None) => "没有可用的供应商".to_string(),
         forwarder::ForwardError::AllProvidersFailed => "所有供应商均请求失败".to_string(),
         forwarder::ForwardError::CloakingError(msg) => format!("伪装处理失败: {msg}"),
         forwarder::ForwardError::RequestError(msg) => msg.clone(),
@@ -273,7 +279,11 @@ fn error_label(err: &forwarder::ForwardError) -> String {
 
 fn forward_error_to_response(err: forwarder::ForwardError) -> Response {
     match err {
-        forwarder::ForwardError::NoAvailableProvider => {
+        forwarder::ForwardError::NoAvailableProvider(Some(model)) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!("没有可用的供应商支持模型 {model}"),
+        ),
+        forwarder::ForwardError::NoAvailableProvider(None) => {
             error_response(StatusCode::SERVICE_UNAVAILABLE, "没有可用的供应商")
         }
         forwarder::ForwardError::AllProvidersFailed => {
@@ -342,6 +352,7 @@ pub async fn handle_list_models(State(state): State<AppState>, headers: HeaderMa
             inbound_body: None,
             inbound_body_truncated: false,
             inbound_model: None,
+            upstream_model: None,
             provider_id: None,
             provider_name: None,
             upstream_url: None,
@@ -391,6 +402,7 @@ pub async fn handle_list_models(State(state): State<AppState>, headers: HeaderMa
         inbound_body: None,
         inbound_body_truncated: false,
         inbound_model: None,
+        upstream_model: None,
         provider_id: None,
         provider_name: None,
         upstream_url: None,

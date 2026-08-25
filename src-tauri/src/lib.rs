@@ -1372,6 +1372,23 @@ async fn get_route_provider_models(
     .map_err(|e| format!("获取供应商模型列表任务失败: {e}"))?
 }
 
+/// Get the aggregated model list of the route aggregation virtual provider.
+///
+/// 路由聚合作为特殊供应商，其对外模型列表 = 所有已勾选（启用）供应商的
+/// `custom_models_json` 有效模型 ID 的去重并集，与 `GET /v1/models` 暴露的
+/// 列表完全一致。唯一来源仍是 AI 供应商编辑页的自定义列表，**不**向远端拉取。
+#[tauri::command]
+async fn get_route_aggregation_models(
+    state: tauri::State<'_, route_aggregation::RouteAggregationState>,
+) -> Result<Vec<String>, String> {
+    // Refresh pools so recent toggles / custom-model edits are reflected
+    // (same contract as get_route_aggregation_status).
+    for group in route_aggregation::RouteGroup::ALL {
+        state.provider_router.refresh_pool_fast(group).await?;
+    }
+    Ok(state.provider_router.get_enabled_model_ids().await)
+}
+
 #[tauri::command]
 async fn pick_project_folder() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1599,6 +1616,7 @@ pub fn run() {
             delete_route_aggregation_api_key,
             regenerate_route_aggregation_api_key,
             get_route_provider_models,
+            get_route_aggregation_models,
             get_route_aggregation_logs,
             clear_route_aggregation_logs,
             get_route_aggregation_log_file_path,

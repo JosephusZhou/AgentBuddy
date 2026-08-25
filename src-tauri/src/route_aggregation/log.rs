@@ -76,6 +76,12 @@ pub struct LogEntry {
     pub inbound_body_truncated: bool,
     /// Original `model` field extracted from the inbound body, if any.
     pub inbound_model: Option<String>,
+    /// Model ID actually sent upstream for the serving attempt. Differs from
+    /// `inbound_model` when the provider was matched via a `[1m]` context
+    /// variant and the body model was rewritten (see
+    /// `ProviderRouter::resolve_providers_for_model`). None if forwarding
+    /// failed before an upstream attempt.
+    pub upstream_model: Option<String>,
 
     /// Provider that handled the request (after failover / circuit-breaker
     /// selection). None if forwarding failed before picking one.
@@ -414,6 +420,7 @@ mod tests {
                         inbound_body: None,
                         inbound_body_truncated: false,
                         inbound_model: None,
+                        upstream_model: None,
                         provider_id: None,
                         provider_name: None,
                         upstream_url: None,

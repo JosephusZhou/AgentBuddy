@@ -4,6 +4,7 @@
 use axum::http::HeaderMap;
 
 use super::codex_headers;
+use super::header_scrub;
 use crate::route_aggregation::config::RouteAggregationConfig;
 use crate::route_aggregation::CloakingMode;
 
@@ -23,27 +24,35 @@ pub fn apply_cloaking(
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let should_cloak = match config.cloaking_mode {
+    // 与 Claude 路径同理：真实 Codex CLI（codex-tui/*）本身就是目标指纹，
+    // 即使 mode=always 也净透传客户端头，仅由 forwarder 替换鉴权。
+    if !should_cloak(config, user_agent) || user_agent.trim().starts_with("codex-tui") {
+        return Ok((
+            modified_body,
+            header_scrub::passthrough_client_headers(client_headers),
+        ));
+    }
+
+    // 1. Inject Codex client headers
+    let session_id = uuid::Uuid::new_v4().to_string();
+    codex_headers::inject_codex_headers(&mut headers, &config.codex_version, None, &session_id);
+    header_scrub::scrub_proxy_headers(&mut headers);
+
+    // 2. Identity confusion — replace identifiers to prevent multi-account correlation
+    confuse_codex_identity(&mut modified_body);
+
+    Ok((modified_body, headers))
+}
+
+fn should_cloak(config: &RouteAggregationConfig, user_agent: &str) -> bool {
+    match config.cloaking_mode {
         CloakingMode::Always => true,
         CloakingMode::Never => false,
         CloakingMode::Auto => {
             // Auto: cloak if the client UA is not already codex-tui
             !user_agent.starts_with("codex-tui")
         }
-    };
-
-    if !should_cloak {
-        return Ok((modified_body, headers));
     }
-
-    // 1. Inject Codex client headers
-    let session_id = uuid::Uuid::new_v4().to_string();
-    codex_headers::inject_codex_headers(&mut headers, &config.codex_version, None, &session_id);
-
-    // 2. Identity confusion — replace identifiers to prevent multi-account correlation
-    confuse_codex_identity(&mut modified_body);
-
-    Ok((modified_body, headers))
 }
 
 /// Confuse Codex identity identifiers to prevent multi-account association detection.
@@ -80,5 +89,59 @@ fn confuse_codex_identity(body: &mut serde_json::Value) {
         if let Some(wid) = metadata.get_mut("x-codex-window-id") {
             *wid = serde_json::Value::String(window_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod passthrough_tests {
+    use super::apply_cloaking;
+    use crate::route_aggregation::config::RouteAggregationConfig;
+    use crate::route_aggregation::CloakingMode;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn hv(value: &str) -> HeaderValue {
+        HeaderValue::from_str(value).unwrap()
+    }
+
+    #[test]
+    fn genuine_codex_tui_passes_through_even_in_always_mode() {
+        let mut config = RouteAggregationConfig::default();
+        config.cloaking_mode = CloakingMode::Always;
+
+        let mut client = HeaderMap::new();
+        client.insert(
+            "user-agent",
+            hv("codex-tui/0.148.0 (Mac OS 26.5.0; arm64) iTerm.app"),
+        );
+        client.insert("originator", hv("codex-tui"));
+        client.insert("authorization", hv("Bearer sk-local-route-key"));
+
+        let body = serde_json::json!({ "model": "gpt-5", "prompt_cache_key": "old" });
+        let (out_body, out_headers) = apply_cloaking(&body, &client, &config).unwrap();
+
+        assert_eq!(out_body["prompt_cache_key"], "old");
+        assert!(out_headers
+            .get("user-agent")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("codex-tui/0.148.0"));
+        assert_eq!(out_headers.get("originator").unwrap(), "codex-tui");
+        assert!(out_headers.get("authorization").is_none());
+        // 伪造头不应出现
+        assert!(out_headers.get("session-id").is_none());
+    }
+
+    #[test]
+    fn non_codex_client_gets_injected_headers() {
+        let config = RouteAggregationConfig::default(); // auto
+        let mut client = HeaderMap::new();
+        client.insert("user-agent", hv("python-requests/2.0"));
+
+        let body = serde_json::json!({ "model": "gpt-5", "prompt_cache_key": "old" });
+        let (_, out_headers) = apply_cloaking(&body, &client, &config).unwrap();
+
+        assert_eq!(out_headers.get("originator").unwrap(), "codex-tui");
+        assert!(out_headers.get("session-id").is_some());
     }
 }

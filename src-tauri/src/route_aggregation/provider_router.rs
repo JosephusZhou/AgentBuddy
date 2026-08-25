@@ -8,6 +8,14 @@ use super::circuit_breaker::CircuitBreaker;
 use super::types::{ProviderRouteStatus, RouteGroup, RouteProvider};
 use super::CircuitBreakerSnapshot;
 
+/// Claude Code 的 1M 上下文模型语法后缀。
+///
+/// 客户端配置 `claude-opus-5[1m]` 时，Claude Code 会**剥掉**该后缀并改发
+/// `context-1m-2025-08-07` beta 头 + 裸模型名（8/24 日志证实）。而中转渠道
+/// 通常以完整变体 ID（`claude-opus-5[1m]`）声明该能力，因此供应商解析层
+/// 需要做 `model → model[1m]` 的变体匹配并在转发时回写完整 ID。
+pub const CONTEXT_1M_SUFFIX: &str = "[1m]";
+
 /// ProviderRouter manages the provider pool and circuit breaker state.
 pub struct ProviderRouter {
     /// Provider pools: (group) → list of providers (with decrypted API keys).
@@ -222,30 +230,41 @@ impl ProviderRouter {
         result
     }
 
-    /// Filter a provider list by model support, so the caller doesn't waste a
-    /// request round-trip on a provider that doesn't even advertise the model.
+    /// Resolve the candidate provider list against the requested model.
     ///
-    /// Rules:
-    /// - `model = None`: no filter (used by `/v1/models`, etc.).
-    /// - Provider has `supported_model_ids = None` (no custom model list):
-    ///   pass through unfiltered so manually specified model IDs still work.
-    /// - Provider has `supported_model_ids = Some(ids)`: keep iff `model` is
-    ///   in `ids`.
+    /// 返回 `(provider, upstream_model_override)`：override 为 `Some` 时调用方
+    /// 必须在转发前把 body 的 model 重写为该值。
     ///
-    /// This is a pure filter; ordering is preserved so the caller's `sort_order`
-    /// (already applied while building the pool) is intact.
-    pub fn filter_by_model(
+    /// 匹配规则：
+    /// - `model = None`: 不过滤（用于无模型请求）。
+    /// - Provider 无自定义模型列表（`supported_model_ids = None`）：直接保留。
+    /// - 精确命中请求模型：保留，原样转发。
+    /// - 命中 `[1m]` 变体（见 CONTEXT_1M_SUFFIX 说明）：保留并返回 override，
+    ///   转发时重写为中转声明的完整变体 ID，否则只声明变体渠道的中转无法路由。
+    /// - 其余：剔除，避免浪费 round-trip。
+    ///
+    /// 排序保持不变（沿用 build_pool_from_db 的 sort_order）。
+    pub fn resolve_providers_for_model(
         providers: Vec<RouteProvider>,
         model: Option<&str>,
-    ) -> Vec<RouteProvider> {
+    ) -> Vec<(RouteProvider, Option<String>)> {
         let Some(model) = model else {
-            return providers;
+            return providers.into_iter().map(|p| (p, None)).collect();
         };
+        let variant = format!("{model}{CONTEXT_1M_SUFFIX}");
         providers
             .into_iter()
-            .filter(|p| match &p.supported_model_ids {
-                None => true,
-                Some(ids) => ids.iter().any(|id| id == model),
+            .filter_map(|p| match &p.supported_model_ids {
+                None => Some((p, None)),
+                Some(ids) => {
+                    if ids.iter().any(|id| id == model) {
+                        Some((p, None))
+                    } else if ids.iter().any(|id| id == &variant) {
+                        Some((p, Some(variant.clone())))
+                    } else {
+                        None
+                    }
+                }
             })
             .collect()
     }
@@ -382,5 +401,86 @@ impl ProviderRouter {
 impl Default for ProviderRouter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::{CONTEXT_1M_SUFFIX, ProviderRouter};
+    use super::super::types::RouteProvider;
+
+    fn resolve(
+        providers: Vec<RouteProvider>,
+        model: Option<&str>,
+    ) -> Vec<(RouteProvider, Option<String>)> {
+        ProviderRouter::resolve_providers_for_model(providers, model)
+    }
+
+    fn provider(id: &str, models: Option<&[&str]>) -> RouteProvider {
+        RouteProvider {
+            id: id.into(),
+            name: id.into(),
+            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            base_url: "https://relay.test".into(),
+            api_key: String::new(),
+            model_ids: Vec::new(),
+            enabled: true,
+            supported_model_ids: models.map(|ms| ms.iter().map(|m| m.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn no_model_keeps_all_providers_without_override() {
+        let providers = vec![provider("a", Some(&["m1"])), provider("b", None)];
+        let resolved = resolve(providers, None);
+        assert_eq!(resolved.len(), 2);
+        assert!(resolved.iter().all(|(_, o)| o.is_none()));
+    }
+
+    #[test]
+    fn exact_match_forwards_model_verbatim() {
+        let providers = vec![provider("a", Some(&["claude-opus-5"]))];
+        let resolved = resolve(providers, Some("claude-opus-5"));
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0.id, "a");
+        assert!(resolved[0].1.is_none());
+    }
+
+    #[test]
+    fn context_1m_variant_matches_and_rewrites_upstream_model() {
+        // CC 发裸名（已把 [1m] 转为 beta 头），供应商只声明 [1m] 变体：
+        // 必须命中并回写完整变体 ID，否则中转无法路由到 1M 渠道。
+        let providers = vec![provider("any", Some(&["claude-opus-5[1m]"]))];
+        let resolved = resolve(providers, Some("claude-opus-5"));
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0.id, "any");
+        assert_eq!(
+            resolved[0].1.as_deref(),
+            Some(format!("claude-opus-5{}", CONTEXT_1M_SUFFIX).as_str())
+        );
+    }
+
+    #[test]
+    fn providers_without_matching_models_are_dropped() {
+        let providers = vec![
+            provider("x", Some(&["other-model"])),
+            provider("y", Some(&["claude-opus-4"])),
+        ];
+        let resolved = resolve(providers, Some("claude-opus-5"));
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn no_custom_list_passes_through_unfiltered() {
+        let providers = vec![provider("b", None)];
+        let resolved = resolve(providers, Some("anything"));
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].1.is_none());
+    }
+
+    #[test]
+    fn resolver_is_associated_function() {
+        // 防止误改为需要实例的方法：纯函数语义，供 forwarder 直接调用。
+        let _ = ProviderRouter::resolve_providers_for_model;
     }
 }

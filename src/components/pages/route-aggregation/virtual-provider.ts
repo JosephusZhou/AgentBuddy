@@ -4,11 +4,12 @@
  * 选中后各页面按普通供应商流程回填 Base URL / API Key（主 Key）：
  * - Claude 环境（anthropic/universal 语义）：baseUrl = `http://host:port`（/v1/messages）
  * - Codex / OpenCode / Pi / OMP（openai 语义）：baseUrl = `http://host:port/v1`
+ * 模型列表 = 已勾选供应商自定义模型的去重并集（见 fetchRouteAggregationProvider）。
  */
 
 import type { AiProvider } from "../ai-providers/types";
 import { invokeGetSecret } from "../ai-providers/api";
-import { getConfig, getStatus } from "./api";
+import { getConfig, getStatus, getRouteAggregatedModels } from "./api";
 
 /** 虚拟供应商哨兵 ID：不存在于 AI 供应商库中，不可用 get_ai_provider_secret 读取。 */
 export const ROUTE_AGGREGATION_PROVIDER_ID = "__route_aggregation__";
@@ -31,11 +32,17 @@ export function openaiProviderBaseUrl(p: AiProvider): string {
  * 待服务启动后即可生效。
  * 路由聚合同时支持 Anthropic 与 OpenAI，因此始终标记为 universal；各页面
  * 根据自身协议使用 baseUrl 或 openaiBaseUrl。
+ * `customModels` 为所有已勾选供应商自定义模型的去重并集（同 `GET /v1/models`）：
+ * 环境弹窗把它当普通供应商读取模型下拉时，拿到的是真实可路由的模型集合；
+ * 拉取失败不阻塞供应商本身的选择，仅模型列表为空。
  */
 export async function fetchRouteAggregationProvider(): Promise<AiProvider | null> {
   try {
-    const status = await getStatus();
-    const config = await getConfig();
+    const [status, config, aggregatedModels] = await Promise.all([
+      getStatus(),
+      getConfig(),
+      getRouteAggregatedModels().catch(() => [] as string[]),
+    ]);
     const base = `http://${status.listenAddress}:${status.listenPort}`;
     const primaryKey = config.apiKeys[0] ?? "";
     return {
@@ -49,7 +56,7 @@ export async function fetchRouteAggregationProvider(): Promise<AiProvider | null
       models: {},
       hasApiKey: primaryKey !== "",
       apiKeyCount: config.apiKeys.length,
-      customModels: [],
+      customModels: aggregatedModels.map((id) => ({ model: id, aliasId: "" })),
       notes: "",
       createdAt: 0,
       updatedAt: 0,

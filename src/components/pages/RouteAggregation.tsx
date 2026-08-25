@@ -1476,6 +1476,14 @@ function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
             <code style={{ color: "var(--seed-primary)" }}>
               {entry.inboundModel ?? "(无)"}
             </code>
+            {entry.upstreamModel && entry.upstreamModel !== entry.inboundModel && (
+              <code
+                data-tooltip="命中 [1m] 等变体后实际转发给上游的模型 ID"
+                style={{ marginLeft: 6, color: "var(--seed-warning, #b58900)" }}
+              >
+                → {entry.upstreamModel}
+              </code>
+            )}
           </span>
           {entry.providerName && (
             <span>

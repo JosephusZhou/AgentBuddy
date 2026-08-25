@@ -34,6 +34,7 @@ import {
 } from "./ai-providers/api";
 import {
   fetchRouteAggregationProvider,
+  isRouteAggregationProvider,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
 import { MODEL_TIERS, type AiProvider, type ProviderType } from "./ai-providers/types";
@@ -508,7 +509,11 @@ export default function ClaudeEnv() {
         setModel(customOptions[0]);
         setStatusMsg(`已使用供应商自定义模型列表（${customOptions.length} 个）`);
       } else {
-        setStatusMsg("该供应商未配置自定义模型，请先在 AI 供应商页添加");
+        setStatusMsg(
+          isRouteAggregationProvider(provider.id)
+            ? "路由聚合暂无可用模型：请先在路由聚合页勾选供应商，并在 AI 供应商页为其配置自定义模型"
+            : "该供应商未配置自定义模型，请先在 AI 供应商页添加",
+        );
       }
       return;
     }

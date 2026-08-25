@@ -17,7 +17,8 @@ use super::{ProviderFormat, RouteGroup, RouteProvider};
 /// Errors that can occur during forwarding.
 #[derive(Debug)]
 pub enum ForwardError {
-    NoAvailableProvider,
+    /// 没有供应商支持该模型（携带请求的模型名，便于日志定位；无模型请求为 None）。
+    NoAvailableProvider(Option<String>),
     AllProvidersFailed,
     CloakingError(String),
     RequestError(String),
@@ -39,6 +40,9 @@ pub struct ForwardResult {
     /// handler to fill the `provider_id` / `provider_name` fields on the
     /// inbound/outbound log entry.
     pub provider_id: String,
+    /// Model ID actually sent upstream for the serving attempt — equals the
+    /// inbound model unless a `[1m]` variant rewrite was applied.
+    pub effective_model: Option<String>,
     pub provider_name: String,
     /// Effective upstream URL the request was sent to. Filled by forwarder so
     /// the log entry can surface "which exact endpoint served the request".
@@ -97,24 +101,30 @@ pub async fn forward(
     let providers = router.select_providers(group, config.auto_failover).await;
 
     if providers.is_empty() {
-        return Err(ForwardError::NoAvailableProvider);
+        return Err(ForwardError::NoAvailableProvider(
+            body.get("model").and_then(|v| v.as_str()).map(str::to_string),
+        ));
     }
 
-    // 按请求 model 过滤 pool：把不提供该 model 的 provider 直接剔除，避免
-    // 浪费 round-trip / 触发不可知的错误。ProviderRouter::filter_by_model 内
-    // 未配置自定义模型的 provider 保留，以支持用户手动指定模型 ID。
-    let request_model = body.get("model").and_then(|v| v.as_str());
-    let providers = ProviderRouter::filter_by_model(providers, request_model);
+    // 按请求 model 解析候选供应商：不提供该 model（或其 [1m] 变体）的 provider
+    // 直接剔除，避免浪费 round-trip。未配置自定义模型的 provider 保留，以支持
+    // 用户手动指定模型 ID。命中 [1m] 变体时返回重写值（CC 已把后缀转为 beta 头，
+    // 中转渠道需要完整变体 ID 才能路由）。
+    let request_model = body.get("model").and_then(|v| v.as_str()).map(str::to_string);
+    let candidates =
+        ProviderRouter::resolve_providers_for_model(providers, request_model.as_deref());
 
-    if providers.is_empty() {
-        return Err(ForwardError::NoAvailableProvider);
+    if candidates.is_empty() {
+        return Err(ForwardError::NoAvailableProvider(request_model));
     }
 
-    let max_attempts = (config.max_retries + 1).min(providers.len() as u32);
+    let max_attempts = (config.max_retries + 1).min(candidates.len() as u32);
 
     let mut last_error = String::new();
 
-    for (index, provider) in providers.iter().take(max_attempts as usize).enumerate() {
+    for (index, (provider, model_override)) in
+        candidates.iter().take(max_attempts as usize).enumerate()
+    {
         let target_format = format_for_provider_type(&provider.provider_type, group);
 
         // 1. Apply cloaking (Claude Code rectifier or Codex client simulation).
@@ -135,16 +145,19 @@ pub async fn forward(
             }
         };
 
-        // 2. Effective body = cloaked body（passthrough 不做协议转换）
-        let effective_body = cloaked_body.clone();
-        let effective_model = cloaked_body
+        // 2. Effective body = cloaked body + 变体模型回写（passthrough 不做协议转换）
+        let mut effective_body = cloaked_body;
+        if let Some(upstream_model) = model_override {
+            effective_body["model"] = serde_json::Value::String(upstream_model.clone());
+        }
+        let effective_model = effective_body
             .get("model")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        // 3. Build auth headers from decrypted API key
-        let auth_headers = build_auth_headers(provider, target_format);
+        // 3. Build auth headers from decrypted API key（鉴权风格镜像入站客户端）
+        let auth_headers = build_auth_headers(provider, target_format, client_headers);
         for (name, value) in &auth_headers {
             if let (Ok(n), Ok(v)) = (
                 HeaderName::from_bytes(name.as_bytes()),
@@ -154,10 +167,7 @@ pub async fn forward(
             }
         }
 
-        // 4. Scrub proxy fingerprint headers
-        cloaking::header_scrub::scrub_proxy_headers(&mut cloaked_headers);
-
-        // 5. Build upstream URL（Phase 5+：无 passthrough 旁路，直接拼 target 路径）
+        // 4. Build upstream URL（Phase 5+：无 passthrough 旁路，直接拼 target 路径）
         let is_stream = is_stream(&effective_body);
         let upstream_url = build_upstream_url(
             provider,
@@ -167,7 +177,7 @@ pub async fn forward(
             count_tokens,
         );
 
-        // 6. Send request
+        // 5. Send request
         match send_request(
             &upstream_url,
             &cloaked_headers,
@@ -187,6 +197,7 @@ pub async fn forward(
                     body_truncated,
                     provider_id: provider.id.clone(),
                     provider_name: provider.name.clone(),
+                    effective_model: Some(effective_model.clone()),
                     upstream_url,
                 });
             }
@@ -218,7 +229,18 @@ fn is_stream(body: &serde_json::Value) -> bool {
 }
 
 /// Build authentication headers based on target format.
-fn build_auth_headers(provider: &RouteProvider, target: ProviderFormat) -> Vec<(String, String)> {
+///
+/// Anthropic 目标**镜像入站客户端的鉴权风格**：真实 Claude Code 通过
+/// `ANTHROPIC_AUTH_TOKEN` 使用 `authorization: Bearer <key>`，通过
+/// `ANTHROPIC_API_KEY` 使用 `x-api-key`。部分中转网关（new-api / one-api 系）
+/// 只读取 `Authorization` 头——只发 `x-api-key` 会被判 403「未授权/未登录」，
+/// 即使供应商密钥本身有效。直连能成功的鉴权形态就是唯一真值，转发时保持
+/// 同一形态；客户端未携带鉴权头时退回默认的 `x-api-key`。
+fn build_auth_headers(
+    provider: &RouteProvider,
+    target: ProviderFormat,
+    client_headers: &HeaderMap,
+) -> Vec<(String, String)> {
     let mut headers = Vec::new();
 
     if provider.api_key.is_empty() {
@@ -227,7 +249,14 @@ fn build_auth_headers(provider: &RouteProvider, target: ProviderFormat) -> Vec<(
 
     match target {
         ProviderFormat::Anthropic => {
-            headers.push(("x-api-key".to_string(), provider.api_key.clone()));
+            if client_headers.contains_key("authorization") {
+                headers.push((
+                    "authorization".to_string(),
+                    format!("Bearer {}", provider.api_key),
+                ));
+            } else {
+                headers.push(("x-api-key".to_string(), provider.api_key.clone()));
+            }
             headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
         }
         ProviderFormat::OpenAiResponses => {
@@ -279,10 +308,11 @@ async fn send_request(
 ) -> Result<(Response, Vec<u8>, bool), String> {
     let client = build_proxied_client(config)?;
 
-    let mut req = client
-        .post(url)
-        .header("content-type", "application/json")
-        .header(
+    // accept 优先沿用透传头里的客户端值（真实 Claude Code 流式请求也发
+    // application/json）；仅在未携带时按流式与否推导默认值。
+    let mut req = client.post(url).header("content-type", "application/json");
+    if !headers.contains_key("accept") {
+        req = req.header(
             "accept",
             if is_stream {
                 "text/event-stream"
@@ -290,12 +320,12 @@ async fn send_request(
                 "application/json"
             },
         );
+    }
 
     // Copy cloaked headers (skip ones we already set)
     for (name, value) in headers.iter() {
         let name_str = name.as_str();
         if name_str.eq_ignore_ascii_case("content-type")
-            || name_str.eq_ignore_ascii_case("accept")
             || name_str.eq_ignore_ascii_case("content-length")
             || name_str.eq_ignore_ascii_case("host")
             || name_str.eq_ignore_ascii_case("transfer-encoding")
@@ -629,5 +659,55 @@ mod tests {
             ),
             "https://example.test/v1/messages/count_tokens"
         );
+    }
+
+    fn anthropic_provider() -> super::RouteProvider {
+        super::RouteProvider {
+            id: "p1".into(),
+            name: "p1".into(),
+            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            base_url: "https://relay.test".into(),
+            api_key: "sk-provider-key".into(),
+            model_ids: Vec::new(),
+            enabled: true,
+            supported_model_ids: None,
+        }
+    }
+
+    #[test]
+    fn anthropic_auth_mirrors_client_bearer_style() {
+        // 真实 Claude Code（ANTHROPIC_AUTH_TOKEN）携带 authorization —— 上游
+        // 也必须收到 authorization: Bearer <provider_key>，否则只认 Authorization
+        // 的中转网关会判 403 未授权。
+        let mut client = axum::http::HeaderMap::new();
+        client.insert(
+            "authorization",
+            axum::http::HeaderValue::from_static("Bearer sk-local-route-key"),
+        );
+        let headers = super::build_auth_headers(
+            &anthropic_provider(),
+            super::ProviderFormat::Anthropic,
+            &client,
+        );
+        assert!(headers.contains(&(
+            "authorization".to_string(),
+            "Bearer sk-provider-key".to_string()
+        )));
+        assert!(!headers.iter().any(|(n, _)| n == "x-api-key"));
+        assert!(headers.iter().any(|(n, _)| n == "anthropic-version"));
+    }
+
+    #[test]
+    fn anthropic_auth_defaults_to_x_api_key_without_client_auth() {
+        let headers = super::build_auth_headers(
+            &anthropic_provider(),
+            super::ProviderFormat::Anthropic,
+            &axum::http::HeaderMap::new(),
+        );
+        assert!(headers.contains(&(
+            "x-api-key".to_string(),
+            "sk-provider-key".to_string()
+        )));
+        assert!(!headers.iter().any(|(n, _)| n == "authorization"));
     }
 }

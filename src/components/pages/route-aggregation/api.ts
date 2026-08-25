@@ -76,6 +76,15 @@ export async function getRouteProviderModels(
   return invoke("get_route_provider_models", { providerId });
 }
 
+/** 获取路由聚合虚拟供应商的对外模型列表。
+ *
+ * = 所有已勾选供应商的有效自定义模型 ID 的去重并集（与 `GET /v1/models`
+ * 暴露的列表一致）。来源仍是各供应商的自定义模型列表，不向远端拉取。 */
+export async function getRouteAggregatedModels(): Promise<string[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_route_aggregation_models");
+}
+
 /** 获取路由聚合服务近期的进出日志（内存中最新的在后）。 */
 export async function getRouteLogs(): Promise<RouteLogEntry[]> {
   const { invoke } = await import("@tauri-apps/api/core");
