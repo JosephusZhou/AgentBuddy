@@ -41,7 +41,8 @@ pub struct ForwardResult {
     /// inbound/outbound log entry.
     pub provider_id: String,
     /// Model ID actually sent upstream for the serving attempt — equals the
-    /// inbound model unless a `[1m]` variant rewrite was applied.
+    /// inbound model unless a `[1m]` variant rewrite was applied. None if the
+    /// request carried no `model` field.
     pub effective_model: Option<String>,
     pub provider_name: String,
     /// Effective upstream URL the request was sent to. Filled by forwarder so
@@ -120,6 +121,14 @@ pub async fn forward(
 
     let max_attempts = (config.max_retries + 1).min(candidates.len() as u32);
 
+    // 响应侧工具名恢复必须与请求侧重映射对称：全量伪装是唯一做请求侧
+    // 重映射的路径（见 claude_cloaking::full_cloak_applies）。真实客户端
+    // 透传若误开恢复，会把上游真实返回的官方工具名（"Bash" 等）错误地
+    // 转成小写，导致官方客户端收到未知工具名、工具调用失败。
+    let reverse_tool_names = matches!(group, RouteGroup::ClaudeCode)
+        && !count_tokens
+        && cloaking::claude_cloaking::full_cloak_applies(client_headers, config);
+
     let mut last_error = String::new();
 
     for (index, (provider, model_override)) in
@@ -153,8 +162,7 @@ pub async fn forward(
         let effective_model = effective_body
             .get("model")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .map(str::to_string);
 
         // 3. Build auth headers from decrypted API key（鉴权风格镜像入站客户端）
         let auth_headers = build_auth_headers(provider, target_format, client_headers);
@@ -172,7 +180,7 @@ pub async fn forward(
         let upstream_url = build_upstream_url(
             provider,
             target_format,
-            &effective_model,
+            effective_model.as_deref().unwrap_or(""),
             is_stream,
             count_tokens,
         );
@@ -184,12 +192,23 @@ pub async fn forward(
             &effective_body,
             config,
             is_stream,
-            matches!(group, RouteGroup::ClaudeCode) && !count_tokens,
+            reverse_tool_names,
         )
         .await
         {
             Ok((resp, body_preview, body_truncated)) => {
-                router.record_success(&provider.id, group).await;
+                // 成功数只统计 2xx：拿到 4xx/5xx 说明该次上游请求报错
+                // （鉴权失败、限流、上游错误等），必须计入失败，与进出日志
+                // 的 `success` 字段（`status.is_success()`）保持同一口径，
+                // 否则供应商列表的成功数会把报错请求也算进去。
+                if upstream_status_is_success(resp.status()) {
+                    router.record_success(&provider.id, group).await;
+                } else {
+                    let status = resp.status().as_u16();
+                    router
+                        .record_failure(&provider.id, group, &format!("上游返回 HTTP {status}"))
+                        .await;
+                }
                 // passthrough：直接返回上游响应，不做协议转换
                 return Ok(ForwardResult {
                     response: resp,
@@ -197,7 +216,7 @@ pub async fn forward(
                     body_truncated,
                     provider_id: provider.id.clone(),
                     provider_name: provider.name.clone(),
-                    effective_model: Some(effective_model.clone()),
+                    effective_model: effective_model.clone(),
                     upstream_url,
                 });
             }
@@ -220,6 +239,14 @@ pub async fn forward(
     } else {
         Err(ForwardError::RequestError(last_error))
     }
+}
+
+/// 上游响应是否计为成功（供应商统计与熔断器记录的统一口径）。
+///
+/// 只有 2xx 算成功；4xx/5xx 属于报错请求。与 handler 写进出日志时的
+/// `success` 判定（`status.is_success()`）保持一致。
+fn upstream_status_is_success(status: StatusCode) -> bool {
+    status.is_success()
 }
 
 fn is_stream(body: &serde_json::Value) -> bool {
@@ -600,7 +627,27 @@ fn parse_scutil_proxy(scutil_output: &str, proxy_type: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_sse_event_end, reverse_tool_names_in_json, transform_sse_frame};
+    use super::{
+        find_sse_event_end, reverse_tool_names_in_json, transform_sse_frame,
+        upstream_status_is_success,
+    };
+    use axum::http::StatusCode;
+
+    #[test]
+    fn upstream_success_only_counts_2xx_status_codes() {
+        // 回归：报错请求（401/429/5xx 等）不得计入供应商成功数。
+        assert!(upstream_status_is_success(StatusCode::OK));
+        assert!(upstream_status_is_success(
+            StatusCode::from_u16(204).unwrap()
+        ));
+        for code in [400u16, 401, 403, 404, 429, 500, 502, 503] {
+            let status = StatusCode::from_u16(code).unwrap();
+            assert!(
+                !upstream_status_is_success(status),
+                "HTTP {code} 不应计为成功"
+            );
+        }
+    }
 
     #[test]
     fn reverses_tool_name_in_non_stream_response_without_touching_input() {

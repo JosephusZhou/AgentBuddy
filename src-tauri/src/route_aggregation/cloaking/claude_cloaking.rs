@@ -29,16 +29,11 @@ pub fn apply_cloaking(
     let mut modified_body = body.clone();
     let mut headers = HeaderMap::new();
 
-    // Determine whether to cloak
-    let user_agent = _client_headers
-        .get("user-agent")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
     // 真实 Claude Code 客户端本身就是目标指纹：即使 mode=always 也不做二次伪装。
     // 用过时的配置版本重新伪造（UA / anthropic-beta / x-stainless 全部降级）只会
     // 让请求偏离"直连形态"，被校验客户端一致性的中转拒绝。改为净透传客户端头，
     // 仅由 forwarder 替换鉴权头。
-    if !should_cloak(config, user_agent) || is_genuine_claude_cli(user_agent) {
+    if !full_cloak_applies(_client_headers, config) {
         return Ok((
             modified_body,
             header_scrub::passthrough_client_headers(_client_headers),
@@ -102,11 +97,7 @@ pub fn apply_count_tokens_cloaking(
     client_headers: &HeaderMap,
     config: &RouteAggregationConfig,
 ) -> Result<(serde_json::Value, HeaderMap), String> {
-    let user_agent = client_headers
-        .get("user-agent")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    if !should_cloak(config, user_agent) || is_genuine_claude_cli(user_agent) {
+    if !full_cloak_applies(client_headers, config) {
         return Ok((
             body.clone(),
             header_scrub::passthrough_client_headers(client_headers),
@@ -136,9 +127,26 @@ fn is_genuine_claude_cli(user_agent: &str) -> bool {
     user_agent.trim().starts_with("claude-cli")
 }
 
+/// 判定该入站请求是否会走**全量伪装**路径（messages 与 count_tokens 共用）。
+///
+/// 谓词与两条 apply 路径的早退分支保持同一来源：既没有被 bypass
+/// （never 模式 / auto 下非伪装），也不是真实 Claude Code 客户端时才成立。
+///
+/// 全量伪装是唯一做请求侧工具名重映射的路径，forwarder 依据它决定是否在
+/// 响应侧做反向恢复。透传请求若误开恢复，会把上游真实返回的官方工具名
+/// （`"Bash"` 等）错误转成小写，导致真实客户端收到未知工具名——恢复必须
+/// 与重映射对称。
+pub fn full_cloak_applies(client_headers: &HeaderMap, config: &RouteAggregationConfig) -> bool {
+    let user_agent = client_headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    should_cloak(config, user_agent) && !is_genuine_claude_cli(user_agent)
+}
+
 #[cfg(test)]
 mod passthrough_tests {
-    use super::{apply_cloaking, apply_count_tokens_cloaking};
+    use super::{apply_cloaking, apply_count_tokens_cloaking, full_cloak_applies};
     use crate::route_aggregation::config::RouteAggregationConfig;
     use crate::route_aggregation::CloakingMode;
     use axum::http::{HeaderMap, HeaderValue};
@@ -240,6 +248,38 @@ mod passthrough_tests {
             "claude-cli/2.1.237 (external, cli)"
         );
         assert!(out_headers.get("authorization").is_none());
+    }
+
+    #[test]
+    fn full_cloak_predicate_gates_response_side_tool_reversal() {
+        // 回归：响应侧工具名恢复必须与请求侧重映射对称。真实 CC 透传请求
+        // 不做重映射，full_cloak_applies 必须为 false，否则 forwarder 会把
+        // 上游真实返回的官方工具名（"Bash" 等）错误转成小写。
+        let never_config = RouteAggregationConfig::default();
+
+        // 真实客户端：即使 always 也不伪装 → 不得开恢复
+        assert!(!full_cloak_applies(
+            &genuine_client_headers(),
+            &always_config()
+        ));
+        // never 模式：任何客户端都不伪装 → 不得开恢复
+        let mut never_config = RouteAggregationConfig::default();
+        never_config.cloaking_mode = CloakingMode::Never;
+        assert!(!full_cloak_applies(
+            &genuine_client_headers(),
+            &never_config
+        ));
+        assert!(!full_cloak_applies(&HeaderMap::new(), &never_config));
+
+        // 非 CC 客户端 + auto/always：全量伪装（含工具名重映射）→ 开恢复
+        let mut curl = HeaderMap::new();
+        curl.insert("user-agent", hv("curl/8.4.0"));
+        assert!(full_cloak_applies(&curl, &always_config()));
+        // auto 模式下无 UA 的请求视为非 CC 客户端 → 开恢复
+        assert!(full_cloak_applies(
+            &HeaderMap::new(),
+            &RouteAggregationConfig::default()
+        ));
     }
 }
 

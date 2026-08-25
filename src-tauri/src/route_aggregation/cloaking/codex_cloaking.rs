@@ -26,7 +26,7 @@ pub fn apply_cloaking(
         .unwrap_or("");
     // 与 Claude 路径同理：真实 Codex CLI（codex-tui/*）本身就是目标指纹，
     // 即使 mode=always 也净透传客户端头，仅由 forwarder 替换鉴权。
-    if !should_cloak(config, user_agent) || user_agent.trim().starts_with("codex-tui") {
+    if !should_cloak(config, user_agent) || is_genuine_codex_cli(user_agent) {
         return Ok((
             modified_body,
             header_scrub::passthrough_client_headers(client_headers),
@@ -53,6 +53,14 @@ fn should_cloak(config: &RouteAggregationConfig, user_agent: &str) -> bool {
             !user_agent.starts_with("codex-tui")
         }
     }
+}
+
+/// UA 判定是否为真实 Codex CLI 客户端（`codex-tui/*`）。
+///
+/// 与 Claude 路径的 `is_genuine_claude_cli` 对称：真实客户端本身就是目标
+/// 指纹，命中时即使 mode=always 也跳过伪装、净透传客户端头。
+fn is_genuine_codex_cli(user_agent: &str) -> bool {
+    user_agent.trim().starts_with("codex-tui")
 }
 
 /// Confuse Codex identity identifiers to prevent multi-account association detection.
