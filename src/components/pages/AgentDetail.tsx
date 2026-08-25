@@ -66,7 +66,14 @@ function basename(path: string | null | undefined): string {
   return parts[parts.length - 1] ?? path;
 }
 
-export default function AgentDetail({ name, displayName, icon, onBack, onManageMcps, onManageSkills }: AgentDetailProps) {
+export default function AgentDetail({
+  name,
+  displayName,
+  icon,
+  onBack,
+  onManageMcps,
+  onManageSkills,
+}: AgentDetailProps) {
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -184,9 +191,10 @@ export default function AgentDetail({ name, displayName, icon, onBack, onManageM
             {/* ===== 路径信息 ===== */}
             <section className="agent-detail-section">
               <h2 className="agent-detail-section-title">路径信息</h2>
-              {appPaths.length === 0 && cliPaths.length === 0 && configDirs.length === 0 && !configDir && (
-                <div className="agent-detail-empty">暂无路径信息</div>
-              )}
+              {appPaths.length === 0 &&
+                cliPaths.length === 0 &&
+                configDirs.length === 0 &&
+                !configDir && <div className="agent-detail-empty">暂无路径信息</div>}
               <div className="agent-detail-rows">
                 {appPaths.map((p) => (
                   <div key={`app-${p}`} className="agent-path-row">
@@ -266,11 +274,7 @@ export default function AgentDetail({ name, displayName, icon, onBack, onManageM
                 <Puzzle size={14} strokeWidth={1.8} />
                 MCP 服务（{mcps.length}）
                 {onManageMcps && (
-                  <button
-                    type="button"
-                    className="agent-detail-manage-link"
-                    onClick={onManageMcps}
-                  >
+                  <button type="button" className="agent-detail-manage-link" onClick={onManageMcps}>
                     前往管理
                     <ChevronRight size={13} strokeWidth={2} />
                   </button>
@@ -284,9 +288,7 @@ export default function AgentDetail({ name, displayName, icon, onBack, onManageM
                     <div key={mcp.title} className="agent-detail-item">
                       <div className="agent-detail-item-header">
                         <span className="agent-detail-item-title">{mcp.title}</span>
-                        {mcp.transport && (
-                          <span className="agent-detail-tag">{mcp.transport}</span>
-                        )}
+                        {mcp.transport && <span className="agent-detail-tag">{mcp.transport}</span>}
                       </div>
                       {mcp.command && (
                         <div className="agent-detail-item-sub">

@@ -33,7 +33,12 @@ export async function invokeCheckProjectConfig(
   skillIds: string[],
 ): Promise<CheckResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<CheckResult>("check_project_config_exists", { targetDir, selectedAgents, mode, skillIds });
+  return invoke<CheckResult>("check_project_config_exists", {
+    targetDir,
+    selectedAgents,
+    mode,
+    skillIds,
+  });
 }
 
 export async function invokeInitProjectConfig(
@@ -46,5 +51,13 @@ export async function invokeInitProjectConfig(
   skillMode: SkillInstallMode,
 ): Promise<InitResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<InitResult>("init_project_config", { targetDir, selectedAgents, mode, overwrite, mcpServers, skillIds, skillMode });
+  return invoke<InitResult>("init_project_config", {
+    targetDir,
+    selectedAgents,
+    mode,
+    overwrite,
+    mcpServers,
+    skillIds,
+    skillMode,
+  });
 }

@@ -140,7 +140,11 @@ export default function Sidebar({
         /* ===== Settings Sidebar ===== */
         <>
           <div className="sidebar-header" style={{ borderBottom: "none", paddingBottom: 4 }}>
-            <button className="menu-item" onClick={onExitSettings} style={{ color: "var(--seed-muted)", padding: "8px 12px" }}>
+            <button
+              className="menu-item"
+              onClick={onExitSettings}
+              style={{ color: "var(--seed-muted)", padding: "8px 12px" }}
+            >
               <ArrowLeft size={18} strokeWidth={1.8} />
               <span className="menu-label">返回应用</span>
             </button>

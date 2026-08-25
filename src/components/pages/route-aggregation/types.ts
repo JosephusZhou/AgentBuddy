@@ -47,10 +47,7 @@ export interface RouteAggregationStatus {
  * Phase 5+：路由聚合只接受 Claude Messages 与 Codex Responses 两种业务
  * 协议；`openaiModelsList` 仅用于 `GET /v1/models` 元数据查询（不入路由池）。
  */
-export type InboundProtocol =
-  | "claudeMessages"
-  | "codexResponses"
-  | "openaiModelsList";
+export type InboundProtocol = "claudeMessages" | "codexResponses" | "openaiModelsList";
 
 export interface RouteLogEntry {
   /** 单调递增 ID；越大越新。 */
@@ -104,14 +101,8 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
  * 与 Rust 端 `provider_router::build_pool_from_db` 的协议过滤保持一致：
  * 路由聚合只接受 Anthropic / OpenAI / Universal 三类 backend，其它类型
  * 一律不进入 pool。 */
-export function isRouteableProviderType(
-  providerType: ProviderType | string,
-): boolean {
-  return (
-    providerType === "anthropic" ||
-    providerType === "openai" ||
-    providerType === "universal"
-  );
+export function isRouteableProviderType(providerType: ProviderType | string): boolean {
+  return providerType === "anthropic" || providerType === "openai" || providerType === "universal";
 }
 
 /** 不支持路由聚合的供应商在 UI 上的提示文案。 */

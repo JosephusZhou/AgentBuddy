@@ -97,10 +97,7 @@ function AppSelect({
   }, [disabled]);
 
   return (
-    <div
-      className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}
-      ref={rootRef}
-    >
+    <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
       <button
         type="button"
         id={id}
@@ -141,9 +138,7 @@ function AppSelect({
                   }}
                 >
                   <span className="app-select-option-title">{o.label}</span>
-                  {o.sub ? (
-                    <span className="app-select-option-sub">{o.sub}</span>
-                  ) : null}
+                  {o.sub ? <span className="app-select-option-sub">{o.sub}</span> : null}
                 </button>
               );
             })
@@ -155,23 +150,32 @@ function AppSelect({
 }
 
 /* ===== Header icons（与 Agent/MCP 页 action-btn 一致） ===== */
-const IconScan = () => (
-  <Radar strokeWidth={1.8} />
-);
+const IconScan = () => <Radar strokeWidth={1.8} />;
 
 /** 上传到云端 / 开始备份 */
-const IconBackup = () => (
-  <CloudUpload strokeWidth={1.8} />
-);
+const IconBackup = () => <CloudUpload strokeWidth={1.8} />;
 
 /** app-select 下拉箭头：open 时朝上 */
 const IconSelectChevron = ({ open }: { open: boolean }) => (
-  <ChevronDown size={16} strokeWidth={1.8} style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }} />
+  <ChevronDown
+    size={16}
+    strokeWidth={1.8}
+    style={{
+      transform: open ? "rotate(180deg)" : "rotate(0deg)",
+      transition: "transform 0.15s ease",
+    }}
+  />
 );
 
 /** 折叠箭头：open=true 朝下（展开），false 朝右（收起） */
 const IconChevron = ({ open }: { open: boolean }) => (
-  <ChevronDown strokeWidth={2} style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s ease" }} />
+  <ChevronDown
+    strokeWidth={2}
+    style={{
+      transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+      transition: "transform 0.15s ease",
+    }}
+  />
 );
 
 function collectDefaultIds(nodes: BackupUnitNode[]): Set<string> {
@@ -190,10 +194,7 @@ function collectDefaultIds(nodes: BackupUnitNode[]): Set<string> {
   return set;
 }
 
-function selectedContainsSecrets(
-  nodes: BackupUnitNode[],
-  selected: Set<string>,
-): boolean {
+function selectedContainsSecrets(nodes: BackupUnitNode[], selected: Set<string>): boolean {
   let found = false;
   const walk = (list: BackupUnitNode[]) => {
     for (const n of list) {
@@ -229,26 +230,16 @@ function UnitTree({
       {nodes.map((node) => {
         const kids = node.children ?? [];
         const hasKids = kids.length > 0;
-        const childIds = hasKids
-          ? collectAvailableIds([node])
-          : node.available
-            ? [node.id]
-            : [];
+        const childIds = hasKids ? collectAvailableIds([node]) : node.available ? [node.id] : [];
         const selectedCount = childIds.filter((id) => selected.has(id)).length;
-        const allSelected =
-          childIds.length > 0 && selectedCount === childIds.length;
-        const someSelected =
-          selectedCount > 0 && selectedCount < childIds.length;
+        const allSelected = childIds.length > 0 && selectedCount === childIds.length;
+        const someSelected = selectedCount > 0 && selectedCount < childIds.length;
         const checked = hasKids ? allSelected : selected.has(node.id);
-        const disabled = hasKids
-          ? childIds.length === 0
-          : !node.available;
+        const disabled = hasKids ? childIds.length === 0 : !node.available;
 
         return (
           <li key={node.id} className="backup-unit-item">
-            <label
-              className={`ui-check backup-unit-check ${disabled ? "is-disabled" : ""}`}
-            >
+            <label className={`ui-check backup-unit-check ${disabled ? "is-disabled" : ""}`}>
               <input
                 type="checkbox"
                 className="ui-check-input"
@@ -266,32 +257,19 @@ function UnitTree({
                   {node.containsSecrets && (
                     <span className="backup-badge backup-badge-secret">含密钥</span>
                   )}
-                  {!node.available && (
-                    <span className="backup-badge">未检测到</span>
-                  )}
+                  {!node.available && <span className="backup-badge">未检测到</span>}
                   {node.estimatedBytes > 0 && (
-                    <span className="backup-unit-size">
-                      {formatBytes(node.estimatedBytes)}
-                    </span>
+                    <span className="backup-unit-size">{formatBytes(node.estimatedBytes)}</span>
                   )}
                 </span>
-                {node.pathSummary && (
-                  <span className="backup-unit-path">{node.pathSummary}</span>
-                )}
+                {node.pathSummary && <span className="backup-unit-path">{node.pathSummary}</span>}
                 {node.warnings?.length > 0 && (
-                  <span className="backup-unit-warn">
-                    {node.warnings.join("；")}
-                  </span>
+                  <span className="backup-unit-warn">{node.warnings.join("；")}</span>
                 )}
               </span>
             </label>
             {hasKids && (
-              <UnitTree
-                nodes={kids}
-                selected={selected}
-                onToggle={onToggle}
-                depth={depth + 1}
-              />
+              <UnitTree nodes={kids} selected={selected} onToggle={onToggle} depth={depth + 1} />
             )}
           </li>
         );
@@ -355,9 +333,7 @@ export default function BackupManage() {
         setRestoreConnId((prev) => prev || dav[0].id);
       }
     } catch (e) {
-      setStatusMsg(
-        `加载失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`,
-      );
+      setStatusMsg(`加载失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
     } finally {
       setLoading(false);
     }
@@ -367,15 +343,9 @@ export default function BackupManage() {
     void reload();
   }, [reload]);
 
-  const availableLeafIds = useMemo(
-    () => collectAvailableIds(units),
-    [units],
-  );
+  const availableLeafIds = useMemo(() => collectAvailableIds(units), [units]);
 
-  const hasSecrets = useMemo(
-    () => selectedContainsSecrets(units, selected),
-    [units, selected],
-  );
+  const hasSecrets = useMemo(() => selectedContainsSecrets(units, selected), [units, selected]);
 
   const estimatedTotal = useMemo(() => {
     let total = 0;
@@ -430,9 +400,7 @@ export default function BackupManage() {
       const u = await listBackupUnits();
       setUnits(u);
     } catch (e) {
-      setStatusMsg(
-        `保存失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`,
-      );
+      setStatusMsg(`保存失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
     }
   };
 
@@ -497,9 +465,7 @@ export default function BackupManage() {
         void loadRemoteList(restoreConnId, remotePrefix);
       }
     } catch (e) {
-      setStatusMsg(
-        `备份失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`,
-      );
+      setStatusMsg(`备份失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
     } finally {
       unlisten?.();
       setRunning(false);
@@ -508,10 +474,8 @@ export default function BackupManage() {
   };
 
   const allUnitsSelected =
-    availableLeafIds.length > 0 &&
-    availableLeafIds.every((id) => selected.has(id));
-  const someUnitsSelected =
-    availableLeafIds.some((id) => selected.has(id)) && !allUnitsSelected;
+    availableLeafIds.length > 0 && availableLeafIds.every((id) => selected.has(id));
+  const someUnitsSelected = availableLeafIds.some((id) => selected.has(id)) && !allUnitsSelected;
 
   const loadRemoteList = useCallback(
     async (connId: string, prefix?: string) => {
@@ -521,13 +485,10 @@ export default function BackupManage() {
       }
       setRemoteLoading(true);
       try {
-        const items = await listRemoteBackups(
-          connId,
-          (prefix ?? uploadDir).trim() || "AgentBuddy",
-        );
+        const items = await listRemoteBackups(connId, (prefix ?? uploadDir).trim() || "AgentBuddy");
         setRemoteItems(items);
         setSelectedRemote((prev) =>
-          items.some((i) => i.name === prev) ? prev : items[0]?.name ?? "",
+          items.some((i) => i.name === prev) ? prev : (items[0]?.name ?? ""),
         );
       } catch (e) {
         setRemoteItems([]);
@@ -581,9 +542,7 @@ export default function BackupManage() {
       setRestoreResult(res);
       setStatusMsg(res.message);
     } catch (e) {
-      setStatusMsg(
-        `恢复失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`,
-      );
+      setStatusMsg(`恢复失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
     } finally {
       unlisten?.();
       setRestoring(false);
@@ -592,11 +551,7 @@ export default function BackupManage() {
     }
   };
 
-  const canStart =
-    !loading &&
-    !running &&
-    selected.size > 0 &&
-    selectedDav.size > 0;
+  const canStart = !loading && !running && selected.size > 0 && selectedDav.size > 0;
 
   const selectedRemoteItem = remoteItems.find((i) => i.name === selectedRemote);
   const canRestore =
@@ -669,9 +624,7 @@ export default function BackupManage() {
                   {!unitsExpanded && (
                     <span className="backup-section-collapsed-meta">
                       已选 {selected.size} 项
-                      {estimatedTotal > 0
-                        ? ` · 约 ${formatBytes(estimatedTotal)}`
-                        : ""}
+                      {estimatedTotal > 0 ? ` · 约 ${formatBytes(estimatedTotal)}` : ""}
                     </span>
                   )}
                 </button>
@@ -694,16 +647,10 @@ export default function BackupManage() {
               </div>
               {unitsExpanded && (
                 <div className="backup-card">
-                  <UnitTree
-                    nodes={units}
-                    selected={selected}
-                    onToggle={onToggleUnit}
-                  />
+                  <UnitTree nodes={units} selected={selected} onToggle={onToggleUnit} />
                   <div className="backup-card-footer">
                     已选 {selected.size} 项
-                    {estimatedTotal > 0
-                      ? ` · 约 ${formatBytes(estimatedTotal)}`
-                      : ""}
+                    {estimatedTotal > 0 ? ` · 约 ${formatBytes(estimatedTotal)}` : ""}
                   </div>
                 </div>
               )}
@@ -728,9 +675,7 @@ export default function BackupManage() {
                             type="checkbox"
                             className="ui-check-input"
                             checked={selectedDav.has(c.id)}
-                            onChange={(e) =>
-                              onToggleDav(c.id, e.target.checked)
-                            }
+                            onChange={(e) => onToggleDav(c.id, e.target.checked)}
                           />
                           <CheckGlyph />
                           <span className="backup-unit-body">
@@ -738,9 +683,7 @@ export default function BackupManage() {
                               <span className="backup-unit-label">{c.name}</span>
                               <span
                                 className={`backup-badge ${
-                                  c.status === "connected"
-                                    ? "backup-badge-ok"
-                                    : ""
+                                  c.status === "connected" ? "backup-badge-ok" : ""
                                 }`}
                               >
                                 {c.status === "connected" ? "已连接" : "未检测"}
@@ -772,7 +715,8 @@ export default function BackupManage() {
                     />
                   </label>
                   <p className="backup-upload-dir-hint">
-                    相对 WebDAV 连接根路径的目录；不存在时会通过 MKCOL 自动创建。备份文件直接放在该目录下。
+                    相对 WebDAV 连接根路径的目录；不存在时会通过 MKCOL
+                    自动创建。备份文件直接放在该目录下。
                   </p>
                 </div>
               </div>
@@ -894,9 +838,7 @@ export default function BackupManage() {
                       />
                     </label>
                     <label className="backup-field">
-                      <span className="backup-field-label">
-                        sub2api 根目录（空=自动探测）
-                      </span>
+                      <span className="backup-field-label">sub2api 根目录（空=自动探测）</span>
                       <input
                         type="text"
                         className="form-input"
@@ -934,13 +876,12 @@ export default function BackupManage() {
               </div>
               <div className="backup-card backup-restore">
                 <p className="backup-upload-dir-hint">
-                  从 WebDAV 上传目录下载备份并按 manifest 还原到本机路径。加密包需填写备份时使用的口令。恢复会覆盖同名文件，请谨慎操作。
+                  从 WebDAV 上传目录下载备份并按 manifest
+                  还原到本机路径。加密包需填写备份时使用的口令。恢复会覆盖同名文件，请谨慎操作。
                 </p>
 
                 {connections.length === 0 ? (
-                  <div className="backup-empty-inline">
-                    请先在「设置 → WebDAV」添加连接
-                  </div>
+                  <div className="backup-empty-inline">请先在「设置 → WebDAV」添加连接</div>
                 ) : (
                   <>
                     <div className="backup-restore-toolbar">
@@ -973,10 +914,7 @@ export default function BackupManage() {
                         className="btn btn-primary backup-restore-refresh"
                         disabled={running || !restoreConnId || remoteLoading}
                         onClick={() =>
-                          void loadRemoteList(
-                            restoreConnId,
-                            uploadDir.trim() || "AgentBuddy",
-                          )
+                          void loadRemoteList(restoreConnId, uploadDir.trim() || "AgentBuddy")
                         }
                       >
                         {remoteLoading ? "加载中…" : "刷新列表"}
@@ -1011,24 +949,18 @@ export default function BackupManage() {
                                 <CheckGlyph />
                                 <span className="backup-unit-body">
                                   <span className="backup-unit-label-row">
-                                    <span className="backup-unit-label">
-                                      {item.name}
-                                    </span>
+                                    <span className="backup-unit-label">{item.name}</span>
                                     <span className="backup-unit-size">
                                       {formatBytes(item.bytes)}
                                     </span>
                                     {item.encrypted ? (
-                                      <span className="backup-badge backup-badge-secret">
-                                        加密
-                                      </span>
+                                      <span className="backup-badge backup-badge-secret">加密</span>
                                     ) : (
                                       <span className="backup-badge">明文</span>
                                     )}
                                   </span>
                                   {item.lastModified ? (
-                                    <span className="backup-unit-path">
-                                      {item.lastModified}
-                                    </span>
+                                    <span className="backup-unit-path">{item.lastModified}</span>
                                   ) : null}
                                 </span>
                               </label>
@@ -1066,17 +998,12 @@ export default function BackupManage() {
 
                     {restoreResult && !running && (
                       <div
-                        className={`backup-result ${
-                          restoreResult.ok ? "is-ok" : "is-fail"
-                        }`}
+                        className={`backup-result ${restoreResult.ok ? "is-ok" : "is-fail"}`}
                         style={{ marginTop: 12 }}
                       >
-                        <div className="backup-result-msg">
-                          {restoreResult.message}
-                        </div>
+                        <div className="backup-result-msg">{restoreResult.message}</div>
                         <div className="backup-result-meta">
-                          还原 {restoreResult.restoredFiles} · 跳过{" "}
-                          {restoreResult.skippedFiles}
+                          还原 {restoreResult.restoredFiles} · 跳过 {restoreResult.skippedFiles}
                         </div>
                         {restoreResult.warnings?.length > 0 && (
                           <div className="backup-unit-warn">
@@ -1098,9 +1025,7 @@ export default function BackupManage() {
                 </div>
                 <div className="backup-card backup-progress">
                   <div className="backup-progress-row">
-                    <span className="backup-progress-phase">
-                      {phaseLabel(progress.phase)}
-                    </span>
+                    <span className="backup-progress-phase">{phaseLabel(progress.phase)}</span>
                     <span className="backup-progress-count">
                       {progress.total > 0
                         ? `${Math.min(progress.current, progress.total)} / ${progress.total}`
@@ -1120,12 +1045,7 @@ export default function BackupManage() {
                       style={{
                         width: `${
                           progress.total > 0
-                            ? Math.min(
-                                100,
-                                Math.round(
-                                  (progress.current / progress.total) * 100,
-                                ),
-                              )
+                            ? Math.min(100, Math.round((progress.current / progress.total) * 100))
                             : 8
                         }%`,
                       }}
@@ -1142,25 +1062,16 @@ export default function BackupManage() {
                 <div className="backup-section-head">
                   <h2 className="backup-section-title">最近一次结果</h2>
                 </div>
-                <div
-                  className={`backup-card backup-result ${
-                    result.ok ? "is-ok" : "is-fail"
-                  }`}
-                >
+                <div className={`backup-card backup-result ${result.ok ? "is-ok" : "is-fail"}`}>
                   <div className="backup-result-msg">{result.message}</div>
                   <div className="backup-result-meta">
-                    文件：{result.archiveFileName} ·{" "}
-                    {formatBytes(result.archiveBytes)}
+                    文件：{result.archiveFileName} · {formatBytes(result.archiveBytes)}
                     {result.encrypted ? " · 已加密" : " · 明文 zip"}
                   </div>
                   <ul className="backup-result-targets">
                     {result.targets.map((t) => (
                       <li key={t.connectionId}>
-                        <span
-                          className={
-                            t.ok ? "backup-badge-ok" : "backup-badge-fail"
-                          }
-                        >
+                        <span className={t.ok ? "backup-badge-ok" : "backup-badge-fail"}>
                           {t.ok ? "成功" : "失败"}
                         </span>{" "}
                         <strong>{t.name}</strong> — {t.message}
@@ -1171,9 +1082,7 @@ export default function BackupManage() {
                     ))}
                   </ul>
                   {result.warnings?.length > 0 && (
-                    <div className="backup-unit-warn">
-                      {result.warnings.join("；")}
-                    </div>
+                    <div className="backup-unit-warn">{result.warnings.join("；")}</div>
                   )}
                 </div>
               </section>

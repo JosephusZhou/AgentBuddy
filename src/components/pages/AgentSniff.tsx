@@ -35,29 +35,17 @@ interface AgentConfigStat {
 }
 
 /* ===== SVG Icons ===== */
-const IconScan = () => (
-  <Radar strokeWidth={1.8} />
-);
+const IconScan = () => <Radar strokeWidth={1.8} />;
 
-const IconPlus = () => (
-  <Plus strokeWidth={2} />
-);
+const IconPlus = () => <Plus strokeWidth={2} />;
 
-const IconClose = () => (
-  <X size={16} strokeWidth={2} />
-);
+const IconClose = () => <X size={16} strokeWidth={2} />;
 
-const IconFolder = () => (
-  <FolderOpen size={16} strokeWidth={1.8} />
-);
+const IconFolder = () => <FolderOpen size={16} strokeWidth={1.8} />;
 
-const IconFileSettings = () => (
-  <FileCog size={16} strokeWidth={1.8} />
-);
+const IconFileSettings = () => <FileCog size={16} strokeWidth={1.8} />;
 
-const IconFileMcp = () => (
-  <FileJson size={16} strokeWidth={1.8} />
-);
+const IconFileMcp = () => <FileJson size={16} strokeWidth={1.8} />;
 
 /* ===== Helpers ===== */
 function getInitials(name: string): string {
@@ -113,7 +101,9 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
       const entries = await Promise.all(
         found.map(async (a) => {
           try {
-            const t = await (invoke("agent_open_targets", { name: a.name }) as Promise<AgentOpenTargets>);
+            const t = await (invoke("agent_open_targets", {
+              name: a.name,
+            }) as Promise<AgentOpenTargets>);
             return [a.name, t] as const;
           } catch {
             return [
@@ -237,7 +227,11 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const agent = await (invoke("add_agent_manual", { name, cliPath, configDir }) as Promise<AgentResult>);
+      const agent = await (invoke("add_agent_manual", {
+        name,
+        cliPath,
+        configDir,
+      }) as Promise<AgentResult>);
       setAgents((prev) => {
         const next = [...prev, agent];
         void loadOpenTargets(next);
@@ -301,7 +295,10 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
     (agentName: string, kind: "mcp" | "settings") => {
       void runOpen(`${kind}:${agentName}`, async () => {
         const { invoke } = await import("@tauri-apps/api/core");
-        return invoke("open_agent_config_file", { name: agentName, kind }) as Promise<AgentOpenResult>;
+        return invoke("open_agent_config_file", {
+          name: agentName,
+          kind,
+        }) as Promise<AgentOpenResult>;
       });
     },
     [runOpen],
@@ -309,7 +306,7 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
 
   // 详情页：以最新的列表数据为准（重新扫描后名称/路径可能更新）
   const selected = selectedAgent
-    ? agents.find((a) => a.name === selectedAgent.name) ?? selectedAgent
+    ? (agents.find((a) => a.name === selectedAgent.name) ?? selectedAgent)
     : null;
   if (selected) {
     return (
@@ -338,11 +335,7 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
             >
               <IconScan />
             </button>
-            <button
-              className="action-btn"
-              data-tooltip="手动添加"
-              onClick={() => setShowAdd(true)}
-            >
+            <button className="action-btn" data-tooltip="手动添加" onClick={() => setShowAdd(true)}>
               <IconPlus />
             </button>
           </div>
@@ -369,117 +362,117 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
               const busy = busyKey?.endsWith(`:${agent.name}`) ?? false;
 
               return (
-            <div
-              key={agent.name}
-              className={`agent-card ${agent.found ? "clickable" : ""}`}
-              role={agent.found ? "button" : undefined}
-              tabIndex={agent.found ? 0 : undefined}
-              aria-label={agent.found ? `查看 ${agent.display_name} 详情` : undefined}
-              onClick={agent.found ? () => setSelectedAgent(agent) : undefined}
-              onKeyDown={
-                agent.found
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelectedAgent(agent);
-                      }
-                    }
-                  : undefined
-              }
-            >
-              <div className="agent-card-header">
-                <div className={`agent-icon ${agent.found ? "found" : ""}`}>
-                  {getAgentIcon(agent.name) ?? agent.icon}
-                </div>
-                <div className="agent-name">{agent.display_name}</div>
-                {showActions && hasAnyAction && (
-                  <div className="agent-card-actions" onClick={(e) => e.stopPropagation()}>
-                    {settingsFile && (
-                      <button
-                        type="button"
-                        className="claude-env-action-btn"
-                        data-tooltip={`打开主配置 ${basename(settingsFile)}`}
-                        onClick={() => handleOpenFile(agent.name, "settings")}
-                        disabled={busy}
-                      >
-                        <IconFileSettings />
-                      </button>
-                    )}
-                    {mcpFile && (
-                      <button
-                        type="button"
-                        className="claude-env-action-btn"
-                        data-tooltip={
-                          settingsFile
-                            ? `打开 MCP 配置 ${basename(mcpFile)}`
-                            : `打开配置文件 ${basename(mcpFile)}`
+                <div
+                  key={agent.name}
+                  className={`agent-card ${agent.found ? "clickable" : ""}`}
+                  role={agent.found ? "button" : undefined}
+                  tabIndex={agent.found ? 0 : undefined}
+                  aria-label={agent.found ? `查看 ${agent.display_name} 详情` : undefined}
+                  onClick={agent.found ? () => setSelectedAgent(agent) : undefined}
+                  onKeyDown={
+                    agent.found
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedAgent(agent);
+                          }
                         }
-                        onClick={() => handleOpenFile(agent.name, "mcp")}
-                        disabled={busy}
-                      >
-                        <IconFileMcp />
-                      </button>
+                      : undefined
+                  }
+                >
+                  <div className="agent-card-header">
+                    <div className={`agent-icon ${agent.found ? "found" : ""}`}>
+                      {getAgentIcon(agent.name) ?? agent.icon}
+                    </div>
+                    <div className="agent-name">{agent.display_name}</div>
+                    {showActions && hasAnyAction && (
+                      <div className="agent-card-actions" onClick={(e) => e.stopPropagation()}>
+                        {settingsFile && (
+                          <button
+                            type="button"
+                            className="claude-env-action-btn"
+                            data-tooltip={`打开主配置 ${basename(settingsFile)}`}
+                            onClick={() => handleOpenFile(agent.name, "settings")}
+                            disabled={busy}
+                          >
+                            <IconFileSettings />
+                          </button>
+                        )}
+                        {mcpFile && (
+                          <button
+                            type="button"
+                            className="claude-env-action-btn"
+                            data-tooltip={
+                              settingsFile
+                                ? `打开 MCP 配置 ${basename(mcpFile)}`
+                                : `打开配置文件 ${basename(mcpFile)}`
+                            }
+                            onClick={() => handleOpenFile(agent.name, "mcp")}
+                            disabled={busy}
+                          >
+                            <IconFileMcp />
+                          </button>
+                        )}
+                        {configDir && (
+                          <button
+                            type="button"
+                            className="claude-env-action-btn"
+                            data-tooltip={`在 Finder 中打开 ${displayHomePath(configDir)}`}
+                            onClick={() => handleRevealDir(agent.name)}
+                            disabled={busy}
+                          >
+                            <IconFolder />
+                          </button>
+                        )}
+                      </div>
                     )}
-                    {configDir && (
-                      <button
-                        type="button"
-                        className="claude-env-action-btn"
-                        data-tooltip={`在 Finder 中打开 ${displayHomePath(configDir)}`}
-                        onClick={() => handleRevealDir(agent.name)}
-                        disabled={busy}
-                      >
-                        <IconFolder />
-                      </button>
+                    <span className="agent-status">
+                      <span
+                        className={`status-dot ${agent.found ? "connected" : "disconnected"}`}
+                      />
+                      {agent.found ? "已安装" : "未找到"}
+                    </span>
+                    {agent.found && (
+                      <span className="agent-card-chevron" aria-hidden>
+                        <ChevronRight size={16} strokeWidth={2} />
+                      </span>
                     )}
                   </div>
-                )}
-                <span className="agent-status">
-                  <span className={`status-dot ${agent.found ? "connected" : "disconnected"}`} />
-                  {agent.found ? "已安装" : "未找到"}
-                </span>
-                {agent.found && (
-                  <span className="agent-card-chevron" aria-hidden>
-                    <ChevronRight size={16} strokeWidth={2} />
-                  </span>
-                )}
-              </div>
-              {agent.found && (agent.install_paths.length > 0 || agent.config_dirs.length > 0 || stats) && (
-                <div className="agent-paths">
-                  {agent.install_paths.map((path, i) => (
-                    <div key={`install-${i}`} className="agent-path-row">
-                      <span className="agent-path-label">
-                        {path.endsWith('.app') ? "App路径" : "CLI 路径"}
-                      </span>
-                      <span className="agent-path-value">{path}</span>
-                    </div>
-                  ))}
-                  {agent.config_dirs.map((dir, i) => (
-                    <div key={`config-${i}`} className="agent-path-row">
-                      <span className="agent-path-label">配置目录</span>
-                      <span className="agent-path-value">{dir}</span>
-                    </div>
-                  ))}
-                  {stats && (
-                    <div className="agent-path-row">
-                      <span className="agent-path-label">配置内容</span>
-                      <span className="agent-path-value">
-                        {stats.mcpCount} 个 MCP · {stats.skillCount} 个 Skills
-                      </span>
-                    </div>
-                  )}
+                  {agent.found &&
+                    (agent.install_paths.length > 0 || agent.config_dirs.length > 0 || stats) && (
+                      <div className="agent-paths">
+                        {agent.install_paths.map((path, i) => (
+                          <div key={`install-${i}`} className="agent-path-row">
+                            <span className="agent-path-label">
+                              {path.endsWith(".app") ? "App路径" : "CLI 路径"}
+                            </span>
+                            <span className="agent-path-value">{path}</span>
+                          </div>
+                        ))}
+                        {agent.config_dirs.map((dir, i) => (
+                          <div key={`config-${i}`} className="agent-path-row">
+                            <span className="agent-path-label">配置目录</span>
+                            <span className="agent-path-value">{dir}</span>
+                          </div>
+                        ))}
+                        {stats && (
+                          <div className="agent-path-row">
+                            <span className="agent-path-label">配置内容</span>
+                            <span className="agent-path-value">
+                              {stats.mcpCount} 个 MCP · {stats.skillCount} 个 Skills
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                 </div>
-              )}
-            </div>
               );
             })}
         </div>
       </div>
 
       {/* ===== Add Agent Modal ===== */}
-      <div
-        className={`modal-overlay ${showAdd ? "visible" : ""}`}
-        {...addDismiss}
-      >
+      <div className={`modal-overlay ${showAdd ? "visible" : ""}`} {...addDismiss}>
         <div className="modal">
           <div className="modal-header">
             <h2 className="modal-title">手动添加 Agent</h2>
@@ -489,7 +482,9 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
           </div>
           <div className="modal-body">
             <div className="form-group">
-              <label className="form-label" htmlFor="agent-name">Agent 名称</label>
+              <label className="form-label" htmlFor="agent-name">
+                Agent 名称
+              </label>
               <input
                 ref={nameInputRef}
                 type="text"
@@ -501,7 +496,9 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="agent-cli-path">CLI/App路径</label>
+              <label className="form-label" htmlFor="agent-cli-path">
+                CLI/App路径
+              </label>
               <input
                 type="text"
                 className="form-input"
@@ -512,7 +509,9 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="agent-config-dir">配置目录</label>
+              <label className="form-label" htmlFor="agent-config-dir">
+                配置目录
+              </label>
               <input
                 type="text"
                 className="form-input"
@@ -524,8 +523,12 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
             </div>
           </div>
           <div className="modal-footer">
-            <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>取消</button>
-            <button className="btn btn-primary" onClick={handleManualAdd}>保存</button>
+            <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
+              取消
+            </button>
+            <button className="btn btn-primary" onClick={handleManualAdd}>
+              保存
+            </button>
           </div>
         </div>
       </div>

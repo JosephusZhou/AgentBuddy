@@ -22,9 +22,7 @@ import {
 } from "./project-config/api";
 import { Folder } from "lucide-react";
 
-const IconFolder = () => (
-  <Folder size={16} strokeWidth={1.8} />
-);
+const IconFolder = () => <Folder size={16} strokeWidth={1.8} />;
 
 /** MCP transport types in fixed display order; only types present in the list are shown. */
 const MCP_TYPE_ORDER = ["stdio", "http", "sse"] as const;
@@ -65,7 +63,10 @@ export default function ProjectConfig() {
     let alive = true;
     (async () => {
       try {
-        const [mcps, skills] = await Promise.all([invokeListMcpServers(), invokeListSkillOptions()]);
+        const [mcps, skills] = await Promise.all([
+          invokeListMcpServers(),
+          invokeListSkillOptions(),
+        ]);
         if (!alive) return;
         setMcpOptions(mcps);
         setSkillOptions(skills);
@@ -103,12 +104,12 @@ export default function ProjectConfig() {
   }, [mcpOptions]);
 
   const filteredMcps = useMemo(
-    () => mcpOptions.filter(m => mcpTypeFilter === "all" || m.type === mcpTypeFilter),
+    () => mcpOptions.filter((m) => mcpTypeFilter === "all" || m.type === mcpTypeFilter),
     [mcpOptions, mcpTypeFilter],
   );
 
   const selectFilteredMcps = (on: boolean) => {
-    setSelectedMcps(prev => {
+    setSelectedMcps((prev) => {
       const next = new Set(prev);
       for (const m of filteredMcps) {
         on ? next.add(m.title) : next.delete(m.title);
@@ -132,7 +133,9 @@ export default function ProjectConfig() {
     ];
     const untagged = counts.get("") ?? 0;
     if (untagged > 0) opts.push({ key: "", label: "无标签", count: untagged });
-    for (const [tag, count] of Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    for (const [tag, count] of Array.from(counts.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    )) {
       if (tag === "") continue;
       opts.push({ key: tag, label: tag, count });
     }
@@ -141,7 +144,7 @@ export default function ProjectConfig() {
 
   const filteredSkills = useMemo(
     () =>
-      skillOptions.filter(s => {
+      skillOptions.filter((s) => {
         const sourceOk = skillSourceFilter === "all" || sourceKeyOf(s) === skillSourceFilter;
         const tagOk = skillTagFilter === "all" || (s.tag?.trim() ?? "") === skillTagFilter;
         return sourceOk && tagOk;
@@ -150,7 +153,7 @@ export default function ProjectConfig() {
   );
 
   const selectFilteredSkills = (on: boolean) => {
-    setSelectedSkills(prev => {
+    setSelectedSkills((prev) => {
       const next = new Set(prev);
       for (const s of filteredSkills) {
         on ? next.add(s.id) : next.delete(s.id);
@@ -168,7 +171,7 @@ export default function ProjectConfig() {
   };
 
   const toggleAgent = (name: string) => {
-    setSelected(prev => toggleIn(prev, name));
+    setSelected((prev) => toggleIn(prev, name));
   };
 
   const handlePickDir = async () => {
@@ -185,9 +188,9 @@ export default function ProjectConfig() {
   };
 
   const buildRequest = () => ({
-    agents: Array.from(selected).map(name => ({ name })),
+    agents: Array.from(selected).map((name) => ({ name })),
     skillIds: Array.from(selectedSkills),
-    mcpServers: mcpOptions.filter(m => selectedMcps.has(m.title)),
+    mcpServers: mcpOptions.filter((m) => selectedMcps.has(m.title)),
   });
 
   const doInit = async (overwrite: boolean) => {
@@ -196,10 +199,20 @@ export default function ProjectConfig() {
     setStatusMsg("初始化中…");
     try {
       const { agents, skillIds, mcpServers } = buildRequest();
-      const result = await invokeInitProjectConfig(targetDir, agents, mode, overwrite, mcpServers, skillIds, skillMode);
+      const result = await invokeInitProjectConfig(
+        targetDir,
+        agents,
+        mode,
+        overwrite,
+        mcpServers,
+        skillIds,
+        skillMode,
+      );
       setInitResult(result);
       setCheckResult(null);
-      setStatusMsg(result.errors.length > 0 ? `完成，但有 ${result.errors.length} 个错误` : "初始化完成");
+      setStatusMsg(
+        result.errors.length > 0 ? `完成，但有 ${result.errors.length} 个错误` : "初始化完成",
+      );
     } catch (e) {
       setStatusMsg(String(e));
     } finally {
@@ -231,10 +244,20 @@ export default function ProjectConfig() {
       }
       // No conflicts — run init while staying in busy state (single busy lifecycle).
       setStatusMsg("初始化中…");
-      const init = await invokeInitProjectConfig(targetDir, agents, mode, false, mcpServers, skillIds, skillMode);
+      const init = await invokeInitProjectConfig(
+        targetDir,
+        agents,
+        mode,
+        false,
+        mcpServers,
+        skillIds,
+        skillMode,
+      );
       setInitResult(init);
       setCheckResult(null);
-      setStatusMsg(init.errors.length > 0 ? `完成，但有 ${init.errors.length} 个错误` : "初始化完成");
+      setStatusMsg(
+        init.errors.length > 0 ? `完成，但有 ${init.errors.length} 个错误` : "初始化完成",
+      );
     } catch (e) {
       setStatusMsg(String(e));
     } finally {
@@ -242,8 +265,10 @@ export default function ProjectConfig() {
     }
   };
 
-  const selectedMcpTitles = mcpOptions.filter(m => selectedMcps.has(m.title)).map(m => m.title);
-  const selectedSkillTitles = skillOptions.filter(s => selectedSkills.has(s.id)).map(s => s.title);
+  const selectedMcpTitles = mcpOptions.filter((m) => selectedMcps.has(m.title)).map((m) => m.title);
+  const selectedSkillTitles = skillOptions
+    .filter((s) => selectedSkills.has(s.id))
+    .map((s) => s.title);
 
   return (
     <>
@@ -252,7 +277,7 @@ export default function ProjectConfig() {
         <p className="content-desc">为项目目录初始化多个 AI coding agent 的配置文件和目录</p>
       </div>
 
-      <div className={`content-body project-config-body${initResult ? " has-result" : ""}`}>
+      <div className={`content-body project-config-body${initResult ? "has-result" : ""}`}>
         <Toast message={statusMsg} />
 
         {/* 目录选择 */}
@@ -265,7 +290,12 @@ export default function ProjectConfig() {
               readOnly
               placeholder="点击右侧按钮选择项目目录…"
             />
-            <button className="form-input-action" onClick={handlePickDir} disabled={busy} data-tooltip="选择目录">
+            <button
+              className="form-input-action"
+              onClick={handlePickDir}
+              disabled={busy}
+              data-tooltip="选择目录"
+            >
               <IconFolder />
             </button>
           </div>
@@ -284,7 +314,7 @@ export default function ProjectConfig() {
               <button
                 type="button"
                 className="mcp-agent-action"
-                onClick={() => setSelected(new Set(AGENT_PROJECT_INFOS.map(a => a.name)))}
+                onClick={() => setSelected(new Set(AGENT_PROJECT_INFOS.map((a) => a.name)))}
                 disabled={busy}
               >
                 全选
@@ -300,7 +330,7 @@ export default function ProjectConfig() {
             </div>
           </div>
           <div className="agent-pick-grid">
-            {AGENT_PROJECT_INFOS.map(agent => {
+            {AGENT_PROJECT_INFOS.map((agent) => {
               const sel = selected.has(agent.name);
               const icon = getAgentIcon(agent.name);
               return (
@@ -315,7 +345,9 @@ export default function ProjectConfig() {
                     {icon ?? agent.displayName.slice(0, 2).toUpperCase()}
                   </span>
                   <span className="agent-pick-name">{agent.displayName}</span>
-                  <span className={`agent-pick-check ${sel ? "checked" : ""}`}>{sel ? "✓" : ""}</span>
+                  <span className={`agent-pick-check ${sel ? "checked" : ""}`}>
+                    {sel ? "✓" : ""}
+                  </span>
                 </button>
               );
             })}
@@ -326,7 +358,7 @@ export default function ProjectConfig() {
         <div className="form-group">
           <label className="form-label">初始化模式</label>
           <div className="proj-mode-list">
-            {(["symlink", "full"] as InitMode[]).map(m => (
+            {(["symlink", "full"] as InitMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -335,8 +367,12 @@ export default function ProjectConfig() {
                 disabled={busy}
               >
                 <div className="proj-mode-option-row">
-                  <span className={`agent-pick-check ${mode === m ? "checked" : ""}`}>{mode === m ? "✓" : ""}</span>
-                  <span className="agent-pick-name">{m === "symlink" ? "软链接模式（推荐）" : "全量模式"}</span>
+                  <span className={`agent-pick-check ${mode === m ? "checked" : ""}`}>
+                    {mode === m ? "✓" : ""}
+                  </span>
+                  <span className="agent-pick-name">
+                    {m === "symlink" ? "软链接模式（推荐）" : "全量模式"}
+                  </span>
                 </div>
                 <span className="proj-mode-option-desc">
                   {m === "symlink"
@@ -411,7 +447,7 @@ export default function ProjectConfig() {
           <div className="form-group">
             <label className="form-label">Skills 安装方式</label>
             <div className="proj-mode-list">
-              {(["link", "copy"] as SkillInstallMode[]).map(sm => (
+              {(["link", "copy"] as SkillInstallMode[]).map((sm) => (
                 <button
                   key={sm}
                   type="button"
@@ -420,8 +456,12 @@ export default function ProjectConfig() {
                   disabled={busy}
                 >
                   <div className="proj-mode-option-row">
-                    <span className={`agent-pick-check ${skillMode === sm ? "checked" : ""}`}>{skillMode === sm ? "✓" : ""}</span>
-                    <span className="agent-pick-name">{sm === "link" ? "软链接（推荐）" : "完整复制"}</span>
+                    <span className={`agent-pick-check ${skillMode === sm ? "checked" : ""}`}>
+                      {skillMode === sm ? "✓" : ""}
+                    </span>
+                    <span className="agent-pick-name">
+                      {sm === "link" ? "软链接（推荐）" : "完整复制"}
+                    </span>
                   </div>
                   <span className="proj-mode-option-desc">
                     {sm === "link"
@@ -449,25 +489,37 @@ export default function ProjectConfig() {
           <div className="proj-init-result">
             {initResult.created.length > 0 && (
               <div className="proj-init-result-group">
-                <div className="proj-init-result-title is-success">已创建 ({initResult.created.length})</div>
-                {initResult.created.map(p => (
-                  <div key={`c:${p}`} className="proj-init-result-line is-success">{p}</div>
+                <div className="proj-init-result-title is-success">
+                  已创建 ({initResult.created.length})
+                </div>
+                {initResult.created.map((p) => (
+                  <div key={`c:${p}`} className="proj-init-result-line is-success">
+                    {p}
+                  </div>
                 ))}
               </div>
             )}
             {initResult.skipped.length > 0 && (
               <div className="proj-init-result-group">
-                <div className="proj-init-result-title is-muted">已跳过 ({initResult.skipped.length})</div>
-                {initResult.skipped.map(p => (
-                  <div key={`s:${p}`} className="proj-init-result-line is-muted">{p}</div>
+                <div className="proj-init-result-title is-muted">
+                  已跳过 ({initResult.skipped.length})
+                </div>
+                {initResult.skipped.map((p) => (
+                  <div key={`s:${p}`} className="proj-init-result-line is-muted">
+                    {p}
+                  </div>
                 ))}
               </div>
             )}
             {initResult.errors.length > 0 && (
               <div className="proj-init-result-group">
-                <div className="proj-init-result-title is-danger">错误 ({initResult.errors.length})</div>
-                {initResult.errors.map(p => (
-                  <div key={`e:${p}`} className="proj-init-result-line is-danger">{p}</div>
+                <div className="proj-init-result-title is-danger">
+                  错误 ({initResult.errors.length})
+                </div>
+                {initResult.errors.map((p) => (
+                  <div key={`e:${p}`} className="proj-init-result-line is-danger">
+                    {p}
+                  </div>
                 ))}
               </div>
             )}
@@ -477,7 +529,7 @@ export default function ProjectConfig() {
 
       {/* MCP 选择弹窗 */}
       <div className={`modal-overlay ${mcpDialogOpen ? "visible" : ""}`} {...mcpDialogDismiss}>
-        <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+        <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <span className="modal-title">
               选择 MCP
@@ -491,11 +543,13 @@ export default function ProjectConfig() {
           </div>
           <div className="modal-body mcp-modal-body">
             {mcpOptions.length === 0 ? (
-              <span className="proj-mode-option-desc">暂无可选 MCP — 可先在「MCP 管理」页添加或嗅探。</span>
+              <span className="proj-mode-option-desc">
+                暂无可选 MCP — 可先在「MCP 管理」页添加或嗅探。
+              </span>
             ) : (
               <>
                 <div className="skill-source-filter" role="group" aria-label="按类型筛选">
-                  {mcpTypeOptions.map(opt => {
+                  {mcpTypeOptions.map((opt) => {
                     const active = opt.key === mcpTypeFilter;
                     return (
                       <button
@@ -513,7 +567,8 @@ export default function ProjectConfig() {
                 </div>
                 <div className="agent-pick-header" style={{ marginTop: 12 }}>
                   <span className="proj-mode-option-desc">
-                    筛选结果 {filteredMcps.length} 项（已选 {filteredMcps.filter(m => selectedMcps.has(m.title)).length}）
+                    筛选结果 {filteredMcps.length} 项（已选{" "}
+                    {filteredMcps.filter((m) => selectedMcps.has(m.title)).length}）
                   </span>
                   <div className="mcp-agent-actions">
                     <button
@@ -537,13 +592,13 @@ export default function ProjectConfig() {
                 {filteredMcps.length === 0 ? (
                   <span className="proj-mode-option-desc">该类型下暂无 MCP。</span>
                 ) : (
-                  filteredMcps.map(mcp => (
+                  filteredMcps.map((mcp) => (
                     <label key={mcp.title} className="ui-check">
                       <input
                         type="checkbox"
                         className="ui-check-input"
                         checked={selectedMcps.has(mcp.title)}
-                        onChange={() => setSelectedMcps(prev => toggleIn(prev, mcp.title))}
+                        onChange={() => setSelectedMcps((prev) => toggleIn(prev, mcp.title))}
                       />
                       <CheckGlyph />
                       <span className="ui-check-label">
@@ -556,7 +611,11 @@ export default function ProjectConfig() {
             )}
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-primary" onClick={() => setMcpDialogOpen(false)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setMcpDialogOpen(false)}
+            >
               完成
             </button>
           </div>
@@ -564,8 +623,11 @@ export default function ProjectConfig() {
       </div>
 
       {/* Skills 选择弹窗 */}
-      <div className={`modal-overlay ${skillsDialogOpen ? "visible" : ""}`} {...skillsDialogDismiss}>
-        <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+      <div
+        className={`modal-overlay ${skillsDialogOpen ? "visible" : ""}`}
+        {...skillsDialogDismiss}
+      >
+        <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <span className="modal-title">
               选择 Skills
@@ -573,13 +635,19 @@ export default function ProjectConfig() {
                 <span className="form-label-optional"> 已选 {selectedSkills.size} 个</span>
               )}
             </span>
-            <button type="button" className="modal-close" onClick={() => setSkillsDialogOpen(false)}>
+            <button
+              type="button"
+              className="modal-close"
+              onClick={() => setSkillsDialogOpen(false)}
+            >
               ✕
             </button>
           </div>
           <div className="modal-body mcp-modal-body">
             {skillOptions.length === 0 ? (
-              <span className="proj-mode-option-desc">暂无可选 Skills — 可先在「Skills 管理」页添加或嗅探。</span>
+              <span className="proj-mode-option-desc">
+                暂无可选 Skills — 可先在「Skills 管理」页添加或嗅探。
+              </span>
             ) : (
               <>
                 <SourceFilterChips
@@ -588,8 +656,13 @@ export default function ProjectConfig() {
                   onSelect={setSkillSourceFilter}
                 />
                 {skillTagOptions.length > 1 && (
-                  <div className="skill-tag-filter" role="group" aria-label="按标签筛选" style={{ marginTop: 8 }}>
-                    {skillTagOptions.map(opt => {
+                  <div
+                    className="skill-tag-filter"
+                    role="group"
+                    aria-label="按标签筛选"
+                    style={{ marginTop: 8 }}
+                  >
+                    {skillTagOptions.map((opt) => {
                       const active = opt.key === skillTagFilter;
                       return (
                         <button
@@ -609,7 +682,8 @@ export default function ProjectConfig() {
                 )}
                 <div className="agent-pick-header" style={{ marginTop: 12 }}>
                   <span className="proj-mode-option-desc">
-                    筛选结果 {filteredSkills.length} 项（已选 {filteredSkills.filter(s => selectedSkills.has(s.id)).length}）
+                    筛选结果 {filteredSkills.length} 项（已选{" "}
+                    {filteredSkills.filter((s) => selectedSkills.has(s.id)).length}）
                   </span>
                   <div className="mcp-agent-actions">
                     <button
@@ -633,16 +707,19 @@ export default function ProjectConfig() {
                 {filteredSkills.length === 0 ? (
                   <span className="proj-mode-option-desc">当前筛选条件下暂无 Skills。</span>
                 ) : (
-                  filteredSkills.map(skill => (
+                  filteredSkills.map((skill) => (
                     <label key={skill.id} className="ui-check">
                       <input
                         type="checkbox"
                         className="ui-check-input"
                         checked={selectedSkills.has(skill.id)}
-                        onChange={() => setSelectedSkills(prev => toggleIn(prev, skill.id))}
+                        onChange={() => setSelectedSkills((prev) => toggleIn(prev, skill.id))}
                       />
                       <CheckGlyph />
-                      <span className="ui-check-label" data-tooltip={skill.description || skill.title}>
+                      <span
+                        className="ui-check-label"
+                        data-tooltip={skill.description || skill.title}
+                      >
                         {skill.title}
                         {skill.tag?.trim() ? <code>{skill.tag.trim()}</code> : null}
                       </span>
@@ -653,7 +730,11 @@ export default function ProjectConfig() {
             )}
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-primary" onClick={() => setSkillsDialogOpen(false)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setSkillsDialogOpen(false)}
+            >
               完成
             </button>
           </div>
@@ -662,7 +743,7 @@ export default function ProjectConfig() {
 
       {/* 确认覆盖 modal */}
       <div className={`modal-overlay ${confirmOpen ? "visible" : ""}`} {...confirmDismiss}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <span className="modal-title">检测到已存在的文件</span>
             <button
@@ -677,11 +758,11 @@ export default function ProjectConfig() {
           <div className="modal-body">
             <p className="proj-confirm-hint">
               以下路径已存在。「跳过」保留原样；「覆盖」仅替换文件内容与可安全删除的软链接/空目录，
-              <strong>不会删除非空真实目录</strong>（以免误伤用户数据）。
-              勾选的 MCP 不受此影响，始终以按名称合并的方式写入。
+              <strong>不会删除非空真实目录</strong>（以免误伤用户数据）。 勾选的 MCP
+              不受此影响，始终以按名称合并的方式写入。
             </p>
             <div className="proj-confirm-list">
-              {checkResult?.existing.map(item => (
+              {checkResult?.existing.map((item) => (
                 <div key={item.path} className="proj-confirm-item">
                   {item.isDir ? "📁" : "📄"} {item.path}
                 </div>

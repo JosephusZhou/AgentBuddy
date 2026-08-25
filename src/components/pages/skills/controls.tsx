@@ -40,9 +40,7 @@ export function sourceKeyOf(skill: SourceInfo): string {
 
 // 由当前技能列表推导出的来源筛选项（保持首次出现顺序）
 export function buildSourceOptions(skills: SourceInfo[]): SourceOption[] {
-  const localCount = skills.filter(
-    (s) => s.source !== "github" && s.source !== "gitcode"
-  ).length;
+  const localCount = skills.filter((s) => s.source !== "github" && s.source !== "gitcode").length;
 
   const remote = new Map<string, SourceOption>();
   for (const s of skills) {
@@ -85,8 +83,7 @@ export function SourceFilterChips({ options, active, onSelect, disabled }: Sourc
   return (
     <div className="skill-source-filter" role="group" aria-label="按来源筛选">
       {options.map((opt) => {
-        const isActive =
-          typeof active === "string" ? opt.key === active : active.has(opt.key);
+        const isActive = typeof active === "string" ? opt.key === active : active.has(opt.key);
         const kindCls =
           opt.kind === "all"
             ? "skill-source-chip-all"

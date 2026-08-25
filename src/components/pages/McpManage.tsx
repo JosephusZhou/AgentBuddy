@@ -297,29 +297,17 @@ async function invokeSniffMcp(): Promise<{
 }
 
 /* ===== Icons ===== */
-const IconPlus = () => (
-  <Plus strokeWidth={2} />
-);
+const IconPlus = () => <Plus strokeWidth={2} />;
 
-const IconScan = () => (
-  <Radar strokeWidth={1.8} />
-);
+const IconScan = () => <Radar strokeWidth={1.8} />;
 
-const IconClose = () => (
-  <X size={16} strokeWidth={2} />
-);
+const IconClose = () => <X size={16} strokeWidth={2} />;
 
-const IconTrash = () => (
-  <Trash2 size={16} strokeWidth={1.8} />
-);
+const IconTrash = () => <Trash2 size={16} strokeWidth={1.8} />;
 
-const IconEdit = () => (
-  <Pencil size={16} strokeWidth={1.8} />
-);
+const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
 
-const IconMcp = () => (
-  <Settings strokeWidth={1.8} />
-);
+const IconMcp = () => <Settings strokeWidth={1.8} />;
 
 const TYPE_OPTIONS: { value: McpType; label: string; desc: string }[] = [
   { value: "stdio", label: "stdio", desc: "本地进程，通过标准输入输出通信" },
@@ -371,14 +359,8 @@ export default function McpManage() {
 
   const editorDismiss = useOverlayDismiss(() => closeEditor());
   const deleteDismiss = useOverlayDismiss(() => closeDelete());
-  const batchDeleteDismiss = useOverlayDismiss(
-    () => setBatchDeleteOpen(false),
-    !isBatchRunning
-  );
-  const batchApplyDismiss = useOverlayDismiss(
-    () => setBatchApplyOpen(false),
-    !isBatchRunning
-  );
+  const batchDeleteDismiss = useOverlayDismiss(() => setBatchDeleteOpen(false), !isBatchRunning);
+  const batchApplyDismiss = useOverlayDismiss(() => setBatchApplyOpen(false), !isBatchRunning);
 
   // Form state
   const [title, setTitle] = useState("");
@@ -557,18 +539,16 @@ export default function McpManage() {
         url,
         headers: headerList,
       }),
-    [title, mcpType, command, argsRaw, envList, url, headerList]
+    [title, mcpType, command, argsRaw, envList, url, headerList],
   );
 
   const updateEnvKv = useCallback((id: string, field: "key" | "value", value: string) => {
-    setEnvList((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
-    );
+    setEnvList((prev) => prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   }, []);
 
   const updateHeaderKv = useCallback((id: string, field: "key" | "value", value: string) => {
     setHeaderList((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
     );
   }, []);
 
@@ -630,7 +610,7 @@ export default function McpManage() {
 
     // Duplicate title check (allow keeping own title while editing)
     const titleTaken = servers.some(
-      (s) => s.title.toLowerCase() === name.toLowerCase() && s.id !== editingId
+      (s) => s.title.toLowerCase() === name.toLowerCase() && s.id !== editingId,
     );
     if (titleTaken) {
       setFormError("已存在同名 MCP，请换一个标题");
@@ -695,11 +675,9 @@ export default function McpManage() {
           return;
         }
         // 只把「实际写入成功」的 Agent 记为已应用，避免部分失败时 UI 与磁盘漂移。
-        const failedTargets = new Set(
-          batch.results.filter((r) => !r.ok).map((r) => r.agent)
-        );
+        const failedTargets = new Set(batch.results.filter((r) => !r.ok).map((r) => r.agent));
         effectiveApplied = nextAgents.filter(
-          (a) => !failedTargets.has(canonicalWriteTarget(a, nextAgents))
+          (a) => !failedTargets.has(canonicalWriteTarget(a, nextAgents)),
         );
       } else {
         setStatusMsg("已保存到本应用列表（未选择 Agent，未写配置文件）");
@@ -707,9 +685,7 @@ export default function McpManage() {
 
       const finalPayload = { ...payload, appliedAgents: effectiveApplied };
       if (editingId) {
-        const nextList = servers.map((s) =>
-          s.id === editingId ? { ...s, ...finalPayload } : s
-        );
+        const nextList = servers.map((s) => (s.id === editingId ? { ...s, ...finalPayload } : s));
         setServers(nextList);
         await persistServers(nextList);
       } else {
@@ -855,23 +831,20 @@ export default function McpManage() {
           ...Object.keys(s.env),
           ...Object.keys(s.headers),
           ...s.appliedAgents.map(
-            (name) => agents.find((a) => a.name === name)?.display_name ?? name
+            (name) => agents.find((a) => a.name === name)?.display_name ?? name,
           ),
         ].some((value) => value.toLocaleLowerCase().includes(searchQuery));
       }),
-    [servers, agents, activeType, activeAgent, searchQuery]
+    [servers, agents, activeType, activeAgent, searchQuery],
   );
 
   // ===== 批量选择派生值与操作 =====
   // 当前筛选结果的 id 集，供「全选可见项」与选择态统计使用
-  const filteredIdSet = useMemo(
-    () => new Set(filteredServers.map((s) => s.id)),
-    [filteredServers]
-  );
+  const filteredIdSet = useMemo(() => new Set(filteredServers.map((s) => s.id)), [filteredServers]);
   // 已选中且仍存在于列表的 id（条目被删除后自动收敛）
   const validSelectedIds = useMemo(
     () => new Set(servers.filter((s) => selectedIds.has(s.id)).map((s) => s.id)),
-    [servers, selectedIds]
+    [servers, selectedIds],
   );
   // 已选中但不在当前筛选内的数量（提示用户选择未丢失，只是被筛选隐藏）
   const hiddenSelectedCount = useMemo(() => {
@@ -943,7 +916,7 @@ export default function McpManage() {
       setStatusMsg(
         batchDeleteAgentConfigs
           ? `已删除 ${targets.length} 个 MCP 配置，并同步清理 Agent 配置文件`
-          : `已从本应用列表删除 ${targets.length} 个 MCP 配置（未改写 Agent 配置文件）`
+          : `已从本应用列表删除 ${targets.length} 个 MCP 配置（未改写 Agent 配置文件）`,
       );
       setBatchDeleteOpen(false);
       exitBatchMode();
@@ -993,7 +966,7 @@ export default function McpManage() {
     const targetAgents = Array.from(batchApplyAgents);
     if (targetAgents.length === 0) {
       setStatusMsg(
-        batchApplyMode === "add" ? "请至少选择一个 Agent" : "请至少选择一个要移除的 Agent"
+        batchApplyMode === "add" ? "请至少选择一个 Agent" : "请至少选择一个要移除的 Agent",
       );
       return;
     }
@@ -1001,7 +974,7 @@ export default function McpManage() {
     setStatusMsg(
       batchApplyMode === "add"
         ? `正在将 ${targets.length} 个 MCP 写入 ${targetAgents.length} 个 Agent 配置…`
-        : `正在从 ${targetAgents.length} 个 Agent 配置移除 ${targets.length} 个 MCP…`
+        : `正在从 ${targetAgents.length} 个 Agent 配置移除 ${targets.length} 个 MCP…`,
     );
     // 每个 server 实际成功的 Agent 集，用于回写 appliedAgents
     const appliedDelta = new Map<string, Set<string>>();
@@ -1023,12 +996,10 @@ export default function McpManage() {
                     url: server.url,
                     headers: server.headers,
                   },
-                  targetAgents
+                  targetAgents,
                 )
               : await invokeRemoveMcp(server.title, targetAgents);
-          const okAgents = new Set(
-            batch.results.filter((r) => r.ok).map((r) => r.agent)
-          );
+          const okAgents = new Set(batch.results.filter((r) => r.ok).map((r) => r.agent));
           appliedDelta.set(server.id, okAgents);
           okCount += okAgents.size;
           const failed = batch.results.filter((r) => !r.ok);
@@ -1056,27 +1027,20 @@ export default function McpManage() {
         setStatusMsg(
           batchApplyMode === "add"
             ? `已将 ${targets.length} 个 MCP 写入 ${okCount} 个 Agent 配置`
-            : `已从 Agent 配置移除 ${okCount} 个 MCP 条目`
+            : `已从 Agent 配置移除 ${okCount} 个 MCP 条目`,
         );
         setBatchApplyOpen(false);
         exitBatchMode();
       } else {
         // 部分失败时保留弹窗与批量模式，便于修正后重试
         setStatusMsg(
-          `部分成功（成功 ${okCount}，失败 ${failCount}）。${errors.slice(0, 3).join("；")}`
+          `部分成功（成功 ${okCount}，失败 ${failCount}）。${errors.slice(0, 3).join("；")}`,
         );
       }
     } finally {
       setIsBatchRunning(false);
     }
-  }, [
-    isBatchRunning,
-    servers,
-    validSelectedIds,
-    batchApplyAgents,
-    batchApplyMode,
-    exitBatchMode,
-  ]);
+  }, [isBatchRunning, servers, validSelectedIds, batchApplyAgents, batchApplyMode, exitBatchMode]);
 
   const typeLabel = (t: McpType) => t.toUpperCase();
 
@@ -1256,7 +1220,9 @@ export default function McpManage() {
                             <CheckGlyph />
                           </label>
                         )}
-                        <div className="mcp-card-icon">{server.title.slice(0, 2).toUpperCase()}</div>
+                        <div className="mcp-card-icon">
+                          {server.title.slice(0, 2).toUpperCase()}
+                        </div>
                         <div className="mcp-card-main">
                           <div className="mcp-card-title-row">
                             <span className="mcp-card-title">{server.title}</span>
@@ -1380,10 +1346,7 @@ export default function McpManage() {
       )}
 
       {/* ===== Add / Edit MCP Modal ===== */}
-      <div
-        className={`modal-overlay ${showEditor ? "visible" : ""}`}
-        {...editorDismiss}
-      >
+      <div className={`modal-overlay ${showEditor ? "visible" : ""}`} {...editorDismiss}>
         <div className="modal modal-lg mcp-modal">
           <div className="modal-header">
             <h2 className="modal-title">{editingId ? "编辑 MCP 配置" : "添加 MCP 配置"}</h2>
@@ -1456,7 +1419,9 @@ export default function McpManage() {
                     className="form-input form-textarea"
                     id="mcp-args"
                     rows={4}
-                    placeholder={"每行一个参数，例如:\n-y\n@modelcontextprotocol/server-filesystem\n/tmp"}
+                    placeholder={
+                      "每行一个参数，例如:\n-y\n@modelcontextprotocol/server-filesystem\n/tmp"
+                    }
                     value={argsRaw}
                     onChange={(e) => setArgsRaw(e.target.value)}
                   />
@@ -1580,7 +1545,11 @@ export default function McpManage() {
               {testResult && (
                 <pre
                   className="mcp-json-preview"
-                  style={{ borderColor: testResult.ok ? "var(--seed-status-connected)" : "var(--seed-status-disconnected)" }}
+                  style={{
+                    borderColor: testResult.ok
+                      ? "var(--seed-status-connected)"
+                      : "var(--seed-status-disconnected)",
+                  }}
                 >
                   {(testResult.ok ? "✓ " : "✗ ") + testResult.message}
                   {testResult.detail ? "\n\n" + testResult.detail : ""}
@@ -1666,10 +1635,7 @@ export default function McpManage() {
       </div>
 
       {/* ===== Delete confirm ===== */}
-      <div
-        className={`modal-overlay ${deleteTarget ? "visible" : ""}`}
-        {...deleteDismiss}
-      >
+      <div className={`modal-overlay ${deleteTarget ? "visible" : ""}`} {...deleteDismiss}>
         <div className="modal">
           <div className="modal-header">
             <h2 className="modal-title">删除 MCP</h2>
@@ -1712,15 +1678,10 @@ export default function McpManage() {
       </div>
 
       {/* ===== 批量删除确认 ===== */}
-      <div
-        className={`modal-overlay ${batchDeleteOpen ? "visible" : ""}`}
-        {...batchDeleteDismiss}
-      >
+      <div className={`modal-overlay ${batchDeleteOpen ? "visible" : ""}`} {...batchDeleteDismiss}>
         <div className="modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              批量删除 MCP（{validSelectedIds.size} 个）
-            </h2>
+            <h2 className="modal-title">批量删除 MCP（{validSelectedIds.size} 个）</h2>
             <button
               className="modal-close"
               onClick={() => !isBatchRunning && setBatchDeleteOpen(false)}
@@ -1771,15 +1732,10 @@ export default function McpManage() {
       </div>
 
       {/* ===== 批量应用到 Agent 弹窗 ===== */}
-      <div
-        className={`modal-overlay ${batchApplyOpen ? "visible" : ""}`}
-        {...batchApplyDismiss}
-      >
+      <div className={`modal-overlay ${batchApplyOpen ? "visible" : ""}`} {...batchApplyDismiss}>
         <div className="modal skill-edit-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              批量应用到 Agent（{validSelectedIds.size} 个 MCP）
-            </h2>
+            <h2 className="modal-title">批量应用到 Agent（{validSelectedIds.size} 个 MCP）</h2>
             <button
               className="modal-close"
               onClick={() => !isBatchRunning && setBatchApplyOpen(false)}
@@ -1901,9 +1857,7 @@ export default function McpManage() {
               className="btn btn-primary"
               onClick={() => void confirmBatchApply()}
               disabled={
-                isBatchRunning ||
-                validSelectedIds.size === 0 ||
-                batchApplyAgents.size === 0
+                isBatchRunning || validSelectedIds.size === 0 || batchApplyAgents.size === 0
               }
             >
               {isBatchRunning

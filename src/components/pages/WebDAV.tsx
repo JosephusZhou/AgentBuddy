@@ -98,33 +98,19 @@ async function invokeTest(id: string): Promise<WebDavTestResult> {
 }
 
 /* ===== SVG Icons ===== */
-const IconPlus = () => (
-  <Plus size={16} strokeWidth={2} />
-);
+const IconPlus = () => <Plus size={16} strokeWidth={2} />;
 
-const IconTrash = () => (
-  <Trash2 size={16} strokeWidth={1.8} />
-);
+const IconTrash = () => <Trash2 size={16} strokeWidth={1.8} />;
 
-const IconClose = () => (
-  <X size={16} strokeWidth={2} />
-);
+const IconClose = () => <X size={16} strokeWidth={2} />;
 
-const IconTrashConfirm = () => (
-  <Trash2 size={20} strokeWidth={2} />
-);
+const IconTrashConfirm = () => <Trash2 size={20} strokeWidth={2} />;
 
-const IconEdit = () => (
-  <Pencil size={16} strokeWidth={1.8} />
-);
+const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
 
-const IconRefresh = () => (
-  <RefreshCw size={16} strokeWidth={1.8} />
-);
+const IconRefresh = () => <RefreshCw size={16} strokeWidth={1.8} />;
 
-const IconEmpty = () => (
-  <Zap size={40} strokeWidth={1.5} />
-);
+const IconEmpty = () => <Zap size={40} strokeWidth={1.5} />;
 
 /* ===== Component ===== */
 export default function WebDAV() {
@@ -354,10 +340,7 @@ export default function WebDAV() {
             {connections.map((conn) => {
               const isTesting = testingIds.has(conn.id) || conn.status === "checking";
               return (
-                <div
-                  key={conn.id}
-                  className={`webdav-item ${isTesting ? "checking" : ""}`}
-                >
+                <div key={conn.id} className={`webdav-item ${isTesting ? "checking" : ""}`}>
                   <button
                     type="button"
                     className={`status-dot ${isTesting ? "checking" : conn.status}`}
@@ -416,15 +399,10 @@ export default function WebDAV() {
       </div>
 
       {/* ===== Add / Edit Modal ===== */}
-      <div
-        className={`modal-overlay ${showForm ? "visible" : ""}`}
-        {...formDismiss}
-      >
+      <div className={`modal-overlay ${showForm ? "visible" : ""}`} {...formDismiss}>
         <div className="modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              {editingId ? "编辑 WebDAV 连接" : "添加 WebDAV 连接"}
-            </h2>
+            <h2 className="modal-title">{editingId ? "编辑 WebDAV 连接" : "添加 WebDAV 连接"}</h2>
             <button
               className="modal-close"
               onClick={() => !isSaving && setShowForm(false)}
@@ -435,7 +413,9 @@ export default function WebDAV() {
           </div>
           <div className="modal-body">
             <div className="form-group">
-              <label className="form-label" htmlFor="webdav-name">名称</label>
+              <label className="form-label" htmlFor="webdav-name">
+                名称
+              </label>
               <input
                 ref={nameInputRef}
                 type="text"
@@ -448,7 +428,9 @@ export default function WebDAV() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="webdav-url">服务器地址</label>
+              <label className="form-label" htmlFor="webdav-url">
+                服务器地址
+              </label>
               <input
                 type="url"
                 className="form-input"
@@ -460,7 +442,9 @@ export default function WebDAV() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="webdav-username">用户名</label>
+              <label className="form-label" htmlFor="webdav-username">
+                用户名
+              </label>
               <input
                 type="text"
                 className="form-input"
@@ -472,7 +456,9 @@ export default function WebDAV() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="webdav-password">密码</label>
+              <label className="form-label" htmlFor="webdav-password">
+                密码
+              </label>
               <input
                 type="password"
                 className="form-input"
@@ -506,10 +492,7 @@ export default function WebDAV() {
       </div>
 
       {/* ===== Delete Confirm Modal ===== */}
-      <div
-        className={`modal-overlay ${deleteTarget !== null ? "visible" : ""}`}
-        {...deleteDismiss}
-      >
+      <div className={`modal-overlay ${deleteTarget !== null ? "visible" : ""}`} {...deleteDismiss}>
         <div className="modal" style={{ width: 380 }}>
           <div className="modal-header">
             <h2 className="modal-title">确认删除</h2>
@@ -528,9 +511,7 @@ export default function WebDAV() {
             <div className="confirm-text">
               确定要删除{deleteName ? `「${deleteName}」` : "此 WebDAV 连接"}吗？
             </div>
-            <div className="confirm-subtext">
-              删除后将无法恢复，需要重新配置连接信息。
-            </div>
+            <div className="confirm-subtext">删除后将无法恢复，需要重新配置连接信息。</div>
           </div>
           <div className="modal-footer">
             <button

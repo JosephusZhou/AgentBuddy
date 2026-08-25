@@ -1,10 +1,6 @@
 /** AI 供应商管理页的 Tauri 命令封装。 */
 
-import type {
-  AiProvider,
-  AiProviderActionResult,
-  AiProviderUpsertPayload,
-} from "./types";
+import type { AiProvider, AiProviderActionResult, AiProviderUpsertPayload } from "./types";
 
 export async function invokeList(): Promise<AiProvider[]> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -45,10 +41,7 @@ export async function invokeGetSecrets(id: string): Promise<string[]> {
  * 唯一来源，**不**发起远程请求。
  *
  */
-export async function invokeFetchRemoteModels(
-  baseUrl: string,
-  apiKey?: string,
-): Promise<string[]> {
+export async function invokeFetchRemoteModels(baseUrl: string, apiKey?: string): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const result = (await invoke("fetch_claude_env_remote_models", {
     baseUrl,

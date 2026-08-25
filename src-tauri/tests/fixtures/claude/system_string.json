@@ -2,5 +2,5 @@
   "model": "claude-3-7-sonnet-latest",
   "max_tokens": 128,
   "system": "Follow the project rules.",
-  "messages": [{"role": "user", "content": "Implement the change"}]
+  "messages": [{ "role": "user", "content": "Implement the change" }]
 }

@@ -17,22 +17,20 @@ export function useGlobalModalA11y() {
   useEffect(() => {
     let activeModal: HTMLElement | null = null;
 
-    const isVisible = (n: HTMLElement) =>
-      n.offsetParent !== null || n === document.activeElement;
+    const isVisible = (n: HTMLElement) => n.offsetParent !== null || n === document.activeElement;
     const focusablesOf = (el: HTMLElement) =>
       Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SEL)).filter(isVisible);
 
     const sync = () => {
-      const modal =
-        document.querySelector(".modal-overlay.visible .modal") as HTMLElement | null;
+      const modal = document.querySelector(".modal-overlay.visible .modal") as HTMLElement | null;
       if (modal === activeModal) return;
       activeModal = modal;
       if (!modal) return;
       // 初始焦点：优先第一个文本输入框，否则第一个可交互元素。
       const firstInput = Array.from(
         modal.querySelectorAll<HTMLElement>(
-          'input:not([type="hidden"]):not(:disabled), textarea:not(:disabled)'
-        )
+          'input:not([type="hidden"]):not(:disabled), textarea:not(:disabled)',
+        ),
       ).find(isVisible);
       (firstInput ?? focusablesOf(modal)[0])?.focus();
     };
@@ -113,8 +111,7 @@ export function useOverlayDismiss(onDismiss: () => void, enabled = true) {
       pressedSelf.current = e.button === 0 && e.target === e.currentTarget;
     },
     onMouseUp: (e: MouseEvent<HTMLDivElement>) => {
-      const shouldDismiss =
-        e.button === 0 && pressedSelf.current && e.target === e.currentTarget;
+      const shouldDismiss = e.button === 0 && pressedSelf.current && e.target === e.currentTarget;
       // 无论是否关闭都复位，避免状态残留影响下一次交互。
       pressedSelf.current = false;
       if (enabled && shouldDismiss) onDismiss();

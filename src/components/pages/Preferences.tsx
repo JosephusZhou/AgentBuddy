@@ -41,9 +41,7 @@ export default function Preferences({ theme, onThemeChange }: PreferencesProps) 
       <div className="content-body">
         <div className="pref-section">
           <div className="pref-section-title">外观</div>
-          <div className="pref-section-desc">
-            选择界面主题，更改后将即时生效
-          </div>
+          <div className="pref-section-desc">选择界面主题，更改后将即时生效</div>
 
           {GROUPS.map(({ category, title }) => {
             const items = THEMES.filter((t) => t.category === category);
@@ -72,12 +70,8 @@ export default function Preferences({ theme, onThemeChange }: PreferencesProps) 
                             <span className="pref-theme-card-radio-dot" />
                           </span>
                           <span className="pref-theme-card-text">
-                            <span className="pref-theme-card-label">
-                              {item.label}
-                            </span>
-                            <span className="pref-theme-card-desc">
-                              {item.description}
-                            </span>
+                            <span className="pref-theme-card-label">{item.label}</span>
+                            <span className="pref-theme-card-desc">{item.description}</span>
                           </span>
                         </div>
                       </button>

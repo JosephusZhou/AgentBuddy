@@ -13,11 +13,7 @@ import type {
   ModelConfigAgentId,
   ModelsDevCatalog,
 } from "./opencode-config/types";
-import {
-  EFFORT_PRESETS,
-  MODALITY_OPTIONS,
-  PI_MODALITY_OPTIONS,
-} from "./opencode-config/types";
+import { EFFORT_PRESETS, MODALITY_OPTIONS, PI_MODALITY_OPTIONS } from "./opencode-config/types";
 import {
   invokeDeleteModel,
   invokeDeleteProvider,
@@ -29,10 +25,7 @@ import {
   invokeUpsertModel,
   invokeUpsertProvider,
 } from "./opencode-config/api";
-import {
-  invokeFetchRemoteModels,
-  invokeList as invokeAiProviderList,
-} from "./ai-providers/api";
+import { invokeFetchRemoteModels, invokeList as invokeAiProviderList } from "./ai-providers/api";
 import type { AiProvider } from "./ai-providers/types";
 import {
   fetchRouteAggregationProvider,
@@ -40,52 +33,48 @@ import {
   openaiProviderBaseUrl,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
-import { ChevronDown, Code, Eye, EyeOff, FolderOpen, Key, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  Code,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Key,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 
 /* ===== Icons ===== */
 
-const IconPlus = () => (
-  <Plus size={16} strokeWidth={2} />
-);
+const IconPlus = () => <Plus size={16} strokeWidth={2} />;
 
-const IconRefresh = () => (
-  <RefreshCw size={16} strokeWidth={1.8} />
-);
+const IconRefresh = () => <RefreshCw size={16} strokeWidth={1.8} />;
 
-const IconFolderOpen = () => (
-  <FolderOpen size={16} strokeWidth={1.8} />
-);
+const IconFolderOpen = () => <FolderOpen size={16} strokeWidth={1.8} />;
 
-const IconTrash = () => (
-  <Trash2 size={16} strokeWidth={1.8} />
-);
+const IconTrash = () => <Trash2 size={16} strokeWidth={1.8} />;
 
-const IconEdit = () => (
-  <Pencil size={16} strokeWidth={1.8} />
-);
+const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
 
-const IconClose = () => (
-  <X size={16} strokeWidth={2} />
-);
+const IconClose = () => <X size={16} strokeWidth={2} />;
 
-const IconEye = () => (
-  <Eye size={16} strokeWidth={1.8} />
-);
+const IconEye = () => <Eye size={16} strokeWidth={1.8} />;
 
-const IconEyeOff = () => (
-  <EyeOff size={16} strokeWidth={1.8} />
-);
+const IconEyeOff = () => <EyeOff size={16} strokeWidth={1.8} />;
 
-const IconKey = () => (
-  <Key size={14} strokeWidth={1.8} />
-);
+const IconKey = () => <Key size={14} strokeWidth={1.8} />;
 
-const IconEmpty = () => (
-  <Code size={40} strokeWidth={1.5} />
-);
+const IconEmpty = () => <Code size={40} strokeWidth={1.5} />;
 
 const IconChevron = ({ open }: { open?: boolean }) => (
-  <ChevronDown size={16} strokeWidth={1.8} style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.15s ease" }} />
+  <ChevronDown
+    size={16}
+    strokeWidth={1.8}
+    style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.15s ease" }}
+  />
 );
 
 /* ===== Helpers ===== */
@@ -131,12 +120,8 @@ function formatModalityTags(
   inputMods?: ReadonlyArray<string>,
   outputMods?: ReadonlyArray<string>,
 ): string {
-  const inPart = inputMods?.length
-    ? inputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/")
-    : "";
-  const outPart = outputMods?.length
-    ? outputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/")
-    : "";
+  const inPart = inputMods?.length ? inputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/") : "";
+  const outPart = outputMods?.length ? outputMods.map((m) => MODALITY_LABEL[m] ?? m).join("/") : "";
   const parts: string[] = [];
   if (inPart) parts.push(`${inPart} in`);
   if (outPart) parts.push(`${outPart} out`);
@@ -194,8 +179,7 @@ function findCatalogModel(
   if (matches.length === 0) return null;
 
   // 身份字段以"严格匹配"的那条优先；如果没有，取第一条
-  const identity =
-    matches.find((m) => m.providerId === providerId)?.model ?? matches[0].model;
+  const identity = matches.find((m) => m.providerId === providerId)?.model ?? matches[0].model;
 
   // limit 字段取并集：任一条目有非空值就采纳（第一个非空生效）
   const ctx = matches.find((m) => m.model.limitContext != null)?.model.limitContext;
@@ -204,12 +188,8 @@ function findCatalogModel(
 
   // 模态字段取并集：把同名模型出现在不同 provider 下的 modalities 能力并到一起
   // （不去重到 identity 条目，避免 grok-4.5 在 xai 之外的条目漏掉 pdf 这类能力）
-  const inputMods = unionModalityStrings(
-    matches.map((m) => m.model.modalitiesInput),
-  );
-  const outputMods = unionModalityStrings(
-    matches.map((m) => m.model.modalitiesOutput),
-  );
+  const inputMods = unionModalityStrings(matches.map((m) => m.model.modalitiesInput));
+  const outputMods = unionModalityStrings(matches.map((m) => m.model.modalitiesOutput));
 
   return {
     ...identity,
@@ -310,11 +290,7 @@ function applyCatalogLimits(
     }
   } else {
     // 仅当表单为空且目录非空时补全
-    if (
-      form.modalitiesInput.length === 0 &&
-      hitInputMods &&
-      hitInputMods.length > 0
-    ) {
+    if (form.modalitiesInput.length === 0 && hitInputMods && hitInputMods.length > 0) {
       next = { ...next, modalitiesInput: [...hitInputMods] };
     }
     if (
@@ -394,10 +370,7 @@ function AppSelect({
   }, [disabled]);
 
   return (
-    <div
-      className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}
-      ref={rootRef}
-    >
+    <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
       <button
         type="button"
         id={id}
@@ -676,11 +649,7 @@ function inputModalitiesForAgent(
   return agent === "opencode" ? [...input] : normalizePiInputModalities(input);
 }
 
-function toggleInputModality(
-  list: string[],
-  value: string,
-  agent: ModelConfigAgentId,
-): string[] {
+function toggleInputModality(list: string[], value: string, agent: ModelConfigAgentId): string[] {
   const next = toggleModality(list, value);
   if (agent === "opencode") return next;
   // Pi 的 schema 只允许 text 或 text + image；取消 text 时同时取消 image，
@@ -733,13 +702,7 @@ function credentialLocationHint(id: ModelConfigAgentId): string {
 
 /* ===== Subcomponents ===== */
 
-function ModalityBadges({
-  input,
-  output,
-}: {
-  input: string[];
-  output: string[];
-}) {
+function ModalityBadges({ input, output }: { input: string[]; output: string[] }) {
   const show = input.length > 0 || output.length > 0;
   if (!show) return null;
   return (
@@ -793,7 +756,9 @@ function ModelChip({
           {isSmall ? <span className="oc-pill">small</span> : null}
           {model.reasoning ? <span className="oc-pill oc-pill-think">思考</span> : null}
         </div>
-        <div className="oc-limit">{formatLimit(model.limitContext, model.limitOutput, model.limitInput)}</div>
+        <div className="oc-limit">
+          {formatLimit(model.limitContext, model.limitOutput, model.limitInput)}
+        </div>
         <ModalityBadges input={model.modalitiesInput} output={model.modalitiesOutput} />
         {thinking ? <div className="oc-model-chip-meta">{thinking}</div> : null}
       </div>
@@ -870,55 +835,49 @@ export default function ModelConfig() {
       setProviderPickOpen(false);
     }
   }, !busy);
-  const deleteProviderDismiss = useOverlayDismiss(
-    () => !busy && setDeleteProvider(null),
-    !busy,
-  );
-  const deleteModelDismiss = useOverlayDismiss(
-    () => !busy && setDeleteModelTarget(null),
-    !busy,
-  );
+  const deleteProviderDismiss = useOverlayDismiss(() => !busy && setDeleteProvider(null), !busy);
+  const deleteModelDismiss = useOverlayDismiss(() => !busy && setDeleteModelTarget(null), !busy);
   const defaultsDismiss = useOverlayDismiss(() => !busy && setDefaultsOpen(false), !busy);
 
   const applyView = useCallback((next: AgentModelConfigView) => {
     setView(next);
   }, []);
 
-  const loadConfig = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
-    try {
-      const next = await invokeGetConfig(agent);
-      applyView(next);
-      if (!quiet) {
-        if (next.installed && next.warnings.length > 0) {
-          setStatusMsg(next.warnings[0]);
-        }
-      }
-      return next;
-    } catch (e) {
-      setStatusMsg(`加载失败: ${e}`);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, [agent, applyView, setStatusMsg]);
-
-  const loadCatalog = useCallback(
-    async (force = false) => {
-      setCatalogLoading(true);
-      setCatalogError("");
+  const loadConfig = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setLoading(true);
       try {
-        const cat = await invokeFetchCatalog(force);
-        setCatalog(cat);
+        const next = await invokeGetConfig(agent);
+        applyView(next);
+        if (!quiet) {
+          if (next.installed && next.warnings.length > 0) {
+            setStatusMsg(next.warnings[0]);
+          }
+        }
+        return next;
       } catch (e) {
-        setCatalog(null);
-        setCatalogError(String(e));
+        setStatusMsg(`加载失败: ${e}`);
+        return null;
       } finally {
-        setCatalogLoading(false);
+        setLoading(false);
       }
     },
-    [],
+    [agent, applyView, setStatusMsg],
   );
+
+  const loadCatalog = useCallback(async (force = false) => {
+    setCatalogLoading(true);
+    setCatalogError("");
+    try {
+      const cat = await invokeFetchCatalog(force);
+      setCatalog(cat);
+    } catch (e) {
+      setCatalog(null);
+      setCatalogError(String(e));
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -991,9 +950,8 @@ export default function ModelConfig() {
     }));
   }, [providerPickHits, catalog, modelForm?.providerId]);
 
-
-/** 加载已配置的 AI 供应商（仅 OpenAI / 通用类型可对接本页面）；编辑时按 Base URL 预选。
- * 路由聚合运行时将虚拟供应商「路由聚合」置顶。 */
+  /** 加载已配置的 AI 供应商（仅 OpenAI / 通用类型可对接本页面）；编辑时按 Base URL 预选。
+   * 路由聚合运行时将虚拟供应商「路由聚合」置顶。 */
   const loadAiProviders = useCallback(async (presetBaseUrl?: string) => {
     setFormAiProviderId("");
     try {
@@ -1050,9 +1008,7 @@ export default function ModelConfig() {
     if (p.hasApiKey) {
       try {
         const secret = await resolveProviderSecret(p);
-        setProviderForm((prev) =>
-          prev ? { ...prev, apiKey: secret, apiKeyTouched: true } : prev,
-        );
+        setProviderForm((prev) => (prev ? { ...prev, apiKey: secret, apiKeyTouched: true } : prev));
       } catch {
         // 拉取失败则保持现值，用户可手动填写
       }
@@ -1094,9 +1050,7 @@ export default function ModelConfig() {
       try {
         const secret = await invokeGetSecret(agent, p.id);
         setProviderForm((prev) =>
-          prev
-            ? { ...prev, apiKey: secret, apiKeyTouched: false }
-            : prev,
+          prev ? { ...prev, apiKey: secret, apiKeyTouched: false } : prev,
         );
       } catch {
         // soft-fail: leave empty, user can re-enter
@@ -1135,7 +1089,8 @@ export default function ModelConfig() {
       toolCall: model.toolCall ?? null,
       attachment: model.attachment ?? null,
       thinkingType: model.thinkingType ?? "",
-      thinkingBudgetTokens: model.thinkingBudgetTokens != null ? String(model.thinkingBudgetTokens) : "",
+      thinkingBudgetTokens:
+        model.thinkingBudgetTokens != null ? String(model.thinkingBudgetTokens) : "",
       reasoningEffort: model.reasoningEffort ?? "",
       textVerbosity: model.textVerbosity ?? "",
       variants: model.variants.map((v) => ({ ...v, extra: { ...v.extra } })),
@@ -1394,8 +1349,9 @@ export default function ModelConfig() {
   const hasEffort = catalogReasoning.some((r) => r.type === "effort");
   const hasBudget = catalogReasoning.some((r) => r.type === "budget_tokens");
   const hasToggle = catalogReasoning.some((r) => r.type === "toggle");
-  const effortValues =
-    catalogReasoning.find((r) => r.type === "effort")?.values ?? [...EFFORT_PRESETS];
+  const effortValues = catalogReasoning.find((r) => r.type === "effort")?.values ?? [
+    ...EFFORT_PRESETS,
+  ];
   // 当前表单的 providerId/modelId 是否在 Models.dev 目录里命中，且至少带有限制字段
   // 该判断同时覆盖 opencode / pi / oh-my-pi 三个 tab：表单共享同一组 limit 字段
   // Pi/Oh-My-Pi 后端不写 limitInput，故仅当 context/output 至少有一个非空时才显示按钮/提示
@@ -1405,14 +1361,12 @@ export default function ModelConfig() {
         if (!hit) return null;
         const hasContext = hit.limitContext != null;
         const hasOutput = hit.limitOutput != null;
-        const hasInput =
-          agent === "opencode" && hit.limitInput != null;
+        const hasInput = agent === "opencode" && hit.limitInput != null;
         if (!hasContext && !hasOutput && !hasInput) return null;
         return hit;
       })()
     : null;
-  const inputModalityOptions =
-    agent === "opencode" ? MODALITY_OPTIONS : PI_MODALITY_OPTIONS;
+  const inputModalityOptions = agent === "opencode" ? MODALITY_OPTIONS : PI_MODALITY_OPTIONS;
 
   return (
     <>
@@ -1502,7 +1456,12 @@ export default function ModelConfig() {
               </div>
             </div>
             {view.defaultsSupported && (
-              <button type="button" className="btn btn-secondary" onClick={openDefaults} disabled={busy}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={openDefaults}
+                disabled={busy}
+              >
                 设置默认模型
               </button>
             )}
@@ -1577,13 +1536,18 @@ export default function ModelConfig() {
               {view.providers.map((p) => (
                 <div key={p.id} className="mcp-card oc-provider-card">
                   <div className="mcp-card-header">
-                    <div className="mcp-card-icon">{(p.name || p.id).slice(0, 2).toUpperCase()}</div>
+                    <div className="mcp-card-icon">
+                      {(p.name || p.id).slice(0, 2).toUpperCase()}
+                    </div>
                     <div className="mcp-card-main">
                       <div className="mcp-card-title-row">
                         <span className="mcp-card-title">{p.name || p.id}</span>
                         <span className="mcp-type-badge">{p.id}</span>
                         {p.hasApiKey ? (
-                          <span className="oc-pill oc-pill-key" title={apiKeySourceLabel(p.apiKeySource)}>
+                          <span
+                            className="oc-pill oc-pill-key"
+                            title={apiKeySourceLabel(p.apiKeySource)}
+                          >
                             <IconKey /> 已配置密钥
                           </span>
                         ) : (
@@ -1666,9 +1630,7 @@ export default function ModelConfig() {
       <div className={`modal-overlay ${providerForm ? "visible" : ""}`} {...providerDismiss}>
         <div className="modal modal-lg oc-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              {providerForm?.isNew ? "添加供应商" : "编辑供应商"}
-            </h2>
+            <h2 className="modal-title">{providerForm?.isNew ? "添加供应商" : "编辑供应商"}</h2>
             <button
               type="button"
               className="modal-close"
@@ -1683,7 +1645,11 @@ export default function ModelConfig() {
               <div className="modal-body oc-modal-body">
                 {aiProviders.length > 0 && (
                   <div className="form-group">
-                    <label className="form-label" id="oc-ai-provider-label" htmlFor="oc-ai-provider">
+                    <label
+                      className="form-label"
+                      id="oc-ai-provider-label"
+                      htmlFor="oc-ai-provider"
+                    >
                       选择 AI 供应商（可选）
                     </label>
                     <AppSelect
@@ -1710,9 +1676,7 @@ export default function ModelConfig() {
                     className="form-input"
                     placeholder="例如 my-proxy"
                     value={providerForm.id}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, id: e.target.value })
-                    }
+                    onChange={(e) => setProviderForm({ ...providerForm, id: e.target.value })}
                     disabled={busy}
                     autoComplete="off"
                     spellCheck={false}
@@ -1727,9 +1691,7 @@ export default function ModelConfig() {
                     className="form-input"
                     placeholder="可选"
                     value={providerForm.name}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, name: e.target.value })
-                    }
+                    onChange={(e) => setProviderForm({ ...providerForm, name: e.target.value })}
                     disabled={busy}
                   />
                 </div>
@@ -1784,9 +1746,7 @@ export default function ModelConfig() {
                       disabled={busy}
                       placeholder="请选择 API 格式"
                     />
-                    <p className="oc-form-hint">
-                      选择后会写入 Pi/Oh-My-Pi 的供应商配置。
-                    </p>
+                    <p className="oc-form-hint">选择后会写入 Pi/Oh-My-Pi 的供应商配置。</p>
                   </div>
                 )}
                 <div className="form-group">
@@ -1798,9 +1758,7 @@ export default function ModelConfig() {
                     className="form-input"
                     placeholder="https://api.example.com/v1"
                     value={providerForm.baseUrl}
-                    onChange={(e) =>
-                      setProviderForm({ ...providerForm, baseUrl: e.target.value })
-                    }
+                    onChange={(e) => setProviderForm({ ...providerForm, baseUrl: e.target.value })}
                     disabled={busy}
                     spellCheck={false}
                   />
@@ -1911,9 +1869,15 @@ export default function ModelConfig() {
                   </div>
                   <p className="oc-form-hint">
                     {agent === "oh-my-pi" ? (
-                      <>密钥写入模型配置供 OMP 校验自定义模型；列表不会回传明文。清空输入并保存可删除密钥。</>
+                      <>
+                        密钥写入模型配置供 OMP
+                        校验自定义模型；列表不会回传明文。清空输入并保存可删除密钥。
+                      </>
                     ) : (
-                      <>密钥默认写入 <code>auth.json</code>，列表不会回传明文。清空输入并保存可删除密钥。</>
+                      <>
+                        密钥默认写入 <code>auth.json</code>
+                        ，列表不会回传明文。清空输入并保存可删除密钥。
+                      </>
                     )}
                   </p>
                   <button
@@ -2063,14 +2027,10 @@ export default function ModelConfig() {
                                 )}
                               </div>
                               {subParts.length > 0 && (
-                                <span className="oc-catalog-hit-sub">
-                                  {subParts.join(" · ")}
-                                </span>
+                                <span className="oc-catalog-hit-sub">{subParts.join(" · ")}</span>
                               )}
                               {inputMissing && (
-                                <span className="oc-catalog-hit-meta">
-                                  input 目录未提供
-                                </span>
+                                <span className="oc-catalog-hit-meta">input 目录未提供</span>
                               )}
                             </button>
                           );
@@ -2156,9 +2116,7 @@ export default function ModelConfig() {
                       inputMode="numeric"
                       placeholder="context"
                       value={modelForm.limitContext}
-                      onChange={(e) =>
-                        setModelForm({ ...modelForm, limitContext: e.target.value })
-                      }
+                      onChange={(e) => setModelForm({ ...modelForm, limitContext: e.target.value })}
                       disabled={busy}
                     />
                     <input
@@ -2166,9 +2124,7 @@ export default function ModelConfig() {
                       inputMode="numeric"
                       placeholder="input"
                       value={modelForm.limitInput}
-                      onChange={(e) =>
-                        setModelForm({ ...modelForm, limitInput: e.target.value })
-                      }
+                      onChange={(e) => setModelForm({ ...modelForm, limitInput: e.target.value })}
                       disabled={busy}
                     />
                     <input
@@ -2176,9 +2132,7 @@ export default function ModelConfig() {
                       inputMode="numeric"
                       placeholder="output"
                       value={modelForm.limitOutput}
-                      onChange={(e) =>
-                        setModelForm({ ...modelForm, limitOutput: e.target.value })
-                      }
+                      onChange={(e) => setModelForm({ ...modelForm, limitOutput: e.target.value })}
                       disabled={busy}
                     />
                   </div>
@@ -2250,7 +2204,7 @@ export default function ModelConfig() {
                 <div className="form-group">
                   <label className="form-label">能力标记</label>
                   <div className="oc-modality-checks">
-                    {(
+                    {
                       // toolCall/attachment 为 OpenCode 专属字段；Pi 家族仅建模 reasoning
                       (isOpenCode
                         ? ([
@@ -2258,28 +2212,29 @@ export default function ModelConfig() {
                             ["toolCall", "tool_call"],
                             ["attachment", "attachment"],
                           ] as const)
-                        : ([["reasoning", "reasoning"]] as const))
-                    ).map(([key, label]) => {
-                      const val = modelForm[key];
-                      return (
-                        <label key={key} className="ui-check">
-                          <input
-                            type="checkbox"
-                            className="ui-check-input"
-                            checked={val === true}
-                            onChange={() =>
-                              setModelForm({
-                                ...modelForm,
-                                [key]: val === true ? null : true,
-                              })
-                            }
-                            disabled={busy}
-                          />
-                          <CheckGlyph />
-                          <span className="ui-check-label">{label}</span>
-                        </label>
-                      );
-                    })}
+                        : ([["reasoning", "reasoning"]] as const)
+                      ).map(([key, label]) => {
+                        const val = modelForm[key];
+                        return (
+                          <label key={key} className="ui-check">
+                            <input
+                              type="checkbox"
+                              className="ui-check-input"
+                              checked={val === true}
+                              onChange={() =>
+                                setModelForm({
+                                  ...modelForm,
+                                  [key]: val === true ? null : true,
+                                })
+                              }
+                              disabled={busy}
+                            />
+                            <CheckGlyph />
+                            <span className="ui-check-label">{label}</span>
+                          </label>
+                        );
+                      })
+                    }
                   </div>
                 </div>
 
@@ -2287,101 +2242,97 @@ export default function ModelConfig() {
                   <div className="form-group">
                     <label className="form-label">思考 / Reasoning</label>
                     {(hasEffort || !catalogReasoning.length) && (
-                    <div className="form-group">
-                      <label
-                        className="form-label form-label-optional"
-                        id="oc-effort-label"
-                        htmlFor="oc-effort"
-                      >
-                        reasoningEffort
-                      </label>
-                      <AppSelect
-                        id="oc-effort"
-                        labelId="oc-effort-label"
-                        value={modelForm.reasoningEffort}
-                        options={(() => {
-                          const base: AppSelectOption[] = [
-                            { value: "", label: "（不设置）" },
-                            ...effortValues.map((v) => ({ value: v, label: v })),
-                          ];
-                          // 保留目录外的既有值，避免编辑时被静默清空展示
-                          if (
-                            modelForm.reasoningEffort &&
-                            !base.some((o) => o.value === modelForm.reasoningEffort)
-                          ) {
-                            base.push({
-                              value: modelForm.reasoningEffort,
-                              label: modelForm.reasoningEffort,
-                            });
-                          }
-                          return base;
-                        })()}
-                        onChange={(v) =>
-                          setModelForm({ ...modelForm, reasoningEffort: v })
-                        }
-                        disabled={busy}
-                        placeholder="（不设置）"
-                      />
-                    </div>
-                  )}
-                  {(hasBudget || hasToggle || !catalogReasoning.length) && (
-                    <div className="oc-form-grid">
                       <div className="form-group">
                         <label
                           className="form-label form-label-optional"
-                          id="oc-think-type-label"
-                          htmlFor="oc-think-type"
+                          id="oc-effort-label"
+                          htmlFor="oc-effort"
                         >
-                          thinking.type
+                          reasoningEffort
                         </label>
                         <AppSelect
-                          id="oc-think-type"
-                          labelId="oc-think-type-label"
-                          value={modelForm.thinkingType}
+                          id="oc-effort"
+                          labelId="oc-effort-label"
+                          value={modelForm.reasoningEffort}
                           options={(() => {
+                            const base: AppSelectOption[] = [
+                              { value: "", label: "（不设置）" },
+                              ...effortValues.map((v) => ({ value: v, label: v })),
+                            ];
+                            // 保留目录外的既有值，避免编辑时被静默清空展示
                             if (
-                              modelForm.thinkingType &&
-                              !THINKING_TYPE_OPTIONS.some(
-                                (o) => o.value === modelForm.thinkingType,
-                              )
+                              modelForm.reasoningEffort &&
+                              !base.some((o) => o.value === modelForm.reasoningEffort)
                             ) {
-                              return [
-                                ...THINKING_TYPE_OPTIONS,
-                                {
-                                  value: modelForm.thinkingType,
-                                  label: modelForm.thinkingType,
-                                },
-                              ];
+                              base.push({
+                                value: modelForm.reasoningEffort,
+                                label: modelForm.reasoningEffort,
+                              });
                             }
-                            return THINKING_TYPE_OPTIONS;
+                            return base;
                           })()}
-                          onChange={(v) =>
-                            setModelForm({ ...modelForm, thinkingType: v })
-                          }
+                          onChange={(v) => setModelForm({ ...modelForm, reasoningEffort: v })}
                           disabled={busy}
                           placeholder="（不设置）"
                         />
                       </div>
-                      <div className="form-group">
-                        <label className="form-label form-label-optional" htmlFor="oc-budget">
-                          budgetTokens
-                        </label>
-                        <input
-                          id="oc-budget"
-                          className="form-input"
-                          inputMode="numeric"
-                          value={modelForm.thinkingBudgetTokens}
-                          onChange={(e) =>
-                            setModelForm({
-                              ...modelForm,
-                              thinkingBudgetTokens: e.target.value,
-                            })
-                          }
-                          disabled={busy}
-                        />
+                    )}
+                    {(hasBudget || hasToggle || !catalogReasoning.length) && (
+                      <div className="oc-form-grid">
+                        <div className="form-group">
+                          <label
+                            className="form-label form-label-optional"
+                            id="oc-think-type-label"
+                            htmlFor="oc-think-type"
+                          >
+                            thinking.type
+                          </label>
+                          <AppSelect
+                            id="oc-think-type"
+                            labelId="oc-think-type-label"
+                            value={modelForm.thinkingType}
+                            options={(() => {
+                              if (
+                                modelForm.thinkingType &&
+                                !THINKING_TYPE_OPTIONS.some(
+                                  (o) => o.value === modelForm.thinkingType,
+                                )
+                              ) {
+                                return [
+                                  ...THINKING_TYPE_OPTIONS,
+                                  {
+                                    value: modelForm.thinkingType,
+                                    label: modelForm.thinkingType,
+                                  },
+                                ];
+                              }
+                              return THINKING_TYPE_OPTIONS;
+                            })()}
+                            onChange={(v) => setModelForm({ ...modelForm, thinkingType: v })}
+                            disabled={busy}
+                            placeholder="（不设置）"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label form-label-optional" htmlFor="oc-budget">
+                            budgetTokens
+                          </label>
+                          <input
+                            id="oc-budget"
+                            className="form-input"
+                            inputMode="numeric"
+                            value={modelForm.thinkingBudgetTokens}
+                            onChange={(e) =>
+                              setModelForm({
+                                ...modelForm,
+                                thinkingBudgetTokens: e.target.value,
+                              })
+                            }
+                            disabled={busy}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                   </div>
                 )}
 

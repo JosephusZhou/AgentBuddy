@@ -173,9 +173,7 @@ export interface AppConfig {
 
 /** 未知/非法值一律回退默认主题，保证 data-theme 永远有效。 */
 function normalizeTheme(value: unknown): Theme {
-  return typeof value === "string" && THEME_IDS.has(value)
-    ? (value as Theme)
-    : DEFAULT_THEME;
+  return typeof value === "string" && THEME_IDS.has(value) ? (value as Theme) : DEFAULT_THEME;
 }
 
 /** 存储值是否已是合法注册主题（用于判断启动时是否需要还原回写）。 */

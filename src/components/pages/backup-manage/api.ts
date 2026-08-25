@@ -23,16 +23,12 @@ export async function getBackupSettings(): Promise<BackupSettings> {
   };
 }
 
-export async function updateBackupSettings(
-  settings: BackupSettings,
-): Promise<BackupSettings> {
+export async function updateBackupSettings(settings: BackupSettings): Promise<BackupSettings> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("update_backup_settings", { settings }) as Promise<BackupSettings>;
 }
 
-export async function runBackupUpload(
-  payload: BackupRunPayload,
-): Promise<BackupRunResult> {
+export async function runBackupUpload(payload: BackupRunPayload): Promise<BackupRunResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("run_backup_upload", { payload }) as Promise<BackupRunResult>;
 }

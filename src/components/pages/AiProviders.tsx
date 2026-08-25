@@ -3,7 +3,21 @@ import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { ModelComboBox } from "../ModelComboBox";
 import { useOverlayDismiss } from "../ui";
-import { Copy, Pencil, Plus, Trash2, X, Boxes, Download, Eye, EyeOff, Search, GripVertical, CheckSquare, Square } from "lucide-react";
+import {
+  Copy,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+  Boxes,
+  Download,
+  Eye,
+  EyeOff,
+  Search,
+  GripVertical,
+  CheckSquare,
+  Square,
+} from "lucide-react";
 import {
   invokeList,
   invokeUpsert,
@@ -122,10 +136,7 @@ function TypeSelect({
   }, [open]);
 
   return (
-    <div
-      className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}
-      ref={rootRef}
-    >
+    <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
       <button
         type="button"
         className="app-select-trigger form-input"
@@ -484,10 +495,7 @@ export default function AiProviders() {
 
   // 自定义模型列表中的模型 ID 列表（用于档位模型下拉）
   const customModelOptions = useMemo(
-    () =>
-      formCustomModels.flatMap((cm) =>
-        cm.aliasId ? [cm.aliasId, cm.model] : [cm.model],
-      ),
+    () => formCustomModels.flatMap((cm) => (cm.aliasId ? [cm.aliasId, cm.model] : [cm.model])),
     [formCustomModels],
   );
 
@@ -531,9 +539,7 @@ export default function AiProviders() {
         baseUrl,
         ...(apiKeys.length > 0 ? { apiKeys } : {}),
         defaultModel,
-        ...(formType === "universal"
-          ? { openaiDefaultModel: formOpenaiDefaultModel.trim() }
-          : {}),
+        ...(formType === "universal" ? { openaiDefaultModel: formOpenaiDefaultModel.trim() } : {}),
         models,
         customModels: formCustomModels,
         notes: formNotes.trim(),
@@ -555,7 +561,19 @@ export default function AiProviders() {
     } finally {
       setIsSaving(false);
     }
-  }, [formName, formType, formBaseUrl, formApiKeys, formDefaultModel, formOpenaiDefaultModel, formTierModels, formCustomModels, formNotes, editingId, nextId]);
+  }, [
+    formName,
+    formType,
+    formBaseUrl,
+    formApiKeys,
+    formDefaultModel,
+    formOpenaiDefaultModel,
+    formTierModels,
+    formCustomModels,
+    formNotes,
+    editingId,
+    nextId,
+  ]);
 
   const handleDelete = useCallback(async () => {
     if (deleteTarget === null) return;
@@ -758,11 +776,21 @@ export default function AiProviders() {
                 </button>
               )}
             </div>
-            <div className="skill-source-filter" role="group" aria-label="按类型筛选" style={{ marginBottom: 14 }}>
+            <div
+              className="skill-source-filter"
+              role="group"
+              aria-label="按类型筛选"
+              style={{ marginBottom: 14 }}
+            >
               {(
                 [
                   { key: "all", label: "全部", count: providers.length, inheritFont: true },
-                  { key: "anthropic", label: "Anthropic", count: anthropicCount, inheritFont: false },
+                  {
+                    key: "anthropic",
+                    label: "Anthropic",
+                    count: anthropicCount,
+                    inheritFont: false,
+                  },
                   { key: "openai", label: "OpenAI", count: openaiCount, inheritFont: false },
                   { key: "universal", label: "通用", count: universalCount, inheritFont: true },
                 ] as const
@@ -844,9 +872,7 @@ export default function AiProviders() {
                         : ""}
                       {p.hasApiKey ? " · 已配置 Key" : " · 未配置 Key"}
                     </div>
-                    {p.notes ? (
-                      <div className="ai-provider-detail">{p.notes}</div>
-                    ) : null}
+                    {p.notes ? <div className="ai-provider-detail">{p.notes}</div> : null}
                   </div>
                   <button
                     className="btn-delete"
@@ -883,9 +909,7 @@ export default function AiProviders() {
       <div className={`modal-overlay ${showForm ? "visible" : ""}`} {...formDismiss}>
         <div className="modal ai-provider-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              {editingId ? "编辑 AI 供应商" : "添加 AI 供应商"}
-            </h2>
+            <h2 className="modal-title">{editingId ? "编辑 AI 供应商" : "添加 AI 供应商"}</h2>
             <button
               className="modal-close"
               onClick={() => !isSaving && setShowForm(false)}
@@ -896,7 +920,9 @@ export default function AiProviders() {
           </div>
           <div className="modal-body ai-provider-modal-body">
             <div className="form-group">
-              <label className="form-label" htmlFor="ai-provider-name">名称</label>
+              <label className="form-label" htmlFor="ai-provider-name">
+                名称
+              </label>
               <input
                 ref={nameInputRef}
                 type="text"
@@ -909,7 +935,9 @@ export default function AiProviders() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" id="ai-provider-type-label">类型</label>
+              <label className="form-label" id="ai-provider-type-label">
+                类型
+              </label>
               <TypeSelect value={formType} onChange={setFormType} disabled={isSaving} />
             </div>
             <div className="form-group">
@@ -921,9 +949,7 @@ export default function AiProviders() {
                 className="form-input"
                 id="ai-provider-base-url"
                 placeholder={
-                  formType === "openai"
-                    ? "https://api.openai.com/v1"
-                    : "https://api.anthropic.com"
+                  formType === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"
                 }
                 value={formBaseUrl}
                 onChange={(e) => {
@@ -949,15 +975,21 @@ export default function AiProviders() {
             <div className="form-group">
               <label className="form-label">API Key</label>
               {formApiKeys.map((key, index) => (
-                <div key={index} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: index < formApiKeys.length - 1 ? 8 : 0 }}>
+                <div
+                  key={index}
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    marginBottom: index < formApiKeys.length - 1 ? 8 : 0,
+                  }}
+                >
                   <div className="form-input-with-action" style={{ flex: 1 }}>
                     <input
                       type={formApiKeyVisibles[index] ? "text" : "password"}
                       className="form-input"
                       placeholder={
-                        editingId && editingHasKey && !key
-                          ? "已载入密钥"
-                          : "输入 API Key"
+                        editingId && editingHasKey && !key ? "已载入密钥" : "输入 API Key"
                       }
                       value={key}
                       onChange={(e) => {
@@ -1205,11 +1237,7 @@ export default function AiProviders() {
                 onChange={setFormDefaultModel}
                 disabled={isSaving}
                 options={customModelOptions}
-                placeholder={
-                  formType === "openai"
-                    ? "gpt-5"
-                    : "claude-sonnet-4-5"
-                }
+                placeholder={formType === "openai" ? "gpt-5" : "claude-sonnet-4-5"}
               />
             </div>
             {formType !== "openai" ? (
@@ -1222,9 +1250,7 @@ export default function AiProviders() {
                     <div className="ai-provider-tier-label">{tier.label}</div>
                     <ModelComboBox
                       value={formTierModels[tier.key] ?? ""}
-                      onChange={(v) =>
-                        setFormTierModels((prev) => ({ ...prev, [tier.key]: v }))
-                      }
+                      onChange={(v) => setFormTierModels((prev) => ({ ...prev, [tier.key]: v }))}
                       disabled={isSaving}
                       options={customModelOptions}
                       placeholder="留空跟随默认模型"
@@ -1269,10 +1295,7 @@ export default function AiProviders() {
       </div>
 
       {/* ===== Delete Confirm Modal ===== */}
-      <div
-        className={`modal-overlay ${deleteTarget !== null ? "visible" : ""}`}
-        {...deleteDismiss}
-      >
+      <div className={`modal-overlay ${deleteTarget !== null ? "visible" : ""}`} {...deleteDismiss}>
         <div className="modal" style={{ width: 380 }}>
           <div className="modal-header">
             <h2 className="modal-title">确认删除</h2>
@@ -1291,9 +1314,7 @@ export default function AiProviders() {
             <div className="confirm-text">
               确定要删除{deleteName ? `「${deleteName}」` : "此供应商"}吗？
             </div>
-            <div className="confirm-subtext">
-              删除后其 API Key 将一并清除，无法恢复。
-            </div>
+            <div className="confirm-subtext">删除后其 API Key 将一并清除，无法恢复。</div>
           </div>
           <div className="modal-footer">
             <button

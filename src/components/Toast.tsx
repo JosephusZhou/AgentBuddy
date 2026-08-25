@@ -34,7 +34,7 @@ export function Toast({ message }: { message: string }) {
 
   return createPortal(
     <div className="ui-toast-layer" aria-live="polite">
-      <div className={`ui-toast${visible ? " is-visible" : ""}`} role="status">
+      <div className={`ui-toast${visible ? "is-visible" : ""}`} role="status">
         {text}
       </div>
     </div>,

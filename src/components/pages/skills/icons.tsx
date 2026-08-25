@@ -48,7 +48,15 @@ export const IconGithub = () => (
 
 /** 品牌图标：GitCode（lucide 无等价物，保留手写 SVG） */
 export const IconGitcode = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
     <circle cx="12" cy="12" r="9" />
     <path d="M8 9.5 5 12l3 2.5" />
     <path d="M16 9.5 19 12l-3 2.5" />

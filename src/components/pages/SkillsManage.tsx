@@ -166,7 +166,9 @@ export default function SkillsManage() {
     _persist.isBatchRunning = v;
     setIsBatchRunning(v);
   }, []);
-  const [batchUpdatingScope, setBatchUpdatingScope] = useState<"available" | "selected" | null>(_persist.batchUpdatingScope);
+  const [batchUpdatingScope, setBatchUpdatingScope] = useState<"available" | "selected" | null>(
+    _persist.batchUpdatingScope,
+  );
   const setBatchUpdatingScopeP = useCallback((v: "available" | "selected" | null) => {
     _persist.batchUpdatingScope = v;
     setBatchUpdatingScope(v);
@@ -189,11 +191,11 @@ export default function SkillsManage() {
   const editDismiss = useOverlayDismiss(() => setEditTarget(null), !isSavingEdit);
   const directoryApplyDismiss = useOverlayDismiss(
     () => setDirectoryApplyTarget(null),
-    !exportingId
+    !exportingId,
   );
   const batchDirectoryApplyDismiss = useOverlayDismiss(
     () => setBatchDirectoryApplyOpen(false),
-    !isBatchRunning
+    !isBatchRunning,
   );
   const deleteDismiss = useOverlayDismiss(() => setDeleteTarget(null), !isDeleting);
   const batchDeleteDismiss = useOverlayDismiss(() => setBatchDeleteOpen(false), !isBatchRunning);
@@ -321,9 +323,7 @@ export default function SkillsManage() {
   const selectAllSniffImportable = useCallback(() => {
     if (!sniffPreview) return;
     setSelectedSniffKeys(
-      new Set(
-        sniffPreview.items.filter((i) => i.status === "import").map((i) => i.key)
-      )
+      new Set(sniffPreview.items.filter((i) => i.status === "import").map((i) => i.key)),
     );
   }, [sniffPreview]);
 
@@ -414,7 +414,7 @@ export default function SkillsManage() {
         setIsAdding(false);
       }
     },
-    [reload]
+    [reload],
   );
 
   const checkAndImportLocal = useCallback(
@@ -445,7 +445,7 @@ export default function SkillsManage() {
         setDupChecking(false);
       }
     },
-    [doImportLocal]
+    [doImportLocal],
   );
 
   const doAddLocalPath = useCallback(async () => {
@@ -566,11 +566,7 @@ export default function SkillsManage() {
   const selectAllImportable = useCallback(() => {
     if (!migratePreview) return;
     setSelectedMigrateIds(
-      new Set(
-        migratePreview.items
-          .filter((i) => i.status === "import")
-          .map((i) => i.ccId)
-      )
+      new Set(migratePreview.items.filter((i) => i.status === "import").map((i) => i.ccId)),
     );
   }, [migratePreview]);
 
@@ -606,13 +602,13 @@ export default function SkillsManage() {
   // 迁移弹窗内的可导入项（仅这些可被勾选，来源整组勾选也只作用于它们）
   const migrateImportableItems = useMemo(
     () => migratePreview?.items.filter((i) => i.status === "import") ?? [],
-    [migratePreview]
+    [migratePreview],
   );
 
   // 迁移弹窗的来源选项：与主列表同一套归组规则，只统计可导入项
   const migrateSourceOptions = useMemo(
     () => buildSourceOptions(migrateImportableItems),
-    [migrateImportableItems]
+    [migrateImportableItems],
   );
 
   // 已整组勾选的来源集合（该来源全部可导入项均被选中时视为激活）
@@ -649,16 +645,14 @@ export default function SkillsManage() {
         return next;
       });
     },
-    [isMigrating, migrateImportableItems]
+    [isMigrating, migrateImportableItems],
   );
 
   // 列表展示顺序：已激活来源的项优先置顶（组内及其余项均保持原有相对顺序）
   const sortedMigrateItems = useMemo(() => {
     const items = migratePreview?.items ?? [];
     // "all" 不是具体来源键，剔除后为空则无需重排
-    const prioritized = new Set(
-      Array.from(migrateActiveSources).filter((k) => k !== "all")
-    );
+    const prioritized = new Set(Array.from(migrateActiveSources).filter((k) => k !== "all"));
     if (prioritized.size === 0) return items;
     const top: CcSwitchPreviewItem[] = [];
     const rest: CcSwitchPreviewItem[] = [];
@@ -670,7 +664,7 @@ export default function SkillsManage() {
 
   const agentLabel = useCallback(
     (name: string) => agents.find((a) => a.name === name)?.display_name ?? name,
-    [agents]
+    [agents],
   );
 
   const openDirectoryApply = useCallback((skill: SkillRecord) => {
@@ -679,7 +673,12 @@ export default function SkillsManage() {
   }, []);
 
   const doExportToDir = useCallback(
-    async (skillIds: string[], installMode: SkillInstallMode, targetDir: string, overwriteIds?: string[]) => {
+    async (
+      skillIds: string[],
+      installMode: SkillInstallMode,
+      targetDir: string,
+      overwriteIds?: string[],
+    ) => {
       setExportingId(skillIds[0] || null);
       setIsBatchRunning(true);
       try {
@@ -695,7 +694,7 @@ export default function SkillsManage() {
         setIsBatchRunning(false);
       }
     },
-    [reload]
+    [reload],
   );
 
   const confirmDirectoryApply = useCallback(async () => {
@@ -743,7 +742,7 @@ export default function SkillsManage() {
         setUpdatingIdP(null);
       }
     },
-    [updatingId, reload, setUpdatingIdP]
+    [updatingId, reload, setUpdatingIdP],
   );
 
   const confirmDelete = useCallback(async () => {
@@ -789,7 +788,7 @@ export default function SkillsManage() {
         editTarget.id,
         Array.from(editAgents),
         editTag.trim(),
-        editInstallMode
+        editInstallMode,
       );
       setStatusMsg(res.message);
       if (res.ok) {
@@ -815,7 +814,7 @@ export default function SkillsManage() {
         setStatusMsg(`打开仓库失败: ${e}`);
       }
     },
-    [setStatusMsg]
+    [setStatusMsg],
   );
 
   // 来源筛选项由技能列表推导
@@ -930,26 +929,20 @@ export default function SkillsManage() {
           ...s.appliedAgents.map((name) => agentLabel(name)),
         ].some((value) => value.toLocaleLowerCase().includes(searchQuery));
       }),
-    [skills, activeAgent, activeSource, activeTag, searchQuery, agentLabel]
+    [skills, activeAgent, activeSource, activeTag, searchQuery, agentLabel],
   );
 
-  const updateAvailableSkills = useMemo(
-    () => skills.filter((s) => s.updateAvailable),
-    [skills]
-  );
+  const updateAvailableSkills = useMemo(() => skills.filter((s) => s.updateAvailable), [skills]);
 
   const updateAvailableCount = updateAvailableSkills.length;
 
   // ===== 批量选择派生值与操作 =====
   // 当前筛选结果的 id 集，供「全选可见项」与选择态统计使用
-  const filteredIdSet = useMemo(
-    () => new Set(filteredSkills.map((s) => s.id)),
-    [filteredSkills]
-  );
+  const filteredIdSet = useMemo(() => new Set(filteredSkills.map((s) => s.id)), [filteredSkills]);
   // 已选中且仍存在于技能库的 id（技能被删除后自动收敛）
   const validSelectedIds = useMemo(
     () => new Set(skills.filter((s) => selectedIds.has(s.id)).map((s) => s.id)),
-    [skills, selectedIds]
+    [skills, selectedIds],
   );
   // 已选中但不在当前筛选内的数量（提示用户选择未丢失，只是被筛选隐藏）
   const hiddenSelectedCount = useMemo(() => {
@@ -1002,11 +995,11 @@ export default function SkillsManage() {
         exitWhenDone?: boolean;
         emptyMessage?: string;
         scope?: "available" | "selected";
-      }
+      },
     ) => {
       if (isBatchRunning) return;
       const remoteTargets = targetSkills.filter(
-        (s) => s.source === "github" || s.source === "gitcode"
+        (s) => s.source === "github" || s.source === "gitcode",
       );
       if (remoteTargets.length === 0) {
         setStatusMsg(opts?.emptyMessage ?? "没有可更新的远程技能");
@@ -1025,7 +1018,7 @@ export default function SkillsManage() {
           if (opts?.exitWhenDone) exitBatchMode();
         } else {
           setStatusMsg(
-            `批量更新结束：成功 ${res.succeeded}，失败 ${res.failed}。${res.errors.slice(0, 3).join("；")}`
+            `批量更新结束：成功 ${res.succeeded}，失败 ${res.failed}。${res.errors.slice(0, 3).join("；")}`,
           );
         }
       } catch (e) {
@@ -1036,7 +1029,7 @@ export default function SkillsManage() {
         setIsBatchRunningP(false);
       }
     },
-    [isBatchRunning, reload, exitBatchMode, setIsBatchRunningP, setBatchUpdatingScopeP]
+    [isBatchRunning, reload, exitBatchMode, setIsBatchRunningP, setBatchUpdatingScopeP],
   );
 
   const doPullAvailableUpdates = useCallback(async () => {
@@ -1161,7 +1154,7 @@ export default function SkillsManage() {
         ids,
         Array.from(batchApplyAgents),
         batchApplyMode,
-        batchInstallMode
+        batchInstallMode,
       );
       setSkills(res.skills);
       setStatusMsg(res.message);
@@ -1172,7 +1165,14 @@ export default function SkillsManage() {
     } finally {
       setIsBatchRunning(false);
     }
-  }, [isBatchRunning, validSelectedIds, batchApplyMode, batchApplyAgents, batchInstallMode, exitBatchMode]);
+  }, [
+    isBatchRunning,
+    validSelectedIds,
+    batchApplyMode,
+    batchApplyAgents,
+    batchInstallMode,
+    exitBatchMode,
+  ]);
 
   // 打开批量标签弹窗：初值取选中项共同标签，否则留空
   const openBatchTag = useCallback(() => {
@@ -1181,9 +1181,7 @@ export default function SkillsManage() {
       return;
     }
     const selectedTags = new Set(
-      skills
-        .filter((s) => validSelectedIds.has(s.id))
-        .map((s) => s.tag?.trim() ?? "")
+      skills.filter((s) => validSelectedIds.has(s.id)).map((s) => s.tag?.trim() ?? ""),
     );
     // 所选技能标签一致时预填该标签，便于微调；不一致则留空由用户决定
     setBatchTag(selectedTags.size === 1 ? [...selectedTags][0] : "");
@@ -1200,7 +1198,7 @@ export default function SkillsManage() {
     const tag = batchTag.trim();
     setIsBatchRunning(true);
     setStatusMsg(
-      tag ? `正在为 ${ids.length} 个技能设置标签…` : `正在清除 ${ids.length} 个技能的标签…`
+      tag ? `正在为 ${ids.length} 个技能设置标签…` : `正在清除 ${ids.length} 个技能的标签…`,
     );
     try {
       const res = await invokeBatchSetTag(ids, tag);
@@ -1231,13 +1229,7 @@ export default function SkillsManage() {
                     : `拉取更新（${updateAvailableCount}）`
                 }
                 onClick={() => void doPullAvailableUpdates()}
-                disabled={
-                  isBatchRunning ||
-                  isChecking ||
-                  isSniffing ||
-                  isMigrating ||
-                  isAdding
-                }
+                disabled={isBatchRunning || isChecking || isSniffing || isMigrating || isAdding}
               >
                 <IconPull />
               </button>
@@ -1254,20 +1246,10 @@ export default function SkillsManage() {
             <button
               className={`action-btn ${isPreviewingMigrate || isMigrating ? "sniffing" : ""}`}
               data-tooltip={
-                isMigrating
-                  ? "迁移中..."
-                  : isPreviewingMigrate
-                    ? "读取中..."
-                    : "从 CC Switch 迁移"
+                isMigrating ? "迁移中..." : isPreviewingMigrate ? "读取中..." : "从 CC Switch 迁移"
               }
               onClick={() => void openMigrate()}
-              disabled={
-                isPreviewingMigrate ||
-                isMigrating ||
-                isSniffing ||
-                isChecking ||
-                isAdding
-              }
+              disabled={isPreviewingMigrate || isMigrating || isSniffing || isChecking || isAdding}
             >
               <IconMigrate />
             </button>
@@ -1452,158 +1434,160 @@ export default function SkillsManage() {
                   <IconSearch />
                   <div className="empty-state-text">没有匹配的技能</div>
                 </div>
-              ) : filteredSkills.map((skill) => {
-                const isRemote = skill.source === "github" || skill.source === "gitcode";
-                const isGitcode = skill.source === "gitcode";
-                const hostTag = isGitcode ? "skill-tag-gitcode" : "skill-tag-github";
-                const hostLabel = isGitcode ? "GitCode" : "GitHub";
-                const repoLabel =
-                  skill.githubOwner && skill.githubRepo
-                    ? `${skill.githubOwner}/${skill.githubRepo}`
-                    : "";
-                const checked = selectedIds.has(skill.id);
-                return (
-                  <div
-                    key={skill.id}
-                    className={`skill-card ${batchMode ? "selectable" : ""} ${
-                      batchMode && checked ? "selected" : ""
-                    }`}
-                    onClick={batchMode ? () => toggleSelect(skill.id) : undefined}
-                    role={batchMode ? "checkbox" : undefined}
-                    aria-checked={batchMode ? checked : undefined}
-                  >
-                    <div className="skill-card-header">
-                      {batchMode && (
-                        <label
-                          className="ui-check skill-card-check"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            className="ui-check-input"
-                            checked={checked}
-                            onChange={() => toggleSelect(skill.id)}
-                          />
-                          <CheckGlyph />
-                        </label>
-                      )}
-                      <div className="skill-card-main">
-                        <div className="skill-card-title-row">
-                          <span className="skill-card-title">{skill.title}</span>
-                          {skill.version?.trim() && (
-                            <span className="skill-tag skill-tag-version">v{skill.version.trim()}</span>
-                          )}
-                          {isRemote ? (
-                            (() => {
-                              const repoUrl = skillRepoUrl(skill);
-                              // 有可跳转地址时整个来源徽标可点击打开仓库网页；否则退化为静态徽标
-                              return repoUrl ? (
-                                <button
-                                  type="button"
-                                  className={`skill-source-link ${hostTag}`}
-                                  data-tooltip={`打开仓库：${repoUrl}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void openRepo(skill);
-                                  }}
-                                >
-                                  <IconExternal />
-                                  <span className="skill-source-link-label">
-                                    {repoLabel || hostLabel}
-                                  </span>
-                                </button>
-                              ) : (
-                                <span className={`skill-tag ${hostTag}`}>{hostLabel}</span>
-                              );
-                            })()
+              ) : (
+                filteredSkills.map((skill) => {
+                  const isRemote = skill.source === "github" || skill.source === "gitcode";
+                  const isGitcode = skill.source === "gitcode";
+                  const hostTag = isGitcode ? "skill-tag-gitcode" : "skill-tag-github";
+                  const hostLabel = isGitcode ? "GitCode" : "GitHub";
+                  const repoLabel =
+                    skill.githubOwner && skill.githubRepo
+                      ? `${skill.githubOwner}/${skill.githubRepo}`
+                      : "";
+                  const checked = selectedIds.has(skill.id);
+                  return (
+                    <div
+                      key={skill.id}
+                      className={`skill-card ${batchMode ? "selectable" : ""} ${
+                        batchMode && checked ? "selected" : ""
+                      }`}
+                      onClick={batchMode ? () => toggleSelect(skill.id) : undefined}
+                      role={batchMode ? "checkbox" : undefined}
+                      aria-checked={batchMode ? checked : undefined}
+                    >
+                      <div className="skill-card-header">
+                        {batchMode && (
+                          <label
+                            className="ui-check skill-card-check"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              className="ui-check-input"
+                              checked={checked}
+                              onChange={() => toggleSelect(skill.id)}
+                            />
+                            <CheckGlyph />
+                          </label>
+                        )}
+                        <div className="skill-card-main">
+                          <div className="skill-card-title-row">
+                            <span className="skill-card-title">{skill.title}</span>
+                            {skill.version?.trim() && (
+                              <span className="skill-tag skill-tag-version">
+                                v{skill.version.trim()}
+                              </span>
+                            )}
+                            {isRemote ? (
+                              (() => {
+                                const repoUrl = skillRepoUrl(skill);
+                                // 有可跳转地址时整个来源徽标可点击打开仓库网页；否则退化为静态徽标
+                                return repoUrl ? (
+                                  <button
+                                    type="button"
+                                    className={`skill-source-link ${hostTag}`}
+                                    data-tooltip={`打开仓库：${repoUrl}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void openRepo(skill);
+                                    }}
+                                  >
+                                    <IconExternal />
+                                    <span className="skill-source-link-label">
+                                      {repoLabel || hostLabel}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span className={`skill-tag ${hostTag}`}>{hostLabel}</span>
+                                );
+                              })()
+                            ) : (
+                              <span className="skill-tag skill-tag-local">本地</span>
+                            )}
+                            {skill.updateAvailable && (
+                              <span className="skill-tag skill-tag-update">有更新</span>
+                            )}
+                            {skill.tag?.trim() && (
+                              <span className="skill-tag skill-tag-custom">{skill.tag.trim()}</span>
+                            )}
+                          </div>
+                          {skill.description ? (
+                            <p className="skill-card-desc">{skill.description}</p>
                           ) : (
-                            <span className="skill-tag skill-tag-local">本地</span>
-                          )}
-                          {skill.updateAvailable && (
-                            <span className="skill-tag skill-tag-update">有更新</span>
-                          )}
-                          {skill.tag?.trim() && (
-                            <span className="skill-tag skill-tag-custom">
-                              {skill.tag.trim()}
-                            </span>
+                            <p className="skill-card-desc skill-card-desc-muted">暂无简介</p>
                           )}
                         </div>
-                        {skill.description ? (
-                          <p className="skill-card-desc">{skill.description}</p>
-                        ) : (
-                          <p className="skill-card-desc skill-card-desc-muted">暂无简介</p>
-                        )}
-                      </div>
-                      {!batchMode && (
-                        <div className="skill-card-actions">
-                          {isRemote && (
+                        {!batchMode && (
+                          <div className="skill-card-actions">
+                            {isRemote && (
+                              <button
+                                type="button"
+                                className={`claude-env-action-btn ${updatingId === skill.id ? "sniffing" : ""}`}
+                                data-tooltip={
+                                  updatingId === skill.id
+                                    ? "正在更新…"
+                                    : skill.updateAvailable
+                                      ? "有更新，点击拉取远端最新"
+                                      : "更新到远端最新"
+                                }
+                                onClick={() => void doUpdateSkill(skill)}
+                                disabled={updatingId === skill.id || isDeleting || isBatchRunning}
+                              >
+                                <IconPull />
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className={`claude-env-action-btn ${updatingId === skill.id ? "sniffing" : ""}`}
-                              data-tooltip={
-                                updatingId === skill.id
-                                  ? "正在更新…"
-                                  : skill.updateAvailable
-                                    ? "有更新，点击拉取远端最新"
-                                    : "更新到远端最新"
-                              }
-                              onClick={() => void doUpdateSkill(skill)}
-                              disabled={updatingId === skill.id || isDeleting || isBatchRunning}
+                              className="claude-env-action-btn"
+                              data-tooltip="编辑标签与应用 Agent"
+                              onClick={() => openEdit(skill)}
+                              disabled={isDeleting || exportingId === skill.id || isBatchRunning}
                             >
-                              <IconPull />
+                              <IconTags />
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className="claude-env-action-btn"
-                            data-tooltip="编辑标签与应用 Agent"
-                            onClick={() => openEdit(skill)}
-                            disabled={isDeleting || exportingId === skill.id || isBatchRunning}
-                          >
-                            <IconTags />
-                          </button>
-                          <button
-                            type="button"
-                            className="claude-env-action-btn"
-                            data-tooltip="应用到目录…"
-                            onClick={() => openDirectoryApply(skill)}
-                            disabled={exportingId === skill.id || isBatchRunning}
-                          >
-                            <IconApplyDir />
-                          </button>
-                          <button
-                            type="button"
-                            className="claude-env-action-btn danger"
-                            data-tooltip="删除技能"
-                            onClick={() => {
-                              setDeleteTarget(skill);
-                              setDeleteAgentCopies(false);
-                            }}
-                            disabled={isDeleting || exportingId === skill.id || isBatchRunning}
-                          >
-                            <IconTrash />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="skill-card-agents">
-                      {skill.appliedAgents.length > 0 ? (
-                        <>
-                          <span className="skill-card-agents-label">已应用</span>
-                          <div className="agent-badge-list">
-                            {skill.appliedAgents.map((name) => (
-                              <AgentBadge key={name} name={name} label={agentLabel(name)} />
-                            ))}
+                            <button
+                              type="button"
+                              className="claude-env-action-btn"
+                              data-tooltip="应用到目录…"
+                              onClick={() => openDirectoryApply(skill)}
+                              disabled={exportingId === skill.id || isBatchRunning}
+                            >
+                              <IconApplyDir />
+                            </button>
+                            <button
+                              type="button"
+                              className="claude-env-action-btn danger"
+                              data-tooltip="删除技能"
+                              onClick={() => {
+                                setDeleteTarget(skill);
+                                setDeleteAgentCopies(false);
+                              }}
+                              disabled={isDeleting || exportingId === skill.id || isBatchRunning}
+                            >
+                              <IconTrash />
+                            </button>
                           </div>
-                        </>
-                      ) : (
-                        <span className="skill-card-agents-empty">未应用到任何 Agent</span>
-                      )}
+                        )}
+                      </div>
+
+                      <div className="skill-card-agents">
+                        {skill.appliedAgents.length > 0 ? (
+                          <>
+                            <span className="skill-card-agents-label">已应用</span>
+                            <div className="agent-badge-list">
+                              {skill.appliedAgents.map((name) => (
+                                <AgentBadge key={name} name={name} label={agentLabel(name)} />
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="skill-card-agents-empty">未应用到任何 Agent</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </>
         )}
@@ -1699,10 +1683,7 @@ export default function SkillsManage() {
       )}
 
       {/* ===== Add Skill Modal ===== */}
-      <div
-        className={`modal-overlay ${showAddModal ? "visible" : ""}`}
-        {...addDismiss}
-      >
+      <div className={`modal-overlay ${showAddModal ? "visible" : ""}`} {...addDismiss}>
         <div className="modal skill-add-modal">
           <div className="modal-header">
             <h2 className="modal-title">添加 Skill</h2>
@@ -1744,7 +1725,12 @@ export default function SkillsManage() {
               <label className="form-label">
                 标签 <span className="form-label-optional">可选，用于分组筛选</span>
               </label>
-              <TagSelect value={addTag} onChange={setAddTag} knownTags={knownTags} disabled={isAdding} />
+              <TagSelect
+                value={addTag}
+                onChange={setAddTag}
+                knownTags={knownTags}
+                disabled={isAdding}
+              />
             </div>
 
             {addTab === "local" ? (
@@ -1792,8 +1778,7 @@ export default function SkillsManage() {
             ) : addTab === "github" ? (
               <>
                 <p className="skill-add-hint">
-                  支持 <code>owner/repo</code> 或完整 GitHub URL；仓库内需有{" "}
-                  <code>SKILL.md</code>
+                  支持 <code>owner/repo</code> 或完整 GitHub URL；仓库内需有 <code>SKILL.md</code>
                 </p>
                 <div className="form-group">
                   <label className="form-label" htmlFor="skill-github-url">
@@ -1827,8 +1812,8 @@ export default function SkillsManage() {
             ) : (
               <>
                 <p className="skill-add-hint">
-                  GitCode 为国内开源平台，支持 <code>owner/repo</code> 或完整
-                  GitCode URL；仓库内需有 <code>SKILL.md</code>（支持多级子目录）
+                  GitCode 为国内开源平台，支持 <code>owner/repo</code> 或完整 GitCode
+                  URL；仓库内需有 <code>SKILL.md</code>（支持多级子目录）
                 </p>
                 <div className="form-group">
                   <label className="form-label" htmlFor="skill-gitcode-url">
@@ -1889,7 +1874,9 @@ export default function SkillsManage() {
                 <label className="skill-dup-select-all">
                   <input
                     type="checkbox"
-                    checked={dupConflicts.length > 0 && dupSelectedOverwrite.size === dupConflicts.length}
+                    checked={
+                      dupConflicts.length > 0 && dupSelectedOverwrite.size === dupConflicts.length
+                    }
                     onChange={(e) => {
                       if (e.target.checked) {
                         setDupSelectedOverwrite(new Set(dupConflicts.map((c) => c.existingId)));
@@ -1934,7 +1921,13 @@ export default function SkillsManage() {
                           <span className="skill-dup-version-existing">
                             已有版本: <strong>{c.existingVersion || "未标注"}</strong>
                             <span className="skill-dup-source">
-                              （{c.existingSource === "github" ? "GitHub" : c.existingSource === "gitcode" ? "GitCode" : "本地"}）
+                              （
+                              {c.existingSource === "github"
+                                ? "GitHub"
+                                : c.existingSource === "gitcode"
+                                  ? "GitCode"
+                                  : "本地"}
+                              ）
                             </span>
                           </span>
                           <span className="skill-dup-version-arrow">→</span>
@@ -2017,7 +2010,10 @@ export default function SkillsManage() {
                 <label className="skill-dup-select-all">
                   <input
                     type="checkbox"
-                    checked={exportConflicts.length > 0 && exportSelectedOverwrite.size === exportConflicts.length}
+                    checked={
+                      exportConflicts.length > 0 &&
+                      exportSelectedOverwrite.size === exportConflicts.length
+                    }
                     onChange={(e) => {
                       if (e.target.checked) {
                         setExportSelectedOverwrite(new Set(exportConflicts.map((c) => c.skillId)));
@@ -2037,10 +2033,7 @@ export default function SkillsManage() {
                 {exportConflicts.map((c) => {
                   const checked = exportSelectedOverwrite.has(c.skillId);
                   return (
-                    <div
-                      key={c.skillId}
-                      className={`skill-dup-item ${checked ? "checked" : ""}`}
-                    >
+                    <div key={c.skillId} className={`skill-dup-item ${checked ? "checked" : ""}`}>
                       <label className="skill-dup-check">
                         <input
                           type="checkbox"
@@ -2094,7 +2087,12 @@ export default function SkillsManage() {
                   // Export only non-conflicting skills, skip all conflicts
                   setExportConflicts(null);
                   setExportSelectedOverwrite(new Set());
-                  void doExportToDir(exportSkillIds, exportInstallMode, exportTargetDir, overwriteIds);
+                  void doExportToDir(
+                    exportSkillIds,
+                    exportInstallMode,
+                    exportTargetDir,
+                    overwriteIds,
+                  );
                 }}
                 disabled={Boolean(exportingId) || isBatchRunning}
               >
@@ -2107,11 +2105,20 @@ export default function SkillsManage() {
                   const overwriteIds = Array.from(exportSelectedOverwrite);
                   setExportConflicts(null);
                   setExportSelectedOverwrite(new Set());
-                  void doExportToDir(exportSkillIds, exportInstallMode, exportTargetDir, overwriteIds);
+                  void doExportToDir(
+                    exportSkillIds,
+                    exportInstallMode,
+                    exportTargetDir,
+                    overwriteIds,
+                  );
                 }}
-                disabled={Boolean(exportingId) || isBatchRunning || exportSelectedOverwrite.size === 0}
+                disabled={
+                  Boolean(exportingId) || isBatchRunning || exportSelectedOverwrite.size === 0
+                }
               >
-                {Boolean(exportingId) || isBatchRunning ? "应用中…" : `覆盖选中 (${exportSelectedOverwrite.size})`}
+                {Boolean(exportingId) || isBatchRunning
+                  ? "应用中…"
+                  : `覆盖选中 (${exportSelectedOverwrite.size})`}
               </button>
             </div>
           </div>
@@ -2119,18 +2126,11 @@ export default function SkillsManage() {
       )}
 
       {/* ===== CC Switch migrate preview modal ===== */}
-      <div
-        className={`modal-overlay ${showMigrateModal ? "visible" : ""}`}
-        {...migrateDismiss}
-      >
+      <div className={`modal-overlay ${showMigrateModal ? "visible" : ""}`} {...migrateDismiss}>
         <div className="modal modal-lg skill-migrate-modal">
           <div className="modal-header">
             <h2 className="modal-title">从 CC Switch 迁移 Skills</h2>
-            <button
-              className="modal-close"
-              onClick={closeMigrate}
-              disabled={isMigrating}
-            >
+            <button className="modal-close" onClick={closeMigrate} disabled={isMigrating}>
               <IconClose />
             </button>
           </div>
@@ -2288,18 +2288,11 @@ export default function SkillsManage() {
       </div>
 
       {/* ===== Sniff preview modal ===== */}
-      <div
-        className={`modal-overlay ${showSniffModal ? "visible" : ""}`}
-        {...sniffDismiss}
-      >
+      <div className={`modal-overlay ${showSniffModal ? "visible" : ""}`} {...sniffDismiss}>
         <div className="modal modal-lg skill-migrate-modal">
           <div className="modal-header">
             <h2 className="modal-title">扫描 Agent 中的 Skills</h2>
-            <button
-              className="modal-close"
-              onClick={closeSniff}
-              disabled={isImportingSniff}
-            >
+            <button className="modal-close" onClick={closeSniff} disabled={isImportingSniff}>
               <IconClose />
             </button>
           </div>
@@ -2310,8 +2303,8 @@ export default function SkillsManage() {
             ) : sniffPreview ? (
               <>
                 <p className="skill-add-hint">
-                  从各 Agent 的 skills 目录发现的技能，将复制到{" "}
-                  <code>~/.agentbuddy/skills</code>，不会修改 Agent 原文件。
+                  从各 Agent 的 skills 目录发现的技能，将复制到 <code>~/.agentbuddy/skills</code>
+                  ，不会修改 Agent 原文件。
                 </p>
                 <div className="skill-migrate-summary">
                   已扫描 <strong>{sniffPreview.scannedAgents}</strong> 个 Agent · 共{" "}
@@ -2380,9 +2373,7 @@ export default function SkillsManage() {
                               )}
                               {item.foundAgents.length > 0 && (
                                 <div className="skill-migrate-item-agents">
-                                  <span className="skill-migrate-item-agents-label">
-                                    发现于
-                                  </span>
+                                  <span className="skill-migrate-item-agents-label">发现于</span>
                                   <div className="agent-badge-list">
                                     {item.foundAgents.map((n) => (
                                       <AgentBadge key={n} name={n} label={agentLabel(n)} />
@@ -2415,10 +2406,7 @@ export default function SkillsManage() {
               className="btn btn-primary"
               onClick={() => void confirmSniffImport()}
               disabled={
-                isImportingSniff ||
-                isSniffing ||
-                selectedSniffKeys.size === 0 ||
-                !sniffPreview?.ok
+                isImportingSniff || isSniffing || selectedSniffKeys.size === 0 || !sniffPreview?.ok
               }
             >
               {isImportingSniff
@@ -2430,15 +2418,10 @@ export default function SkillsManage() {
       </div>
 
       {/* ===== Edit Skill Modal ===== */}
-      <div
-        className={`modal-overlay ${editTarget ? "visible" : ""}`}
-        {...editDismiss}
-      >
+      <div className={`modal-overlay ${editTarget ? "visible" : ""}`} {...editDismiss}>
         <div className="modal skill-edit-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              编辑技能{editTarget ? `：${editTarget.title}` : ""}
-            </h2>
+            <h2 className="modal-title">编辑技能{editTarget ? `：${editTarget.title}` : ""}</h2>
             <button
               className="modal-close"
               onClick={() => !isSavingEdit && setEditTarget(null)}
@@ -2486,7 +2469,9 @@ export default function SkillsManage() {
                     disabled={isSavingEdit}
                   >
                     <span className="skill-install-mode-title">完整复制</span>
-                    <span className="skill-install-mode-desc">复制完整目录，Agent 不依赖技能库</span>
+                    <span className="skill-install-mode-desc">
+                      复制完整目录，Agent 不依赖技能库
+                    </span>
                   </button>
                 </div>
               </div>
@@ -2502,8 +2487,8 @@ export default function SkillsManage() {
                   </label>
                 </div>
                 <p className="skill-add-hint">
-                  勾选后，将以{editInstallMode === "link" ? "软链接" : "完整复制"}形式把该技能应用到对应
-                  Agent 的 <code>skills</code> 目录；取消勾选会移除其对应项。
+                  勾选后，将以{editInstallMode === "link" ? "软链接" : "完整复制"}
+                  形式把该技能应用到对应 Agent 的 <code>skills</code> 目录；取消勾选会移除其对应项。
                 </p>
                 {agents.length === 0 ? (
                   <div className="agent-pick-empty">
@@ -2538,9 +2523,7 @@ export default function SkillsManage() {
                   </div>
                 )}
                 {(() => {
-                  const removed = editTarget.appliedAgents.filter(
-                    (name) => !editAgents.has(name)
-                  );
+                  const removed = editTarget.appliedAgents.filter((name) => !editAgents.has(name));
                   if (removed.length === 0) return null;
                   const labels = removed.map((n) => agentLabel(n)).join("、");
                   return (
@@ -2715,10 +2698,7 @@ export default function SkillsManage() {
       </div>
 
       {/* ===== Delete Skill Modal ===== */}
-      <div
-        className={`modal-overlay ${deleteTarget ? "visible" : ""}`}
-        {...deleteDismiss}
-      >
+      <div className={`modal-overlay ${deleteTarget ? "visible" : ""}`} {...deleteDismiss}>
         <div className="modal" style={{ width: 400 }}>
           <div className="modal-header">
             <h2 className="modal-title">确认删除</h2>
@@ -2771,10 +2751,7 @@ export default function SkillsManage() {
       </div>
 
       {/* ===== 批量删除确认弹窗 ===== */}
-      <div
-        className={`modal-overlay ${batchDeleteOpen ? "visible" : ""}`}
-        {...batchDeleteDismiss}
-      >
+      <div className={`modal-overlay ${batchDeleteOpen ? "visible" : ""}`} {...batchDeleteDismiss}>
         <div className="modal" style={{ width: 440 }}>
           <div className="modal-header">
             <h2 className="modal-title">批量删除</h2>
@@ -2794,9 +2771,7 @@ export default function SkillsManage() {
               将从技能库删除 <code>~/.agentbuddy/skills</code> 下的对应目录，此操作不可撤销。
             </div>
             {(() => {
-              const titles = skills
-                .filter((s) => validSelectedIds.has(s.id))
-                .map((s) => s.title);
+              const titles = skills.filter((s) => validSelectedIds.has(s.id)).map((s) => s.title);
               const shown = titles.slice(0, 6);
               return (
                 <div className="skill-batch-namelist">
@@ -2847,15 +2822,10 @@ export default function SkillsManage() {
       </div>
 
       {/* ===== 批量应用到 Agent 弹窗 ===== */}
-      <div
-        className={`modal-overlay ${batchApplyOpen ? "visible" : ""}`}
-        {...batchApplyDismiss}
-      >
+      <div className={`modal-overlay ${batchApplyOpen ? "visible" : ""}`} {...batchApplyDismiss}>
         <div className="modal skill-edit-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              批量应用到 Agent（{validSelectedIds.size} 个技能）
-            </h2>
+            <h2 className="modal-title">批量应用到 Agent（{validSelectedIds.size} 个技能）</h2>
             <button
               className="modal-close"
               onClick={() => !isBatchRunning && setBatchApplyOpen(false)}
@@ -3001,26 +2971,17 @@ export default function SkillsManage() {
                 (batchApplyMode === "add" && batchApplyAgents.size === 0)
               }
             >
-              {isBatchRunning
-                ? "同步中…"
-                : batchApplyMode === "replace"
-                  ? "覆盖应用"
-                  : "追加应用"}
+              {isBatchRunning ? "同步中…" : batchApplyMode === "replace" ? "覆盖应用" : "追加应用"}
             </button>
           </div>
         </div>
       </div>
 
       {/* ===== 批量设置标签弹窗 ===== */}
-      <div
-        className={`modal-overlay ${batchTagOpen ? "visible" : ""}`}
-        {...batchTagDismiss}
-      >
+      <div className={`modal-overlay ${batchTagOpen ? "visible" : ""}`} {...batchTagDismiss}>
         <div className="modal skill-edit-modal">
           <div className="modal-header">
-            <h2 className="modal-title">
-              批量设置标签（{validSelectedIds.size} 个技能）
-            </h2>
+            <h2 className="modal-title">批量设置标签（{validSelectedIds.size} 个技能）</h2>
             <button
               className="modal-close"
               onClick={() => !isBatchRunning && setBatchTagOpen(false)}
@@ -3045,9 +3006,7 @@ export default function SkillsManage() {
                 disabled={isBatchRunning}
               />
               {batchTag.trim() === "" && (
-                <div className="skill-edit-warning">
-                  未填写标签：将清除所选技能的现有标签。
-                </div>
+                <div className="skill-edit-warning">未填写标签：将清除所选技能的现有标签。</div>
               )}
             </div>
           </div>
@@ -3067,11 +3026,7 @@ export default function SkillsManage() {
               onClick={() => void confirmBatchTag()}
               disabled={isBatchRunning || validSelectedIds.size === 0}
             >
-              {isBatchRunning
-                ? "处理中…"
-                : batchTag.trim() === ""
-                  ? "清除标签"
-                  : "应用标签"}
+              {isBatchRunning ? "处理中…" : batchTag.trim() === "" ? "清除标签" : "应用标签"}
             </button>
           </div>
         </div>

@@ -52,7 +52,7 @@ export async function invokeAddGitcode(url: string, tag: string): Promise<SkillA
 }
 
 export async function invokeCheckExportDuplicates(
-  skillIds: string[]
+  skillIds: string[],
 ): Promise<ExportDuplicateCheckResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("check_export_duplicates", { skillIds }) as Promise<ExportDuplicateCheckResult>;
@@ -62,7 +62,7 @@ export async function invokeExportSkillsToDir(
   skillIds: string[],
   installMode: SkillInstallMode,
   targetDir: string,
-  overwriteIds?: string[]
+  overwriteIds?: string[],
 ): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("export_skills_to_dir", {
@@ -86,7 +86,7 @@ export async function invokeUpdateSkillsBatch(skillIds: string[]): Promise<Batch
 
 export async function invokeDeleteSkill(
   skillId: string,
-  deleteAgentCopies: boolean
+  deleteAgentCopies: boolean,
 ): Promise<SkillActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("delete_skill", {
@@ -99,7 +99,7 @@ export async function invokeApplySkill(
   skillId: string,
   agents: string[],
   tag: string,
-  installMode: SkillInstallMode
+  installMode: SkillInstallMode,
 ): Promise<SkillApplyResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("apply_skill_to_agents", {
@@ -113,15 +113,13 @@ export async function invokeApplySkill(
 export async function invokeAddLocalPath(
   path: string,
   tag: string,
-  overwriteIds?: string[]
+  overwriteIds?: string[],
 ): Promise<SkillActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("add_skill_local", { path, tag, overwriteIds }) as Promise<SkillActionResult>;
 }
 
-export async function invokeCheckLocalDuplicate(
-  path: string
-): Promise<SkillDuplicateCheckResult> {
+export async function invokeCheckLocalDuplicate(path: string): Promise<SkillDuplicateCheckResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("check_skill_local_duplicate", { path }) as Promise<SkillDuplicateCheckResult>;
 }
@@ -138,7 +136,7 @@ export async function invokeMigrateCcSwitch(ccIds: string[]): Promise<CcSwitchMi
 
 export async function invokeBatchDelete(
   skillIds: string[],
-  deleteAgentCopies: boolean
+  deleteAgentCopies: boolean,
 ): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("batch_delete_skills", {
@@ -151,7 +149,7 @@ export async function invokeBatchApply(
   skillIds: string[],
   agents: string[],
   mode: BatchApplyMode,
-  installMode: SkillInstallMode
+  installMode: SkillInstallMode,
 ): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("batch_apply_skills_to_agents", {
@@ -164,7 +162,7 @@ export async function invokeBatchApply(
 
 export async function invokeBatchSetTag(
   skillIds: string[],
-  tag: string
+  tag: string,
 ): Promise<BatchSkillResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("batch_set_skill_tag", {

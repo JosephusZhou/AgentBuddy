@@ -45,7 +45,16 @@ export interface BackupRunResult {
 
 /** Event payload for `backup-progress` (from Rust `BackupProgressEvent`). */
 export interface BackupProgressEvent {
-  phase: "collect" | "zip" | "encrypt" | "upload" | "finalize" | "download" | "decrypt" | "restore" | string;
+  phase:
+    | "collect"
+    | "zip"
+    | "encrypt"
+    | "upload"
+    | "finalize"
+    | "download"
+    | "decrypt"
+    | "restore"
+    | string;
   current: number;
   total: number;
   message: string;

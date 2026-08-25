@@ -1,10 +1,6 @@
 // Tauri invoke wrappers for route aggregation commands.
 
-import type {
-  RouteAggregationConfig,
-  RouteAggregationStatus,
-  RouteLogEntry,
-} from "./types";
+import type { RouteAggregationConfig, RouteAggregationStatus, RouteLogEntry } from "./types";
 
 export async function getStatus(): Promise<RouteAggregationStatus> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -33,10 +29,7 @@ export async function stopServer(): Promise<void> {
   return invoke("stop_route_aggregation");
 }
 
-export async function toggleProviderRoute(
-  providerId: string,
-  enabled: boolean,
-): Promise<void> {
+export async function toggleProviderRoute(providerId: string, enabled: boolean): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("toggle_provider_route", { providerId, enabled });
 }
@@ -69,9 +62,7 @@ export async function regenerateApiKey(index: number): Promise<string> {
  * 来源唯一：AI 供应商编辑页配置的 `customModels`（已在后端从 `custom_models_json`
  * 读取并按 alias_id 优先展开）。即使该列表为空也**不**再向供应商远端 /v1/models
  * 拉取——配置侧的自定义列表即为对外暴露的全部模型。 */
-export async function getRouteProviderModels(
-  providerId: string,
-): Promise<string[]> {
+export async function getRouteProviderModels(providerId: string): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("get_route_provider_models", { providerId });
 }

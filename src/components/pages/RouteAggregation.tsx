@@ -86,11 +86,7 @@ export default function RouteAggregation() {
 
   const loadData = useCallback(async () => {
     try {
-      const [cfg, sts, list] = await Promise.all([
-        api.getConfig(),
-        api.getStatus(),
-        invokeList(),
-      ]);
+      const [cfg, sts, list] = await Promise.all([api.getConfig(), api.getStatus(), invokeList()]);
       setConfig(cfg);
       setStatus(sts);
       setProviders(list);
@@ -335,14 +331,19 @@ export default function RouteAggregation() {
 
         {/* Route status card */}
         <div className="pref-section" style={{ marginBottom: 16 }}>
-          <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            className="pref-section-title"
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
             <Server size={15} />
             路由状态
             <span
               className={`status-dot ${serverRunning ? "connected" : "disconnected"}`}
               style={{ marginLeft: 4 }}
             />
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)", fontWeight: 400 }}>
+            <span
+              style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)", fontWeight: 400 }}
+            >
               {serverRunning ? "运行中" : "已停止"}
             </span>
           </div>
@@ -380,7 +381,10 @@ export default function RouteAggregation() {
 
         {/* Basic config */}
         <div className="pref-section" style={{ marginBottom: 16 }}>
-          <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <div
+            className="pref-section-title"
+            style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
+          >
             <Settings2 size={15} />
             基本配置
           </div>
@@ -389,10 +393,12 @@ export default function RouteAggregation() {
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label">监听地址</label>
               <div style={{ display: "flex", gap: 8 }}>
-                {([
-                  { value: "127.0.0.1", label: "本机" },
-                  { value: "0.0.0.0", label: "局域网" },
-                ] as const).map((opt) => (
+                {(
+                  [
+                    { value: "127.0.0.1", label: "本机" },
+                    { value: "0.0.0.0", label: "局域网" },
+                  ] as const
+                ).map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -451,11 +457,13 @@ export default function RouteAggregation() {
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label">伪装模式</label>
               <div style={{ display: "flex", gap: 8 }}>
-                {([
-                  { value: "auto", label: "自动" },
-                  { value: "always", label: "强制" },
-                  { value: "never", label: "关闭" },
-                ] as const).map((opt) => (
+                {(
+                  [
+                    { value: "auto", label: "自动" },
+                    { value: "always", label: "强制" },
+                    { value: "never", label: "关闭" },
+                  ] as const
+                ).map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -474,10 +482,7 @@ export default function RouteAggregation() {
               </div>
             </div>
           </div>
-          <label
-            className="ui-check"
-            style={{ marginTop: 12 }}
-          >
+          <label className="ui-check" style={{ marginTop: 12 }}>
             <input
               className="ui-check-input"
               type="checkbox"
@@ -503,10 +508,15 @@ export default function RouteAggregation() {
 
         {/* Provider selection */}
         <div className="pref-section" style={{ marginBottom: 16 }}>
-          <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            className="pref-section-title"
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
             <Layers size={15} />
             供应商配置
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}>
+            <span
+              style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}
+            >
               {providers.length > 0 ? `${providers.length} 个` : ""}
             </span>
             <button
@@ -525,9 +535,7 @@ export default function RouteAggregation() {
             <div className="empty-state" style={{ minHeight: 120, padding: "24px 12px" }}>
               <Server size={32} />
               <div className="empty-state-text">暂无供应商</div>
-              <div className="empty-state-subtext">
-                请先在「AI 供应商」中添加供应商
-              </div>
+              <div className="empty-state-subtext">请先在「AI 供应商」中添加供应商</div>
             </div>
           ) : providersExpanded ? (
             <>
@@ -580,33 +588,61 @@ export default function RouteAggregation() {
         />
 
         {/* Log detail modal */}
-      <LogDetailModal entry={selectedLog} onClose={() => setSelectedLog(null)} />
+        <LogDetailModal entry={selectedLog} onClose={() => setSelectedLog(null)} />
 
-      {/* Usage instructions */}
+        {/* Usage instructions */}
         <div className="pref-section" style={{ marginBottom: 16 }}>
-          <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            className="pref-section-title"
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
             <Zap size={15} />
             使用说明
           </div>
           <div className="pref-section-desc" style={{ marginTop: 8, lineHeight: 1.8 }}>
             <p style={{ marginBottom: 4 }}>
               <strong>Claude Code:</strong> 设置{" "}
-              <code style={{ background: "var(--seed-surface-alt)", padding: "2px 6px", borderRadius: 4, fontSize: "var(--text-xs)", color: "var(--seed-primary)" }}>
+              <code
+                style={{
+                  background: "var(--seed-surface-alt)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: "var(--text-xs)",
+                  color: "var(--seed-primary)",
+                }}
+              >
                 ANTHROPIC_BASE_URL={proxyUrl}
               </code>
             </p>
             <p style={{ marginBottom: 4 }}>
               <strong>Codex CLI:</strong> 设置{" "}
-              <code style={{ background: "var(--seed-surface-alt)", padding: "2px 6px", borderRadius: 4, fontSize: "var(--text-xs)", color: "var(--seed-primary)" }}>
+              <code
+                style={{
+                  background: "var(--seed-surface-alt)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: "var(--text-xs)",
+                  color: "var(--seed-primary)",
+                }}
+              >
                 OPENAI_BASE_URL={proxyUrl}/v1
               </code>
             </p>
             <p style={{ marginBottom: 4 }}>
               <strong>OpenCode / 其他 OpenAI 兼容客户端:</strong> 使用 baseURL{" "}
-              <code style={{ background: "var(--seed-surface-alt)", padding: "2px 6px", borderRadius: 4, fontSize: "var(--text-xs)", color: "var(--seed-primary)" }}>
+              <code
+                style={{
+                  background: "var(--seed-surface-alt)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: "var(--text-xs)",
+                  color: "var(--seed-primary)",
+                }}
+              >
                 {proxyUrl}/v1
               </code>
-              （转发 <code style={{ fontSize: "var(--text-xs)" }}>/v1/responses</code> 请求到勾选的供应商，未勾选或不匹配则透传失败）
+              （转发 <code style={{ fontSize: "var(--text-xs)" }}>/v1/responses</code>{" "}
+              请求到勾选的供应商，未勾选或不匹配则透传失败）
             </p>
             <p style={{ color: "var(--seed-muted)", marginTop: 8 }}>
               客户端请求会自动经路由聚合代理转发到已勾选的供应商，享受整流器伪装和自动故障转移能力。
@@ -639,7 +675,10 @@ function SelectedProviderModels({ models }: { models: string[] }) {
           onClick={() => {
             navigator.clipboard.writeText(model);
             setCopiedModel(model);
-            setTimeout(() => setCopiedModel((current) => (current === model ? null : current)), 2000);
+            setTimeout(
+              () => setCopiedModel((current) => (current === model ? null : current)),
+              2000,
+            );
           }}
           data-tooltip={copiedModel === model ? "已复制" : "点击复制"}
           style={{
@@ -675,7 +714,13 @@ function maskKey(key: string): string {
   return key.slice(0, 6) + "*".repeat(key.length - 10) + key.slice(-4);
 }
 
-function ApiKeySection({ apiKeys, actionLoading, onAdd, onDelete, onRegenerate }: ApiKeySectionProps) {
+function ApiKeySection({
+  apiKeys,
+  actionLoading,
+  onAdd,
+  onDelete,
+  onRegenerate,
+}: ApiKeySectionProps) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const handleCopy = async (index: number, key: string) => {
@@ -886,7 +931,16 @@ function ProviderSelectRow({
 
         {/* Provider info */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "var(--text-base)", fontWeight: 500, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <div
+            style={{
+              fontSize: "var(--text-base)",
+              fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+            }}
+          >
             {provider.name}
             <span
               style={{
@@ -926,14 +980,31 @@ function ProviderSelectRow({
             </div>
           )}
           {isRouteable && routeStatus && (
-            <div style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)", display: "flex", gap: 12, marginTop: 2 }}>
+            <div
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--seed-muted)",
+                display: "flex",
+                gap: 12,
+                marginTop: 2,
+              }}
+            >
               <span>请求 {routeStatus.requestCount}</span>
               <span>成功 {routeStatus.successCount}</span>
               {routeStatus.consecutiveFailures > 0 && (
-                <span style={{ color: "var(--seed-danger)" }}>连续失败 {routeStatus.consecutiveFailures}</span>
+                <span style={{ color: "var(--seed-danger)" }}>
+                  连续失败 {routeStatus.consecutiveFailures}
+                </span>
               )}
               {routeStatus.lastError && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--seed-danger)" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    color: "var(--seed-danger)",
+                  }}
+                >
                   <Clock size={12} /> 最近错误
                 </span>
               )}
@@ -945,21 +1016,25 @@ function ProviderSelectRow({
         {isRouteable && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span className={`status-dot ${circuitClass}`} />
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)" }}>{circuitLabel}</span>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--seed-muted)" }}>
+              {circuitLabel}
+            </span>
           </div>
         )}
 
         {/* Actions */}
-        {isRouteable && routeStatus && (routeStatus.circuitState === "open" || routeStatus.circuitState === "half_open") && (
-          <button
-            className="btn btn-secondary"
-            onClick={onResetCircuitBreaker}
-            disabled={actionLoading}
-            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
-          >
-            <RefreshCw size={12} /> 重置
-          </button>
-        )}
+        {isRouteable &&
+          routeStatus &&
+          (routeStatus.circuitState === "open" || routeStatus.circuitState === "half_open") && (
+            <button
+              className="btn btn-secondary"
+              onClick={onResetCircuitBreaker}
+              disabled={actionLoading}
+              style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+            >
+              <RefreshCw size={12} /> 重置
+            </button>
+          )}
         {isRouteable && (
           <button
             className="btn-icon-action"
@@ -978,50 +1053,55 @@ function ProviderSelectRow({
 
       {/* Model chips — horizontal layout with wrapping; 仅对支持路由的供应商展示 */}
       {isRouteable && (
-      <div style={{ marginTop: 10, paddingLeft: 30 }}>
-        {modelsLoading ? (
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", display: "flex", alignItems: "center", gap: 6 }}>
-            <Loader2 size={12} className="animate-spin" /> 正在读取自定义模型…
-          </div>
-        ) : modelsError ? (
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-danger)" }}>
-            自定义模型读取失败：{modelsError}
-          </div>
-        ) : !models || models.length === 0 ? (
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
-            暂无自定义模型。供应商对外可见模型仅来自「AI 供应商」中的自定义模型列表，请前往配置。
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {models.map((m) => (
-              <code
-                key={m}
-                onClick={() => {
-                  navigator.clipboard.writeText(m);
-                  setCopiedModel(m);
-                  setTimeout(
-                    () => setCopiedModel((cur) => (cur === m ? null : cur)),
-                    2000,
-                  );
-                }}
-                data-tooltip={copiedModel === m ? "已复制" : "点击复制"}
-                style={{
-                  fontSize: "var(--text-xs)",
-                  padding: "3px 8px",
-                  borderRadius: 4,
-                  background: "var(--seed-surface-alt)",
-                  border: "1px solid var(--seed-border)",
-                  color: "var(--seed-primary)",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {m}
-              </code>
-            ))}
-          </div>
-        )}
-      </div>
+        <div style={{ marginTop: 10, paddingLeft: 30 }}>
+          {modelsLoading ? (
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--seed-muted)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Loader2 size={12} className="animate-spin" /> 正在读取自定义模型…
+            </div>
+          ) : modelsError ? (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-danger)" }}>
+              自定义模型读取失败：{modelsError}
+            </div>
+          ) : !models || models.length === 0 ? (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
+              暂无自定义模型。供应商对外可见模型仅来自「AI 供应商」中的自定义模型列表，请前往配置。
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {models.map((m) => (
+                <code
+                  key={m}
+                  onClick={() => {
+                    navigator.clipboard.writeText(m);
+                    setCopiedModel(m);
+                    setTimeout(() => setCopiedModel((cur) => (cur === m ? null : cur)), 2000);
+                  }}
+                  data-tooltip={copiedModel === m ? "已复制" : "点击复制"}
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    background: "var(--seed-surface-alt)",
+                    border: "1px solid var(--seed-border)",
+                    color: "var(--seed-primary)",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {m}
+                </code>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1088,10 +1168,7 @@ function LogsSection({
 
   return (
     <div className="pref-section" style={{ marginBottom: 16 }}>
-      <div
-        className="pref-section-title"
-        style={{ display: "flex", alignItems: "center", gap: 8 }}
-      >
+      <div className="pref-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <ScrollText size={15} />
         进出日志
         <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontWeight: 400 }}>
@@ -1119,11 +1196,7 @@ function LogsSection({
           </span>
           <span className="ui-check-label">自动刷新</span>
         </label>
-        <button
-          className="btn-icon-action"
-          onClick={onRefresh}
-          data-tooltip="手动刷新"
-        >
+        <button className="btn-icon-action" onClick={onRefresh} data-tooltip="手动刷新">
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
         </button>
         <button
@@ -1207,9 +1280,7 @@ function LogsSection({
           <div className="empty-state" style={{ minHeight: 100, padding: "20px 12px" }}>
             <ScrollText size={28} />
             <div className="empty-state-text">暂无请求记录</div>
-            <div className="empty-state-subtext">
-              启动路由聚合后，客户端发起的请求会出现在这里
-            </div>
+            <div className="empty-state-subtext">启动路由聚合后，客户端发起的请求会出现在这里</div>
           </div>
         ) : (
           <div style={{ maxHeight: 360, overflowY: "auto" }}>
@@ -1234,14 +1305,20 @@ function LogsSection({
                     transition: "background 0.1s ease",
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      "var(--seed-surface-alt)";
+                    (e.currentTarget as HTMLElement).style.background = "var(--seed-surface-alt)";
                   }}
                   onMouseLeave={(e) => {
                     (e.currentTarget as HTMLElement).style.background = "transparent";
                   }}
                 >
-                  <span style={{ fontFamily: "monospace", color: "var(--seed-muted)", fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>
+                  <span
+                    style={{
+                      fontFamily: "monospace",
+                      color: "var(--seed-muted)",
+                      fontSize: "var(--text-xs)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {formatTimestamp(entry.timestampMs)}
                   </span>
                   <span
@@ -1375,9 +1452,7 @@ function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
           : "(无 body)";
   const inboundHeadersText = headersToText(entry.inboundHeaders);
   const upstreamHeadersText =
-    entry.upstreamHeaders.length > 0
-      ? headersToText(entry.upstreamHeaders)
-      : "(无)";
+    entry.upstreamHeaders.length > 0 ? headersToText(entry.upstreamHeaders) : "(无)";
 
   return (
     <div
@@ -1447,10 +1522,20 @@ function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
               fontWeight: 600,
             }}
           >
-            {entry.upstreamStatus != null ? `→ ${entry.upstreamStatus}` : entry.error ? "ERROR" : ""}
+            {entry.upstreamStatus != null
+              ? `→ ${entry.upstreamStatus}`
+              : entry.error
+                ? "ERROR"
+                : ""}
           </span>
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)", fontFamily: "monospace" }}>
+          <span
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--seed-muted)",
+              fontFamily: "monospace",
+            }}
+          >
             {formatTimestamp(entry.timestampMs)} · {entry.durationMs} ms
           </span>
           <button className="btn-icon-action" onClick={onClose} data-tooltip="关闭">
@@ -1473,9 +1558,7 @@ function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
         >
           <span>
             模型:{" "}
-            <code style={{ color: "var(--seed-primary)" }}>
-              {entry.inboundModel ?? "(无)"}
-            </code>
+            <code style={{ color: "var(--seed-primary)" }}>{entry.inboundModel ?? "(无)"}</code>
             {entry.upstreamModel && entry.upstreamModel !== entry.inboundModel && (
               <code
                 data-tooltip="命中 [1m] 等变体后实际转发给上游的模型 ID"
@@ -1487,19 +1570,15 @@ function LogDetailModal({ entry, onClose }: LogDetailModalProps) {
           </span>
           {entry.providerName && (
             <span>
-              供应商:{" "}
-              <code style={{ color: "var(--seed-primary)" }}>{entry.providerName}</code>
+              供应商: <code style={{ color: "var(--seed-primary)" }}>{entry.providerName}</code>
             </span>
           )}
           {entry.upstreamUrl && (
             <span>
-              上游 URL:{" "}
-              <code style={{ color: "var(--seed-primary)" }}>{entry.upstreamUrl}</code>
+              上游 URL: <code style={{ color: "var(--seed-primary)" }}>{entry.upstreamUrl}</code>
             </span>
           )}
-          {entry.error && (
-            <span style={{ color: "var(--seed-danger)" }}>错误: {entry.error}</span>
-          )}
+          {entry.error && <span style={{ color: "var(--seed-danger)" }}>错误: {entry.error}</span>}
         </div>
 
         {/* Body */}

@@ -1,9 +1,6 @@
 /** AI 供应商管理页的类型定义（与 Rust 端 ai_provider.rs 的 camelCase DTO 对齐）。 */
 
-export type ProviderType =
-  | "anthropic"
-  | "openai"
-  | "universal";
+export type ProviderType = "anthropic" | "openai" | "universal";
 
 /** 自定义模型条目：从供应商端点拉取后用户筛选保留的模型，可自定义别名 ID。 */
 export interface CustomModel {
@@ -70,5 +67,9 @@ export const MODEL_TIERS: Array<{ key: string; label: string }> = [
 export const PROVIDER_TYPE_OPTIONS: Array<{ value: ProviderType; label: string; sub?: string }> = [
   { value: "anthropic", label: "Anthropic", sub: "支持按档位配置不同模型" },
   { value: "openai", label: "OpenAI" },
-  { value: "universal", label: "通用", sub: "同时接入 Anthropic 与 OpenAI（OpenAI Base URL 自动派生 /v1）" },
+  {
+    value: "universal",
+    label: "通用",
+    sub: "同时接入 Anthropic 与 OpenAI（OpenAI Base URL 自动派生 /v1）",
+  },
 ];

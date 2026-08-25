@@ -71,7 +71,10 @@ export async function invokeUpsert(payload: {
   return invoke("upsert_codex_environment", { payload }) as Promise<CodexEnvActionResult>;
 }
 
-export async function invokeDelete(id: string, deleteFiles: boolean): Promise<CodexEnvActionResult> {
+export async function invokeDelete(
+  id: string,
+  deleteFiles: boolean,
+): Promise<CodexEnvActionResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("delete_codex_environment", { id, deleteFiles }) as Promise<CodexEnvActionResult>;
 }
@@ -119,7 +122,7 @@ export async function invokeGetSecret(id: string): Promise<string> {
  */
 export async function invokeFetchRemoteModels(baseUrl: string, apiKey?: string): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
-  const result = await invoke("fetch_codex_env_remote_models", { baseUrl, apiKey }) as {
+  const result = (await invoke("fetch_codex_env_remote_models", { baseUrl, apiKey })) as {
     modelIds: string[];
   };
   return result.modelIds;
@@ -130,9 +133,15 @@ export async function invokeSyncMcp(id: string): Promise<CodexEnvMcpSyncResult> 
   return invoke("sync_codex_env_mcp", { id }) as Promise<CodexEnvMcpSyncResult>;
 }
 
-export async function invokeSyncSkills(id: string): Promise<{ ok: boolean; message: string; skillCount: number }> {
+export async function invokeSyncSkills(
+  id: string,
+): Promise<{ ok: boolean; message: string; skillCount: number }> {
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("sync_codex_env_skills", { id }) as Promise<{ ok: boolean; message: string; skillCount: number }>;
+  return invoke("sync_codex_env_skills", { id }) as Promise<{
+    ok: boolean;
+    message: string;
+    skillCount: number;
+  }>;
 }
 
 export async function invokeSyncAllMcp(): Promise<CodexEnvMcpSyncResult> {

@@ -63,9 +63,7 @@ async function invokeGetNetwork(): Promise<NetworkSettingsDto> {
   return normalizeDto(raw);
 }
 
-async function invokeUpdateNetwork(
-  settings: NetworkSettingsDto,
-): Promise<NetworkSettingsDto> {
+async function invokeUpdateNetwork(settings: NetworkSettingsDto): Promise<NetworkSettingsDto> {
   const { invoke } = await import("@tauri-apps/api/core");
   const raw = await (invoke("update_network_settings", { settings }) as Promise<{
     proxy?: Partial<ProxySettings> & { mode?: string; protocol?: string };
@@ -83,15 +81,18 @@ function normalizeProtocol(value: unknown): ProxyProtocol {
   return "http";
 }
 
-function normalizeDto(raw: {
-  proxy?: Partial<ProxySettings> & { mode?: string; protocol?: string };
-} | null | undefined): NetworkSettingsDto {
+function normalizeDto(
+  raw:
+    | {
+        proxy?: Partial<ProxySettings> & { mode?: string; protocol?: string };
+      }
+    | null
+    | undefined,
+): NetworkSettingsDto {
   const p = raw?.proxy;
   const portRaw = typeof p?.port === "number" ? p.port : Number(p?.port);
   const port =
-    Number.isFinite(portRaw) && portRaw > 0 && portRaw <= 65535
-      ? Math.floor(portRaw)
-      : 0;
+    Number.isFinite(portRaw) && portRaw > 0 && portRaw <= 65535 ? Math.floor(portRaw) : 0;
   return {
     proxy: {
       mode: normalizeMode(p?.mode),
@@ -197,9 +198,7 @@ export default function NetworkSettings() {
         const dto = await invokeGetNetwork();
         applyDto(dto);
       } catch (err) {
-        setStatusMsg(
-          `加载网络设置失败：${err instanceof Error ? err.message : String(err)}`,
-        );
+        setStatusMsg(`加载网络设置失败：${err instanceof Error ? err.message : String(err)}`);
         applyDto({ proxy: DEFAULT_PROXY });
       } finally {
         setLoaded(true);
@@ -359,9 +358,7 @@ export default function NetworkSettings() {
                       <button
                         key={opt.value}
                         type="button"
-                        className={`net-protocol-chip ${
-                          protocol === opt.value ? "selected" : ""
-                        }`}
+                        className={`net-protocol-chip ${protocol === opt.value ? "selected" : ""}`}
                         onClick={() => selectProtocol(opt.value)}
                       >
                         {opt.label}
