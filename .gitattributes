@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Explicit binaries (belt & suspenders for Windows checkouts)
+*.png binary
+*.icns binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary

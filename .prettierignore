@@ -1,0 +1,15 @@
+# Dependencies & build output
+node_modules/
+dist/
+dist-ssr/
+coverage/
+
+# Rust / Tauri (rustfmt owns src-tauri sources; gen/ is generated)
+src-tauri/target/
+src-tauri/gen/
+
+# Lockfiles
+pnpm-lock.yaml
+
+# Hand-written prose documents (avoid noisy rewrap diffs)
+*.md
