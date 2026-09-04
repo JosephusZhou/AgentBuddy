@@ -10,18 +10,19 @@ AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统
 
 | 模块 | 说明 |
 |------|------|
-| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Codex CLI、OpenCode、Antigravity、CodeBuddy CN、WorkBuddy），展示安装路径、配置目录、MCP 状态等详情 |
-| MCP 管理 | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量导入导出、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
+| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Claude Desktop、Codex CLI、OpenCode、Antigravity、CodeBuddy CN、WorkBuddy、Pi、Oh-My-Pi），展示安装路径、配置目录、MCP 状态等详情 |
+| MCP 管理 | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量应用/删除、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
 | Skills 管理 | 本地 / GitHub / GitCode 多源导入 Skill，支持批量应用到多个 Agent、标签管理、导出 |
 | Claude 多环境 | 管理多个 `CLAUDE_CONFIG_DIR` 环境（别名安装、Token 配置、MCP 同步、模型选择） |
 | Codex 多环境 | 管理多个 `CODEX_HOME` 环境（别名安装、Auth 配置、MCP 同步） |
 | OpenCode 配置 | 管理 Provider / Model、API Key、Models.dev 目录同步 |
-| AI 供应商库 | 集中管理 AI 供应商（Anthropic / OpenAI），加密存储 API Key，支持 Base URL 自定义 |
+| AI 供应商库 | 集中管理 AI 供应商（Anthropic / OpenAI / 通用 Universal），加密存储 API Key，支持 Base URL 自定义 |
+| 路由聚合 | 本地 Axum 代理，统一接入已启用供应商的模型路由，支持同协议转发、故障转移与 cloaking |
 | 项目配置 | 一键为项目初始化 AI Agent 骨架（Full / Symlink 模式），可选注入 MCP 和 Skills |
-| 备份与恢复 | 本地打包 + 多 WebDAV 上传（支持加密），待实现恢复功能 |
+| 备份与恢复 | 本地打包 + 多 WebDAV 上传（支持加密）、远端恢复；支持定时自动备份（按间隔 / 每日触发，强制口令加密，上传至独立 auto 子目录） |
 | 网络设置 | 代理模式（无 / 系统 / 自定义 HTTP/SOCKS5），应用于 WebDAV / Skills 下载 / MCP 探测 |
 | WebDAV 管理 | 多 WebDAV 连接管理，连通性探测 |
-| 主题与偏好 | 深色 / 浅色主题切换 |
+| 主题与偏好 | 多套深色 / 浅色主题切换 |
 
 ## 技术栈
 
@@ -64,7 +65,7 @@ cd src-tauri && cargo test encrypt_decrypt
 ## 平台说明
 
 - **macOS**：完整支持，提供 DMG 发布包（Intel + Apple Silicon）。
-- **Windows**：路径 / PATH / 文件管理器 / Skills 软链降级 / PowerShell 别名等已适配（见 `WINDOWS_ADAPTATION_PLAN.md`）；Release 提供 NSIS 安装包。
+- **Windows**：路径 / PATH / 文件管理器 / Skills 软链降级 / PowerShell 别名等已适配；Release 提供 NSIS 安装包。
 
 ## 下载与安装
 
@@ -116,7 +117,7 @@ codesign --force --deep --sign - /Applications/AgentBuddy.app
 
 | 文件/目录 | 用途 |
 |-----------|------|
-| `config.json` | 主题、网络代理、备份设置 |
+| `config.json` | 主题、网络代理、备份设置（含自动备份 `backup.auto`） |
 | `agents.db` | SQLite 数据库（Agent、MCP 服务器、Skills、环境、供应商等） |
 | `skills/` | Skills 库文件 |
 
@@ -141,6 +142,7 @@ src/                          React 前端
       CodexEnv.tsx            Codex 多环境管理
       OpenCodeConfig.tsx      OpenCode 配置
       AiProviders.tsx         AI 供应商管理
+      RouteAggregation.tsx    路由聚合
       ProjectConfig.tsx       项目配置初始化
       BackupManage.tsx        备份管理
       Preferences.tsx         偏好设置
@@ -156,13 +158,18 @@ src-tauri/src/                Rust 后端
   claude_env.rs               Claude 多环境管理
   codex_env.rs                Codex 多环境管理
   opencode_config.rs          OpenCode Provider/Model 配置
+  pi_model_config.rs          Pi / Oh-My-Pi 模型与认证配置
+  agent_model_config.rs       OpenCode / Pi / Oh-My-Pi 统一模型分派
   ai_provider.rs              AI 供应商注册与加密存储
   project_config.rs           项目级 AI 配置初始化
   db.rs                       SQLite 持久化
   config.rs                   应用配置读写
   crypto.rs                   AES-256-GCM 加密
+  http_client.rs              统一代理下的 HTTP 客户端
   webdav.rs                   WebDAV 连接与上传
-  backup.rs                   备份打包与多 WebDAV 上传
+  backup.rs                   备份打包与多 WebDAV 上传、远端恢复
+  backup_schedule.rs          自动备份调度（定时触发，与手动备份互斥）
+  route_aggregation/          本地路由聚合、故障转移与 cloaking
   platform.rs                 跨平台路径与工具函数
 ```
 

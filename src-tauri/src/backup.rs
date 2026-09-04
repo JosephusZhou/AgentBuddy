@@ -18,6 +18,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
@@ -29,6 +30,24 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 多 WebDAV 目标并发上传时的最大并发数。
 const UPLOAD_CONCURRENCY: usize = 3;
+
+/// 进度事件来源：手动备份 / 自动备份。
+pub(crate) const TRIGGER_MANUAL: &str = "manual";
+pub(crate) const TRIGGER_AUTO: &str = "auto";
+
+/// 手动与自动备份共用的运行互斥锁：同一时刻只允许一轮备份
+///（打包 / 上传 / 远端清理），避免 zip 临时目录与滚动清理互相踩踏。
+static BACKUP_RUN_LOCK: Mutex<()> = Mutex::new(());
+
+/// 尝试获取备份运行锁；`None` 表示已有备份在进行中。
+/// 锁中毒（上一轮备份 panic）时仍返回锁，允许后续备份继续执行。
+pub(crate) fn try_acquire_run_lock() -> Option<MutexGuard<'static, ()>> {
+    match BACKUP_RUN_LOCK.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::WouldBlock) => None,
+        Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
+    }
+}
 
 // ===== Public DTOs =====
 
@@ -131,6 +150,13 @@ pub struct BackupProgressEvent {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
+    /// manual | auto；旧事件无该字段，前端按缺省处理。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// 仅 finalize 汇总事件携带：本轮是否成功（备份=任一目标上传成功，恢复=还原了文件）；
+    /// 其余进度事件不带，前端按缺省处理。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
 }
 
 fn emit_backup_progress(app: &AppHandle, event: BackupProgressEvent) {
@@ -203,7 +229,15 @@ pub fn get_backup_settings() -> Result<BackupSettings, String> {
 }
 
 pub fn update_backup_settings(settings: BackupSettings) -> Result<BackupSettings, String> {
-    config::save_backup_settings(settings)
+    // 前端手动路径 DTO 不含 auto 段（serde 缺省为关闭）：在配置锁内读出现状、
+    // 保留磁盘上的自动备份段（口令密文 + 运行状态）后整体写回，避免保存路径
+    // 设置时把自动备份覆盖掉，也避免与调度线程的状态回写互相踩踏。
+    config::update_backup_settings_atomic(|current| {
+        Ok(BackupSettings {
+            auto: current.auto,
+            ..settings
+        })
+    })
 }
 
 // ===== List units =====
@@ -1067,6 +1101,19 @@ pub fn run_backup_upload(
     app: AppHandle,
     payload: BackupRunPayload,
 ) -> Result<BackupRunResult, String> {
+    let _run_guard =
+        try_acquire_run_lock().ok_or_else(|| "已有备份正在进行，请稍后再试".to_string())?;
+    execute_backup(app, payload, Some(TRIGGER_MANUAL.to_string()))
+}
+
+/// 备份执行内核：收集 → 打包 → 加密 → 多目标并发上传 → 远端清理。
+/// 手动 command 与自动备份调度共用；调用方需先持有
+/// [`try_acquire_run_lock`]。`trigger` 写入进度事件供前端区分手动/自动。
+pub(crate) fn execute_backup(
+    app: AppHandle,
+    payload: BackupRunPayload,
+    trigger: Option<String>,
+) -> Result<BackupRunResult, String> {
     let settings = config::load_backup_settings()?;
     let unit_ids: HashSet<String> = payload
         .unit_ids
@@ -1112,6 +1159,8 @@ pub fn run_backup_upload(
                     total: total_steps,
                     message,
                     connection_id,
+                    trigger: trigger.clone(),
+                    ok: None,
                 },
             );
         };
@@ -1138,9 +1187,15 @@ pub fn run_backup_upload(
         );
     }
 
-    // 文件名时间戳：yyyyMMddHHmmss（无分隔符，便于排序与去重）
+    // 文件名时间戳：yyyyMMddHHmmss（无分隔符，便于排序与去重）。
+    // 自动备份用独立前缀 agentbuddy-auto-backup-*，落在远端 auto/ 子目录，
+    // 与手动备份互不影响保留窗口。
     let stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
-    let base_name = format!("agentbuddy-backup-{}", stamp);
+    let base_name = if trigger.as_deref() == Some(TRIGGER_AUTO) {
+        format!("agentbuddy-auto-backup-{}", stamp)
+    } else {
+        format!("agentbuddy-backup-{}", stamp)
+    };
     let encrypted = passphrase.is_some();
     let archive_file_name = if encrypted {
         format!("{}.abenc", base_name)
@@ -1337,6 +1392,7 @@ pub fn run_backup_upload(
                 &app,
                 BackupProgressEvent {
                     phase: "upload".to_string(),
+                    ok: None,
                     current: step.min(total_steps),
                     total: total_steps,
                     message: if target.ok {
@@ -1348,6 +1404,7 @@ pub fn run_backup_upload(
                         )
                     },
                     connection_id: Some(upload_ids[idx].clone()),
+                    trigger: trigger.clone(),
                 },
             );
             completed_targets.push((idx, target));
@@ -1369,6 +1426,8 @@ pub fn run_backup_upload(
             total: total_steps,
             message: "正在清理临时文件…".into(),
             connection_id: None,
+            trigger: trigger.clone(),
+            ok: None,
         },
     );
 
@@ -1405,6 +1464,8 @@ pub fn run_backup_upload(
             total: total_steps,
             message: message.clone(),
             connection_id: None,
+            trigger,
+            ok: Some(any_ok),
         },
     );
 
@@ -1561,6 +1622,8 @@ pub fn restore_remote_backup(
                 total: total_steps,
                 message,
                 connection_id: Some(cid.clone()),
+                trigger: None,
+                ok: None,
             },
         );
     };
@@ -1626,6 +1689,8 @@ pub fn restore_remote_backup(
                 total: total_steps,
                 message: message.clone(),
                 connection_id: Some(cid.clone()),
+                trigger: None,
+                ok: Some(restored > 0),
             },
         );
         Ok(RestoreBackupResult {

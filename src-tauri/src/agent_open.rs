@@ -202,6 +202,9 @@ mod tests {
 
     #[test]
     fn claude_code_has_distinct_settings() {
+        // 持 HOME 测试锁：home_dir 与 open_targets 都依赖 HOME 派生路径，
+        // 两次读取之间不能被其它换 HOME 的测试穿插（约定见 config.rs TEST_HOME_LOCK）。
+        let _home_guard = crate::config::lock_home_for_test();
         let home = dirs::home_dir().expect("home");
         let targets = open_targets("claude-code");
         assert_eq!(

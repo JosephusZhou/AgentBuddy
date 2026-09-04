@@ -14,7 +14,9 @@ import NetworkSettings from "./components/pages/NetworkSettings";
 import WebDAV from "./components/pages/WebDAV";
 import RouteAggregation from "./components/pages/RouteAggregation";
 import { applyTheme, loadAppConfig, saveTheme, DEFAULT_THEME, type Theme } from "./lib/theme";
+import { useStatusMessage } from "./lib/useStatusMessage";
 import { useGlobalModalA11y } from "./components/ui";
+import { Toast } from "./components/Toast";
 
 export type MainView =
   | "agent-sniff"
@@ -28,6 +30,46 @@ export type MainView =
   | "route-aggregation";
 export type SettingsView = "preferences" | "network" | "webdav" | "backup";
 export type AppMode = "main" | "settings";
+
+/**
+ * 自动备份后台失败时弹出全局 Toast（trigger=auto 的 finalize 汇总事件）。
+ * 成功不打扰（备份页内已有「上次运行 · 成功」状态）；失败提示复用
+ * useStatusMessage 的超时逻辑，5s 后自动滑出。
+ */
+function AutoBackupNotifier() {
+  const [message, setMessage] = useStatusMessage(5000);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      if (disposed) return;
+      unlisten = await listen<{
+        phase: string;
+        message: string;
+        trigger?: string;
+        ok?: boolean;
+      }>("backup-progress", (ev) => {
+        // ok 仅在 finalize 汇总事件上出现；成功与不带 ok 的事件都不弹。
+        if (ev.payload.trigger !== "auto" || ev.payload.phase !== "finalize") return;
+        if (ev.payload.ok !== false) return;
+        setMessage(ev.payload.message);
+      });
+      // 清理发生在 listen 完成前时，这里补退订，避免监听器泄漏。
+      if (disposed) {
+        unlisten();
+        unlisten = undefined;
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  return <Toast message={message} />;
+}
 
 export default function App() {
   // 全局弹窗可访问性：打开自动聚焦主输入框 + Tab 焦点圈定（见 ui.tsx）
@@ -108,6 +150,7 @@ export default function App() {
         {activeView === "webdav" && <WebDAV />}
         {activeView === "backup" && <BackupManage />}
       </main>
+      <AutoBackupNotifier />
     </div>
   );
 }

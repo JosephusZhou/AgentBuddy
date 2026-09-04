@@ -5,7 +5,7 @@ use crate::crypto;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 /// 后端兜底默认主题。精确的“是否属于主题注册表”判断由前端 `lib/theme.ts`
@@ -41,10 +41,90 @@ pub struct AppConfig {
     pub models_dev_cached_at: Option<u64>,
 }
 
+fn default_auto_mode() -> String {
+    "interval".to_string()
+}
+
+fn default_auto_interval_hours() -> u32 {
+    24
+}
+
+/// 自动备份（定时触发）配置与运行状态，存 config.json `backup.auto`。
+/// `passphrase_*` 是经 secretsKey 加密的备份口令三段密文（与 WebDAV 密码同构），
+/// 任何 command 都不得回传明文或密文；前端只读取 `hasPassphrase` 存在性标志。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoBackupSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    /// interval | daily
+    #[serde(default = "default_auto_mode")]
+    pub mode: String,
+    /// interval 模式的触发间隔（小时），合法值 6/12/24/72/168。
+    #[serde(default = "default_auto_interval_hours")]
+    pub interval_hours: u32,
+    /// daily 模式的本地时间 "HH:MM"。
+    #[serde(default)]
+    pub daily_time: String,
+    /// 固定备份单元 id（BackupUnitNode 树的叶子 id）。
+    #[serde(default)]
+    pub unit_ids: Vec<String>,
+    /// WebDAV 连接 id 列表。
+    #[serde(default)]
+    pub webdav_connection_ids: Vec<String>,
+    #[serde(default)]
+    pub passphrase_salt: String,
+    #[serde(default)]
+    pub passphrase_nonce: String,
+    #[serde(default)]
+    pub passphrase_cipher: String,
+    /// 最近一次启用的时间锚点（Unix 秒）：interval 模式在首跑前用它推算下次触发，
+    /// 避免每次 tick 以 now 为基线导致调度点无限顺延。
+    #[serde(default)]
+    pub enabled_at: Option<u64>,
+    /// 最近一次自动备份尝试时间（Unix 秒）。
+    #[serde(default)]
+    pub last_run_at: Option<u64>,
+    #[serde(default)]
+    pub last_ok: Option<bool>,
+    /// 最近一次结果文案（不含敏感信息）。
+    #[serde(default)]
+    pub last_message: Option<String>,
+}
+
+impl Default for AutoBackupSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: default_auto_mode(),
+            interval_hours: default_auto_interval_hours(),
+            daily_time: String::new(),
+            unit_ids: Vec::new(),
+            webdav_connection_ids: Vec::new(),
+            passphrase_salt: String::new(),
+            passphrase_nonce: String::new(),
+            passphrase_cipher: String::new(),
+            enabled_at: None,
+            last_run_at: None,
+            last_ok: None,
+            last_message: None,
+        }
+    }
+}
+
+impl AutoBackupSettings {
+    pub fn has_passphrase(&self) -> bool {
+        !self.passphrase_cipher.trim().is_empty()
+    }
+}
+
 /// Backup-related preferences stored in config.json (no secrets).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSettings {
+    /// 定时自动备份配置；旧 config.json 缺失该字段时取默认值（关闭）。
+    #[serde(default)]
+    pub auto: AutoBackupSettings,
     /// Override path to CLIProxyAPI conf; empty = auto-detect.
     #[serde(default)]
     pub cliproxyapi_conf_path: String,
@@ -79,6 +159,7 @@ pub fn lock_home_for_test() -> std::sync::MutexGuard<'static, ()> {
 impl Default for BackupSettings {
     fn default() -> Self {
         Self {
+            auto: AutoBackupSettings::default(),
             cliproxyapi_conf_path: String::new(),
             sub2api_root_path: String::new(),
             default_remote_dir: default_remote_dir(),
@@ -439,8 +520,8 @@ pub fn save_route_aggregation_config(
     Ok(())
 }
 
-pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, String> {
-    let mut settings = settings;
+/// 归一化手动路径字段（trim 与默认目录兜底），backup 段各保存路径共用。
+fn normalize_backup_settings(mut settings: BackupSettings) -> BackupSettings {
     settings.cliproxyapi_conf_path = settings.cliproxyapi_conf_path.trim().to_string();
     settings.sub2api_root_path = settings.sub2api_root_path.trim().to_string();
     let remote = settings
@@ -453,19 +534,54 @@ pub fn save_backup_settings(settings: BackupSettings) -> Result<BackupSettings, 
     } else {
         remote
     };
+    settings
+}
 
-    let _config_guard = lock_config_file()?;
-    let path = config_path()?;
-    let _ = ensure_app_config_locked()?;
-    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+/// 在已持有 CONFIG_FILE_LOCK 的前提下把 backup 段整体写回 config.json。
+fn write_backup_settings_locked(path: &Path, settings: &BackupSettings) -> Result<(), String> {
+    let raw = fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
     let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
     let obj = root
         .as_object_mut()
         .ok_or_else(|| "config.json 格式无效".to_string())?;
     let backup_val =
-        serde_json::to_value(&settings).map_err(|e| format!("序列化备份设置失败: {}", e))?;
+        serde_json::to_value(settings).map_err(|e| format!("序列化备份设置失败: {}", e))?;
     obj.insert("backup".to_string(), backup_val);
-    write_raw(&path, &root)?;
+    write_raw(path, &root)?;
+    Ok(())
+}
+
+/// backup 段的原子读-改-写：全程持有 CONFIG_FILE_LOCK，读出磁盘现状交给闭包
+/// 修改后整体写回。手动备份设置、自动备份设置与调度线程的运行状态回写都必须
+/// 经由本函数修改 backup 段，闭合「读-改」与「写」之间被并发写入覆盖的窗口。
+///
+/// 读取失败或 config.json 无法解析时直接报错放弃写入：修改型操作在无法确认
+/// 现状时宁可失败，也不把默认值静默落盘覆盖已有配置（如自动备份的口令密文）。
+/// 闭包返回与现状完全相同的内容时不产生写盘。
+///
+/// 注意：闭包在 CONFIG_FILE_LOCK 内执行，不得再调用任何拿这把锁的函数
+///（load_secrets_key / load_backup_settings / save_backup_settings 等），
+/// 需要锁的数据应在进入本函数前取好。
+pub fn update_backup_settings_atomic<F>(f: F) -> Result<BackupSettings, String>
+where
+    F: FnOnce(BackupSettings) -> Result<BackupSettings, String>,
+{
+    let _config_guard = lock_config_file()?;
+    let path = config_path()?;
+    let _ = ensure_app_config_locked()?;
+
+    let raw = fs::read_to_string(&path)
+        .map_err(|e| format!("读取 config.json 失败，已取消保存: {}", e))?;
+    let root: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("config.json 无法解析，已取消保存: {}", e))?;
+    let current = parse_backup_settings(root.get("backup"));
+
+    // 闭包按值接管现状（所有权移交后还需与结果比较判断是否跳写），先克隆一份。
+    let settings = normalize_backup_settings(f(current.clone())?);
+    if settings == current {
+        return Ok(settings);
+    }
+    write_backup_settings_locked(&path, &settings)?;
     Ok(settings)
 }
 
@@ -525,11 +641,19 @@ fn write_full_config(path: &PathBuf, theme: &str, secrets_key: &str) -> Result<(
     write_raw(path, &Value::Object(map))
 }
 
-fn write_raw(path: &PathBuf, value: &Value) -> Result<(), String> {
+fn write_raw(path: &Path, value: &Value) -> Result<(), String> {
     let pretty = serde_json::to_string_pretty(value)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    fs::write(path, format!("{}\n", pretty))
-        .map_err(|e| format!("Failed to write config.json: {}", e))?;
+    // 临时文件 + rename 原子替换：进程中途崩溃不会留下半截 config.json。
+    // 半截文件会被读取端按损坏处理并重置 secretsKey，导致已有密文全部不可解，
+    // 代价远大于多一次 rename。并发写由 CONFIG_FILE_LOCK 串行化，临时名不会冲突。
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, format!("{}\n", pretty))
+        .map_err(|e| format!("Failed to write config.json.tmp: {}", e))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("Failed to replace config.json: {}", e)
+    })?;
     Ok(())
 }
 
@@ -583,5 +707,47 @@ mod tests {
     fn slug_length_boundary() {
         assert!(is_valid_theme_slug(&"a".repeat(64)));
         assert!(!is_valid_theme_slug(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn auto_backup_settings_default_on_legacy_config() {
+        // 旧 config.json 的 backup 段没有 auto 字段：解析应取默认值（关闭），
+        // 已有的手动路径字段不受影响。
+        let parsed: BackupSettings =
+            serde_json::from_value(json!({ "defaultRemoteDir": "Backups" })).unwrap();
+        assert_eq!(parsed.default_remote_dir, "Backups");
+        assert!(!parsed.auto.enabled);
+        assert_eq!(parsed.auto.mode, "interval");
+        assert_eq!(parsed.auto.interval_hours, 24);
+        assert!(!parsed.auto.has_passphrase());
+    }
+
+    #[test]
+    fn auto_backup_settings_roundtrip_keeps_passphrase_fields() {
+        let auto = AutoBackupSettings {
+            enabled: true,
+            mode: "daily".into(),
+            daily_time: "09:30".into(),
+            unit_ids: vec!["app:agentbuddy:db".into()],
+            webdav_connection_ids: vec!["dav-1".into()],
+            passphrase_salt: "cw==".into(),
+            passphrase_nonce: "cw==".into(),
+            passphrase_cipher: "cw==".into(),
+            enabled_at: Some(1_700_000_000),
+            last_run_at: Some(1_700_000_100),
+            last_ok: Some(true),
+            last_message: Some("ok".into()),
+            ..AutoBackupSettings::default()
+        };
+        let settings = BackupSettings {
+            auto: auto.clone(),
+            ..BackupSettings::default()
+        };
+        let val = serde_json::to_value(&settings).unwrap();
+        // 密文字段必须落盘（save_backup_settings 依赖完整序列化持久化 auto 段）。
+        assert_eq!(val["auto"]["passphraseCipher"], "cw==");
+        let back: BackupSettings = serde_json::from_value(val).unwrap();
+        assert_eq!(back.auto, auto);
+        assert!(back.auto.has_passphrase());
     }
 }

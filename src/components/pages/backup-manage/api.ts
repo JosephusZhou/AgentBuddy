@@ -1,4 +1,7 @@
 import type {
+  AutoBackupSettings,
+  AutoBackupSettingsUpdate,
+  AutoBackupStatus,
   BackupRunPayload,
   BackupRunResult,
   BackupSettings,
@@ -31,6 +34,38 @@ export async function updateBackupSettings(settings: BackupSettings): Promise<Ba
 export async function runBackupUpload(payload: BackupRunPayload): Promise<BackupRunResult> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("run_backup_upload", { payload }) as Promise<BackupRunResult>;
+}
+
+export async function getAutoBackupSettings(): Promise<AutoBackupSettings> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const r = await (invoke("get_auto_backup_settings") as Promise<Partial<AutoBackupSettings>>);
+  return {
+    enabled: !!r.enabled,
+    mode: r.mode === "daily" ? "daily" : "interval",
+    intervalHours: typeof r.intervalHours === "number" ? r.intervalHours : 24,
+    dailyTime: r.dailyTime ?? "",
+    unitIds: r.unitIds ?? [],
+    webdavConnectionIds: r.webdavConnectionIds ?? [],
+    hasPassphrase: !!r.hasPassphrase,
+  };
+}
+
+export async function updateAutoBackupSettings(
+  update: AutoBackupSettingsUpdate,
+): Promise<AutoBackupSettings> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("update_auto_backup_settings", { update }) as Promise<AutoBackupSettings>;
+}
+
+export async function getAutoBackupStatus(): Promise<AutoBackupStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_auto_backup_status") as Promise<AutoBackupStatus>;
+}
+
+/** 按自动备份配置立即执行一轮（走同一互斥锁与 auto 远端子目录）。 */
+export async function runAutoBackupNow(): Promise<BackupRunResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("run_auto_backup_now") as Promise<BackupRunResult>;
 }
 
 export async function listRemoteBackups(

@@ -28,8 +28,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib route_aggregation
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 ```
 
-当前没有 ESLint、Prettier 或前端测试脚本。构建需要 Node、pnpm、Rust 和对应平台的 Tauri
-系统依赖。
+没有 ESLint 或前端测试脚本；前端格式由 Prettier（`pnpm format` / `pnpm format:check`）、
+后端由 rustfmt（`cargo fmt`）管理，并由 lefthook pre-commit 在提交时自动执行（前端 write 修正、
+Rust `--check` 校验）。构建需要 Node、pnpm、Rust 和对应平台的 Tauri 系统依赖。
 
 ## 代码入口
 
@@ -56,7 +57,9 @@ src-tauri/src/
   config.rs                        app config.json、主题、代理和 secretsKey
   crypto.rs                        AES-256-GCM + HKDF 密钥字段加密
   http_client.rs                   统一代理下的 reqwest client
-  webdav.rs / backup.rs            WebDAV 连接、备份打包上传和远端恢复
+  webdav.rs                        WebDAV 连接与上传
+  backup.rs                        备份打包上传和远端恢复
+  backup_schedule.rs               自动备份调度（30s tick、interval/daily、互斥）
   route_aggregation/               同协议路由聚合、故障转移和 cloaking
 
 docs/SYNC_PLAYBOOK.md              CLIProxyAPI 行为同步手册
@@ -127,6 +130,32 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
   状态、`GET /v1/models` 和 `get_route_provider_models` 都不得自动请求供应商模型列表。
 - 编辑表单可显式执行一次远端模型拉取作为候选；未关联供应商的临时环境配置也允许远端拉取。
 
+## 备份与自动备份
+
+`backup.rs` 提供备份内核（收集 → 打包 → 加密 → 多 WebDAV 并发上传 → 远端清理）与远端恢复；
+`backup_schedule.rs` 提供定时自动备份。要点：
+
+- 手动与自动备份共用 `BACKUP_RUN_LOCK` 互斥（`backup::try_acquire_run_lock`），同一时刻只允许
+  一轮备份（打包 / 上传 / 清理）；调用执行内核前必须先持有该锁
+  （`backup::execute_backup` / `backup_schedule::execute_auto`）。
+- 自动备份由常驻调度线程驱动：每 30s tick 热读 `config.json backup.auto`；`next_run` 由
+  `last_run_at`（首跑前用启用锚点 `enabled_at`）现算、不持久化；interval 模式错过调度点后
+  唤醒即补跑一次；重新启用（false→true）视为新调度周期并重置锚点与运行状态。
+- 自动备份强制口令加密（无明文旁路），上传到 `{remote_dir}/auto`，文件名前缀
+  `agentbuddy-auto-backup-*`，与手动备份（`agentbuddy-backup-*`）隔离保留窗口（各目录各保留
+  最新 3 份，`BACKUP_REMOTE_KEEP`）。
+- 自动备份口令经 `secretsKey` 加密为三段密文存于 `backup.auto.passphrase_*`；任何 command 不得
+  回传明文或密文，DTO 只回传 `hasPassphrase` 存在性标志。
+- `config::update_backup_settings_atomic` 是 backup 段的唯一写入口：全程持有 `CONFIG_FILE_LOCK`
+  读出磁盘现状交给闭包修改后整体写回，闭合「读-改」与「写」之间的并发覆盖窗口；闭包内不得再
+  调用任何取同一把锁的函数（`load_secrets_key` / `load_backup_settings` 等），口令加密等取锁
+  操作须在进入前完成。手动保存路径必须保留磁盘上的 `auto` 段（含口令密文与运行状态）。
+- 所有 config.json 写入经 `write_raw` 临时文件 + rename 原子替换，避免半截文件触发
+  secretsKey 重置。
+- 备份进度事件 `BackupProgressEvent` 携带 `trigger`（manual | auto）与 `ok`（仅 finalize 汇总
+  事件携带本轮是否成功）；前端据此区分手动/自动与成功/失败（自动备份全部失败时弹全局 Toast，
+  成功不打扰）。
+
 ## 路由聚合
 
 `src-tauri/src/route_aggregation/` 提供本地 Axum 代理，维护两种协议、三个入口：
@@ -172,7 +201,11 @@ CLIProxyAPI 只提供行为同步参考，不是运行时依赖。上游变更�
 3. 修改 Agent/MCP/Skills 路径时，遵循 `agents.rs` → 写入器/项目配置 → `AGENT_MCP_SKILLS_MAP.md`
    → 前端镜像的顺序。
 4. 修改路由聚合或 cloaking 时，至少运行 `cargo test --manifest-path src-tauri/Cargo.toml --lib route_aggregation`。
-5. 保留用户已有配置和未相关工作区改动；不要读取或输出密钥、密码、Token 等敏感信息。
+5. 修改备份 / 自动备份 / config 读写时，保持 `update_backup_settings_atomic` 原子写不变量与
+   `BACKUP_RUN_LOCK` 互斥（含测试的 HOME 测试锁），至少运行
+   `cargo test --manifest-path src-tauri/Cargo.toml --lib backup`（覆盖 backup 与
+   backup_schedule 模块）。
+6. 保留用户已有配置和未相关工作区改动；不要读取或输出密钥、密码、Token 等敏感信息。
 
 ## 首要阅读文件
 

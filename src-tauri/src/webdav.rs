@@ -1001,10 +1001,10 @@ fn fs_create_dir_all(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| format!("创建目录失败: {}", e))
 }
 
-/// Whether `name` looks like an AgentBuddy backup archive.
+/// Whether `name` looks like an AgentBuddy backup archive (manual or auto prefix).
 pub fn is_agentbuddy_backup_name(name: &str) -> bool {
     let n = name.trim();
-    if !n.starts_with("agentbuddy-backup-") {
+    if !(n.starts_with("agentbuddy-backup-") || n.starts_with("agentbuddy-auto-backup-")) {
         return false;
     }
     n.ends_with(".zip") || n.ends_with(".abenc")
@@ -1127,8 +1127,15 @@ mod tests {
         assert!(is_agentbuddy_backup_name(
             "agentbuddy-backup-20260721120000.abenc"
         ));
+        assert!(is_agentbuddy_backup_name(
+            "agentbuddy-auto-backup-20260721120000.zip"
+        ));
+        assert!(is_agentbuddy_backup_name(
+            "agentbuddy-auto-backup-20260721120000.abenc"
+        ));
         assert!(!is_agentbuddy_backup_name("other.zip"));
         assert!(!is_agentbuddy_backup_name("agentbuddy-backup-foo.txt"));
+        assert!(!is_agentbuddy_backup_name("agentbuddy-auto-backup-foo.txt"));
     }
 
     #[test]

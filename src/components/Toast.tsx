@@ -34,7 +34,9 @@ export function Toast({ message }: { message: string }) {
 
   return createPortal(
     <div className="ui-toast-layer" aria-live="polite">
-      <div className={`ui-toast${visible ? "is-visible" : ""}`} role="status">
+      {/* 两个分支都用完整静态类名：f2a9779 曾把 ` is-visible` 的前导空格当作
+          可整理空白删掉，导致 `ui-toastis-visible` 匹配不到任何样式。 */}
+      <div className={visible ? "ui-toast is-visible" : "ui-toast"} role="status">
         {text}
       </div>
     </div>,

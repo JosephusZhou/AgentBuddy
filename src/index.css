@@ -5611,6 +5611,32 @@ a[href]:focus-visible {
   display: flex;
   gap: 8px;
 }
+/* 自动备份卡片 */
+.backup-auto {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.backup-auto-status {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--seed-muted);
+}
+.backup-auto-dav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.backup-auto-pass-set {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-sm);
+  color: var(--seed-fg);
+}
 .backup-result.is-ok {
   border-color: rgba(34, 197, 94, 0.35);
 }

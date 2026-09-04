@@ -5,15 +5,21 @@ import { useStatusMessage } from "@/lib/useStatusMessage";
 import {
   collectAvailableIds,
   formatBytes,
+  getAutoBackupSettings,
+  getAutoBackupStatus,
   getBackupSettings,
   listBackupUnits,
   listRemoteBackups,
   listWebDavConnections,
   restoreRemoteBackup,
+  runAutoBackupNow,
   runBackupUpload,
+  updateAutoBackupSettings,
   updateBackupSettings,
 } from "./backup-manage/api";
 import type {
+  AutoBackupSettings,
+  AutoBackupStatus,
   BackupProgressEvent,
   BackupRunResult,
   BackupSettings,
@@ -37,6 +43,25 @@ const PHASE_LABEL: Record<string, string> = {
 
 function phaseLabel(phase: string): string {
   return PHASE_LABEL[phase] ?? phase;
+}
+
+/** Unix 秒 → 本地 "yyyy-MM-dd HH:mm"；空值显示 —。 */
+function formatAutoTime(unixSec: number | null): string {
+  if (!unixSec) return "—";
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const AUTO_INTERVAL_CHOICES = [6, 12, 24, 72, 168];
+
+function intervalLabel(hours: number): string {
+  return hours % 24 === 0 ? `每隔 ${hours / 24} 天` : `每隔 ${hours} 小时`;
+}
+
+/** 远程列表条目的稳定键：手动目录与 auto 目录可能存在同名旧归档，用目录消歧。 */
+function remoteItemKey(item: RemoteBackupItem): string {
+  return `${item.dir ?? ""}/${item.name}`;
 }
 
 type AppSelectOption = {
@@ -305,6 +330,27 @@ export default function BackupManage() {
   /** 备份内容区折叠：默认展开 */
   const [unitsExpanded, setUnitsExpanded] = useState(true);
 
+  // 自动备份（设置持久化在 config.json backup.auto；单元/目标选择独立于手动备份）
+  const [autoSettings, setAutoSettings] = useState<AutoBackupSettings>({
+    enabled: false,
+    mode: "interval",
+    intervalHours: 24,
+    dailyTime: "09:30",
+    unitIds: [],
+    webdavConnectionIds: [],
+    hasPassphrase: false,
+  });
+  const [autoStatus, setAutoStatus] = useState<AutoBackupStatus | null>(null);
+  const [autoSelected, setAutoSelected] = useState<Set<string>>(new Set());
+  const [autoDavSelected, setAutoDavSelected] = useState<Set<string>>(new Set());
+  const [autoPassphrase, setAutoPassphrase] = useState("");
+  const [autoPassphrase2, setAutoPassphrase2] = useState("");
+  /** 自动备份单元树折叠：默认收起，避免与手动树重复占用版面 */
+  const [autoUnitsExpanded, setAutoUnitsExpanded] = useState(false);
+  const [autoDirty, setAutoDirty] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
+
   // Restore
   const [restoreConnId, setRestoreConnId] = useState("");
   const [remoteItems, setRemoteItems] = useState<RemoteBackupItem[]>([]);
@@ -317,16 +363,26 @@ export default function BackupManage() {
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, s, dav] = await Promise.all([
+      const [u, s, dav, auto] = await Promise.all([
         listBackupUnits(),
         getBackupSettings(),
         listWebDavConnections(),
+        getAutoBackupSettings(),
       ]);
       setUnits(u);
       setSettings(s);
       setUploadDir(s.defaultRemoteDir?.trim() || "AgentBuddy");
       setConnections(dav);
       setSelected(collectDefaultIds(u));
+      // 自动备份优先用已保存的选择；首次使用时预填默认选中项 + 全部 WebDAV。
+      setAutoSelected(auto.unitIds.length > 0 ? new Set(auto.unitIds) : collectDefaultIds(u));
+      setAutoDavSelected(
+        auto.webdavConnectionIds.length > 0
+          ? new Set(auto.webdavConnectionIds)
+          : new Set(dav.map((d) => d.id)),
+      );
+      setAutoSettings(auto);
+      setAutoDirty(false);
       setSelectedDav(new Set(dav.map((d) => d.id)));
       setSettingsDirty(false);
       if (dav.length > 0) {
@@ -473,10 +529,171 @@ export default function BackupManage() {
     }
   };
 
+  /** 拉取自动备份运行状态（下次/上次运行）。 */
+  const refreshAutoStatus = useCallback(async () => {
+    try {
+      setAutoStatus(await getAutoBackupStatus());
+    } catch {
+      // 状态查询失败不打断页面，保留上次状态
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAutoStatus();
+    const timer = window.setInterval(() => void refreshAutoStatus(), 30000);
+    return () => window.clearInterval(timer);
+  }, [refreshAutoStatus]);
+
+  // 自动备份在后台执行时也会发 backup-progress（trigger=auto）：监听以即时刷新状态。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      if (disposed) return;
+      unlisten = await listen<BackupProgressEvent>("backup-progress", (ev) => {
+        if (ev.payload.trigger !== "auto") return;
+        if (ev.payload.phase === "finalize") void refreshAutoStatus();
+      });
+      // 清理发生在 listen 完成前时，这里补退订，避免监听器泄漏。
+      if (disposed) {
+        unlisten();
+        unlisten = undefined;
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshAutoStatus]);
+
+  /** 校验并写入自动备份设置；成功返回 true 并清空表单脏状态。 */
+  const persistAutoSettings = async (): Promise<boolean> => {
+    if (autoSelected.size === 0) {
+      setStatusMsg("请至少选择一个自动备份内容");
+      return false;
+    }
+    if (autoDavSelected.size === 0) {
+      setStatusMsg("请至少选择一个自动备份 WebDAV 目标");
+      return false;
+    }
+    if (autoPassphrase && autoPassphrase !== autoPassphrase2) {
+      setStatusMsg("两次输入的口令不一致");
+      return false;
+    }
+    const dailyTime = autoSettings.dailyTime.trim() || "09:30";
+    setAutoSaving(true);
+    try {
+      const saved = await updateAutoBackupSettings({
+        enabled: autoSettings.enabled,
+        mode: autoSettings.mode,
+        intervalHours: autoSettings.intervalHours,
+        dailyTime,
+        unitIds: Array.from(autoSelected),
+        webdavConnectionIds: Array.from(autoDavSelected),
+        // 留空 = 不修改口令；清除走单独的 clearAutoPassphrase。
+        passphrase: autoPassphrase || undefined,
+      });
+      setAutoSettings(saved);
+      setAutoPassphrase("");
+      setAutoPassphrase2("");
+      setAutoDirty(false);
+      return true;
+    } catch (e) {
+      setStatusMsg(`保存失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
+      return false;
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+
+  const saveAutoSettings = async () => {
+    if (!(await persistAutoSettings())) return;
+    setStatusMsg("自动备份设置已保存");
+    void refreshAutoStatus();
+  };
+
+  const clearAutoPassphrase = async () => {
+    setAutoSaving(true);
+    try {
+      const saved = await updateAutoBackupSettings({
+        enabled: autoSettings.enabled,
+        mode: autoSettings.mode,
+        intervalHours: autoSettings.intervalHours,
+        dailyTime: autoSettings.dailyTime,
+        unitIds: Array.from(autoSelected),
+        webdavConnectionIds: Array.from(autoDavSelected),
+        passphrase: "",
+      });
+      setAutoSettings(saved);
+      setStatusMsg("已清除自动备份口令");
+    } catch (e) {
+      setStatusMsg(`清除失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+
+  const runAutoNow = async () => {
+    setAutoRunning(true);
+    try {
+      // 后端按已保存配置执行：表单有未保存改动（含刚输入的口令）时先落盘，
+      // 否则会出现「运行的不是表单里看到的配置/口令未设置」的错位。
+      if (autoDirty || autoPassphrase) {
+        const saved = await persistAutoSettings();
+        if (!saved) return;
+      }
+      const res = await runAutoBackupNow();
+      setStatusMsg(res.message);
+    } catch (e) {
+      setStatusMsg(`自动备份失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
+    } finally {
+      setAutoRunning(false);
+      void refreshAutoStatus();
+    }
+  };
+
+  const onToggleAutoUnit = (id: string, node: BackupUnitNode, checked: boolean) => {
+    setAutoSelected((prev) => {
+      const next = new Set(prev);
+      const kids = node.children ?? [];
+      if (kids.length > 0) {
+        const ids = collectAvailableIds([node]);
+        for (const i of ids) {
+          if (checked) next.add(i);
+          else next.delete(i);
+        }
+      } else {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+    setAutoDirty(true);
+  };
+
+  const onToggleAutoDav = (id: string, checked: boolean) => {
+    setAutoDavSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    setAutoDirty(true);
+  };
+
+  const autoUnitsAllSelected =
+    availableLeafIds.length > 0 && availableLeafIds.every((id) => autoSelected.has(id));
+  const autoUnitsSomeSelected =
+    availableLeafIds.some((id) => autoSelected.has(id)) && !autoUnitsAllSelected;
+  // 输入框里已填写的口令也视为满足要求：hasPassphrase 只反映已落盘状态，
+  // 否则首次保存（口令尚未存在）会被本条件永久禁用。
+  const autoNeedsPassphrase =
+    selectedContainsSecrets(units, autoSelected) && !autoSettings.hasPassphrase && !autoPassphrase;
+
   const allUnitsSelected =
     availableLeafIds.length > 0 && availableLeafIds.every((id) => selected.has(id));
   const someUnitsSelected = availableLeafIds.some((id) => selected.has(id)) && !allUnitsSelected;
-
   const loadRemoteList = useCallback(
     async (connId: string, prefix?: string) => {
       if (!connId) {
@@ -485,10 +702,25 @@ export default function BackupManage() {
       }
       setRemoteLoading(true);
       try {
-        const items = await listRemoteBackups(connId, (prefix ?? uploadDir).trim() || "AgentBuddy");
-        setRemoteItems(items);
+        const base = (prefix ?? uploadDir).trim() || "AgentBuddy";
+        const autoDir = `${base}/auto`;
+        // 合并上传目录与其下 auto 子目录（自动备份）；auto 目录尚不存在时视为空。
+        const [manual, auto] = await Promise.all([
+          listRemoteBackups(connId, base),
+          listRemoteBackups(connId, autoDir).catch(() => [] as RemoteBackupItem[]),
+        ]);
+        const merged: RemoteBackupItem[] = [
+          ...manual.map((i) => ({ ...i, dir: base, auto: false })),
+          ...auto.map((i) => ({ ...i, dir: autoDir, auto: true })),
+        ];
+        merged.sort((a, b) => b.name.localeCompare(a.name));
+        setRemoteItems(merged);
         setSelectedRemote((prev) =>
-          items.some((i) => i.name === prev) ? prev : (items[0]?.name ?? ""),
+          merged.some((i) => remoteItemKey(i) === prev)
+            ? prev
+            : merged[0]
+              ? remoteItemKey(merged[0])
+              : "",
         );
       } catch (e) {
         setRemoteItems([]);
@@ -511,7 +743,7 @@ export default function BackupManage() {
       setStatusMsg("请选择要恢复的远程备份");
       return;
     }
-    const item = remoteItems.find((i) => i.name === selectedRemote);
+    const item = remoteItems.find((i) => remoteItemKey(i) === selectedRemote);
     if (item?.encrypted && !restorePassphrase.trim()) {
       setStatusMsg("该备份已加密，请填写备份口令");
       return;
@@ -532,10 +764,11 @@ export default function BackupManage() {
       unlisten = await listen<BackupProgressEvent>("backup-progress", (ev) => {
         setProgress(ev.payload);
       });
-      const remotePrefix = uploadDir.trim() || "AgentBuddy";
+      // 自动备份归档在 <上传目录>/auto 下，按条目来源目录下载。
+      const remotePrefix = item?.dir || uploadDir.trim() || "AgentBuddy";
       const res = await restoreRemoteBackup({
         connectionId: restoreConnId,
-        fileName: selectedRemote,
+        fileName: item?.name ?? selectedRemote,
         remotePrefix,
         passphrase: restorePassphrase.trim() || undefined,
       });
@@ -553,7 +786,7 @@ export default function BackupManage() {
 
   const canStart = !loading && !running && selected.size > 0 && selectedDav.size > 0;
 
-  const selectedRemoteItem = remoteItems.find((i) => i.name === selectedRemote);
+  const selectedRemoteItem = remoteItems.find((i) => remoteItemKey(i) === selectedRemote);
   const canRestore =
     !loading &&
     !running &&
@@ -804,8 +1037,8 @@ export default function BackupManage() {
                 )}
 
                 <p className="backup-upload-dir-hint">
-                  上传成功后本地临时包会删除；每个 WebDAV 目录仅保留最新 3 份
-                  <code> agentbuddy-backup-*</code> 归档。
+                  上传成功后本地临时包会删除；每个 WebDAV 目录仅保留最新 3 份备份归档（自动备份在其
+                  auto 子目录单独保留 3 份）。
                 </p>
 
                 <button
@@ -869,6 +1102,253 @@ export default function BackupManage() {
               </div>
             </section>
 
+            {/* 自动备份：设置持久化在 config.json backup.auto，与手动选择互不影响 */}
+            <section className="backup-section">
+              <div className="backup-section-head">
+                <h2 className="backup-section-title">自动备份</h2>
+                {autoStatus?.running && (
+                  <span className="backup-badge backup-badge-ok">备份进行中</span>
+                )}
+              </div>
+              <div className="backup-card backup-auto">
+                <p className="backup-upload-dir-hint">
+                  应用运行期间按计划自动备份并上传到每个 WebDAV 的{" "}
+                  <code>{uploadDir.trim() || "AgentBuddy"}/auto</code> 子目录，命名前缀为{" "}
+                  <code>agentbuddy-auto-backup-*</code>
+                  ，自动强制口令加密，仅保留最近 3
+                  份，不与手动备份挤占保留窗口；应用未运行时不执行。
+                </p>
+
+                <label className="ui-check backup-ack">
+                  <input
+                    type="checkbox"
+                    className="ui-check-input"
+                    checked={autoSettings.enabled}
+                    onChange={(e) => {
+                      setAutoSettings((s) => ({ ...s, enabled: e.target.checked }));
+                      setAutoDirty(true);
+                    }}
+                    disabled={autoSaving || autoRunning}
+                  />
+                  <CheckGlyph />
+                  <span>启用自动备份</span>
+                </label>
+
+                <div className="backup-field-row">
+                  <label className="backup-field">
+                    <span className="backup-field-label">触发方式</span>
+                    <AppSelect
+                      value={autoSettings.mode}
+                      options={[
+                        { value: "interval", label: "按时间间隔" },
+                        { value: "daily", label: "每天固定时刻" },
+                      ]}
+                      onChange={(v) => {
+                        setAutoSettings((s) => ({
+                          ...s,
+                          mode: v === "daily" ? "daily" : "interval",
+                        }));
+                        setAutoDirty(true);
+                      }}
+                      disabled={autoSaving || autoRunning}
+                    />
+                  </label>
+                  {autoSettings.mode === "interval" ? (
+                    <label className="backup-field">
+                      <span className="backup-field-label">间隔</span>
+                      <AppSelect
+                        value={String(autoSettings.intervalHours)}
+                        options={AUTO_INTERVAL_CHOICES.map((h) => ({
+                          value: String(h),
+                          label: intervalLabel(h),
+                        }))}
+                        onChange={(v) => {
+                          setAutoSettings((s) => ({ ...s, intervalHours: Number(v) }));
+                          setAutoDirty(true);
+                        }}
+                        disabled={autoSaving || autoRunning}
+                      />
+                    </label>
+                  ) : (
+                    <label className="backup-field">
+                      <span className="backup-field-label">每天时刻</span>
+                      <input
+                        type="time"
+                        className="form-input"
+                        value={autoSettings.dailyTime}
+                        onChange={(e) => {
+                          setAutoSettings((s) => ({ ...s, dailyTime: e.target.value }));
+                          setAutoDirty(true);
+                        }}
+                        disabled={autoSaving || autoRunning}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {autoSettings.enabled && (
+                  <div className="backup-auto-status">
+                    <span>下次运行：{formatAutoTime(autoStatus?.nextRunAt ?? null)}</span>
+                    <span>
+                      上次运行：{formatAutoTime(autoStatus?.lastRunAt ?? null)}
+                      {autoStatus?.lastOk === false ? " · 失败" : ""}
+                      {autoStatus?.lastOk === true ? " · 成功" : ""}
+                    </span>
+                  </div>
+                )}
+                {autoStatus?.lastMessage && (
+                  <div className="backup-unit-warn">{autoStatus.lastMessage}</div>
+                )}
+
+                <button
+                  type="button"
+                  className="btn btn-secondary backup-advanced-toggle"
+                  onClick={() => setAutoUnitsExpanded((v) => !v)}
+                >
+                  {autoUnitsExpanded
+                    ? "收起自动备份内容"
+                    : `选择自动备份内容（已选 ${autoSelected.size} 项）`}
+                </button>
+                {autoUnitsExpanded && (
+                  <>
+                    <UnitTree nodes={units} selected={autoSelected} onToggle={onToggleAutoUnit} />
+                    <label className="ui-check backup-select-all">
+                      <input
+                        type="checkbox"
+                        className="ui-check-input"
+                        checked={autoUnitsAllSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = autoUnitsSomeSelected;
+                        }}
+                        onChange={(e) => {
+                          setAutoSelected(e.target.checked ? new Set(availableLeafIds) : new Set());
+                          setAutoDirty(true);
+                        }}
+                        disabled={availableLeafIds.length === 0}
+                      />
+                      <CheckGlyph />
+                      <span>全选可用项</span>
+                    </label>
+                  </>
+                )}
+
+                <div className="backup-auto-dav">
+                  <span className="backup-field-label">WebDAV 目标</span>
+                  {connections.length === 0 ? (
+                    <div className="backup-empty-inline">
+                      尚未配置 WebDAV 连接。请到「设置 → WebDAV」添加。
+                    </div>
+                  ) : (
+                    <ul className="backup-unit-list depth-0">
+                      {connections.map((c) => (
+                        <li key={c.id} className="backup-unit-item">
+                          <label className="ui-check backup-unit-check">
+                            <input
+                              type="checkbox"
+                              className="ui-check-input"
+                              checked={autoDavSelected.has(c.id)}
+                              onChange={(e) => onToggleAutoDav(c.id, e.target.checked)}
+                            />
+                            <CheckGlyph />
+                            <span className="backup-unit-body">
+                              <span className="backup-unit-label">{c.name}</span>
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {autoSettings.hasPassphrase ? (
+                  <div className="backup-auto-pass-set">
+                    <span>
+                      备份口令：<strong>已设置</strong>（不可回读）
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void clearAutoPassphrase()}
+                      disabled={autoSaving || autoRunning}
+                    >
+                      清除口令
+                    </button>
+                  </div>
+                ) : (
+                  <div className="backup-field-row">
+                    <label className="backup-field">
+                      <span className="backup-field-label">备份口令（必填）</span>
+                      <input
+                        type="password"
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={autoPassphrase}
+                        onChange={(e) => {
+                          setAutoPassphrase(e.target.value);
+                          setAutoDirty(true);
+                        }}
+                        placeholder="自动备份强制加密"
+                        disabled={autoSaving || autoRunning}
+                      />
+                    </label>
+                    <label className="backup-field">
+                      <span className="backup-field-label">确认口令</span>
+                      <input
+                        type="password"
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={autoPassphrase2}
+                        onChange={(e) => setAutoPassphrase2(e.target.value)}
+                        placeholder="再次输入"
+                        disabled={autoSaving || autoRunning || !autoPassphrase}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {autoNeedsPassphrase && (
+                  <div className="backup-alert">
+                    自动备份所选内容可能包含密钥，必须设置备份口令后才能启用。
+                  </div>
+                )}
+
+                <div className="backup-advanced-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={
+                      !autoDirty ||
+                      autoSaving ||
+                      autoRunning ||
+                      running ||
+                      autoSelected.size === 0 ||
+                      autoDavSelected.size === 0 ||
+                      (autoSettings.enabled && autoNeedsPassphrase)
+                    }
+                    onClick={() => void saveAutoSettings()}
+                  >
+                    {autoSaving ? "保存中…" : "保存自动备份设置"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={
+                      running ||
+                      autoRunning ||
+                      autoSelected.size === 0 ||
+                      autoDavSelected.size === 0 ||
+                      (!autoSettings.hasPassphrase && !autoPassphrase)
+                    }
+                    onClick={() => void runAutoNow()}
+                  >
+                    {autoRunning ? "自动备份中…" : "按当前配置立即运行"}
+                  </button>
+                </div>
+              </div>
+            </section>
+
             {/* Restore from remote */}
             <section className="backup-section">
               <div className="backup-section-head">
@@ -876,7 +1356,7 @@ export default function BackupManage() {
               </div>
               <div className="backup-card backup-restore">
                 <p className="backup-upload-dir-hint">
-                  从 WebDAV 上传目录下载备份并按 manifest
+                  从 WebDAV 上传目录（含其下 auto 自动备份子目录）拉取备份列表，按 manifest
                   还原到本机路径。加密包需填写备份时使用的口令。恢复会覆盖同名文件，请谨慎操作。
                 </p>
 
@@ -930,9 +1410,10 @@ export default function BackupManage() {
                     ) : (
                       <ul className="backup-remote-list">
                         {remoteItems.map((item) => {
-                          const checked = selectedRemote === item.name;
+                          const itemKey = remoteItemKey(item);
+                          const checked = selectedRemote === itemKey;
                           return (
-                            <li key={item.name} className="backup-unit-item">
+                            <li key={itemKey} className="backup-unit-item">
                               <label
                                 className={`ui-check backup-unit-check ${
                                   checked ? "is-selected" : ""
@@ -943,7 +1424,7 @@ export default function BackupManage() {
                                   className="ui-check-input"
                                   name="backup-remote-pick"
                                   checked={checked}
-                                  onChange={() => setSelectedRemote(item.name)}
+                                  onChange={() => setSelectedRemote(itemKey)}
                                   disabled={running}
                                 />
                                 <CheckGlyph />
@@ -958,6 +1439,7 @@ export default function BackupManage() {
                                     ) : (
                                       <span className="backup-badge">明文</span>
                                     )}
+                                    {item.auto && <span className="backup-badge">自动</span>}
                                   </span>
                                   {item.lastModified ? (
                                     <span className="backup-unit-path">{item.lastModified}</span>

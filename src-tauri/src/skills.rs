@@ -4250,13 +4250,20 @@ body
 
     #[test]
     fn preview_cc_switch_if_present() {
+        // 持 HOME 测试锁：cc_switch_root 与 preview 内部都按 HOME 派生路径，
+        // 中间不能被其它换 HOME 的测试穿插（约定见 config.rs TEST_HOME_LOCK）。
+        let _home_guard = crate::config::lock_home_for_test();
         let root = cc_switch_root();
         if !root.exists() {
             return;
         }
         let res = preview_cc_switch_skills().expect("preview");
         assert!(res.ok, "preview message: {}", res.message);
-        assert!(res.total > 0, "expected skills in ~/.cc-switch");
+        // cc-switch 已安装但未收录任何 skill（skills 表 0 行且 skills/ 目录为空）
+        // 是合法环境状态：跳过冒烟断言，不代表导入功能故障。
+        if res.total == 0 {
+            return;
+        }
         // statuses only use known tokens
         for item in &res.items {
             assert!(
@@ -4270,6 +4277,8 @@ body
 
     #[test]
     fn migrate_one_cc_switch_skill_if_present() {
+        // 同 preview_cc_switch_if_present：HOME 派生路径的多次读取需持锁防穿插。
+        let _home_guard = crate::config::lock_home_for_test();
         let root = cc_switch_root();
         if !root.exists() {
             return;

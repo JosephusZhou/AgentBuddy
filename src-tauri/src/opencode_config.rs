@@ -1534,6 +1534,7 @@ mod tests {
 
     struct TempHome {
         path: PathBuf,
+        prev_home: Option<std::ffi::OsString>,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
 
@@ -1552,9 +1553,11 @@ mod tests {
             fs::create_dir_all(path.join(".local/share/opencode")).unwrap();
             // dirs::home_dir does not honor HOME on all platforms the same way —
             // we set HOME for path helpers that use dirs::home_dir.
+            let prev_home = std::env::var_os("HOME");
             std::env::set_var("HOME", &path);
             Self {
                 path,
+                prev_home,
                 _guard: guard,
             }
         }
@@ -1566,6 +1569,11 @@ mod tests {
 
     impl Drop for TempHome {
         fn drop(&mut self) {
+            // 恢复原 HOME，避免污染进程内后续测试。
+            match self.prev_home.take() {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
             let _ = fs::remove_dir_all(&self.path);
         }
     }

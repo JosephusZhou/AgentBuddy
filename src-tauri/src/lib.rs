@@ -7,6 +7,7 @@ mod agent_open;
 mod agents;
 mod ai_provider;
 mod backup;
+mod backup_schedule;
 mod claude_env;
 mod codex_env;
 mod config;
@@ -375,6 +376,32 @@ async fn restore_remote_backup(
     tauri::async_runtime::spawn_blocking(move || backup::restore_remote_backup(app, payload))
         .await
         .map_err(|e| format!("恢复备份任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn get_auto_backup_settings() -> Result<backup_schedule::AutoBackupSettingsDto, String> {
+    backup_schedule::get_auto_backup_settings()
+}
+
+#[tauri::command]
+async fn update_auto_backup_settings(
+    update: backup_schedule::AutoBackupSettingsUpdate,
+) -> Result<backup_schedule::AutoBackupSettingsDto, String> {
+    backup_schedule::update_auto_backup_settings(update)
+}
+
+#[tauri::command]
+async fn get_auto_backup_status() -> Result<backup_schedule::AutoBackupStatus, String> {
+    tauri::async_runtime::spawn_blocking(backup_schedule::get_auto_backup_status)
+        .await
+        .map_err(|e| format!("查询自动备份状态任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn run_auto_backup_now(app: tauri::AppHandle) -> Result<backup::BackupRunResult, String> {
+    tauri::async_runtime::spawn_blocking(move || backup_schedule::run_auto_backup_now(app))
+        .await
+        .map_err(|e| format!("自动备份任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -1525,6 +1552,10 @@ pub fn run() {
             run_backup_upload,
             list_remote_backups,
             restore_remote_backup,
+            get_auto_backup_settings,
+            update_auto_backup_settings,
+            get_auto_backup_status,
+            run_auto_backup_now,
             list_skills,
             sniff_skills,
             preview_sniff_skills,
@@ -1640,6 +1671,10 @@ pub fn run() {
             if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy", "deveco-code"]) {
                 eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
             }
+
+            // 自动备份调度线程：应用运行期间按 backup.auto 配置周期触发备份，
+            // 每 30s tick 热更新设置；未启用时空转。
+            backup_schedule::spawn_auto_backup_scheduler(_app.handle().clone());
 
             // Route aggregation: load config and register global state.
             let mut ra_config = route_aggregation::config::load_config().unwrap_or_default();
