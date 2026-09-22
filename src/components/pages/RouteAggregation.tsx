@@ -373,7 +373,8 @@ export default function RouteAggregation() {
                 </button>
               </div>
               <div className="pref-section-desc" style={{ marginTop: 8 }}>
-                开启后同时支持 Claude Code（/v1/messages）与 Codex（/v1/responses）两种接口请求。
+                开启后同时支持 Claude Code（/v1/messages）、Codex（/v1/responses）与 OpenAI Chat
+                Completions（/v1/chat/completions）三种接口请求。
               </div>
             </>
           )}
@@ -627,6 +628,22 @@ export default function RouteAggregation() {
               >
                 OPENAI_BASE_URL={proxyUrl}/v1
               </code>
+            </p>
+            <p style={{ marginBottom: 4 }}>
+              <strong>OpenAI SDK（Chat Completions）:</strong> 使用 baseURL{" "}
+              <code
+                style={{
+                  background: "var(--seed-surface-alt)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: "var(--text-xs)",
+                  color: "var(--seed-primary)",
+                }}
+              >
+                {proxyUrl}/v1
+              </code>
+              （转发 <code style={{ fontSize: "var(--text-xs)" }}>/v1/chat/completions</code>{" "}
+              请求到勾选的供应商）
             </p>
             <p style={{ marginBottom: 4 }}>
               <strong>OpenCode / 其他 OpenAI 兼容客户端:</strong> 使用 baseURL{" "}
@@ -1125,12 +1142,14 @@ interface LogsSectionProps {
 const PROTOCOL_LABEL: Record<InboundProtocol, string> = {
   claudeMessages: "Claude",
   codexResponses: "Codex",
+  openAiChatCompletions: "OpenAI Chat",
   openaiModelsList: "Models",
 };
 
 const PROTOCOL_COLOR: Record<InboundProtocol, string> = {
   claudeMessages: "var(--seed-primary)",
   codexResponses: "#10a37f",
+  openAiChatCompletions: "#10a37f",
   openaiModelsList: "var(--seed-muted)",
 };
 

@@ -42,12 +42,14 @@ export interface RouteAggregationStatus {
   providers: ProviderRouteStatus[];
 }
 
-/** 进站协议，分别对应路由聚合支持的两种透传协议。
+/** 进站协议，分别对应路由聚合支持的透传协议。
  *
- * Phase 5+：路由聚合只接受 Claude Messages 与 Codex Responses 两种业务
- * 协议；`openaiModelsList` 仅用于 `GET /v1/models` 元数据查询（不入路由池）。
+ * Phase 5+：路由聚合只接受 Claude Messages / Codex Responses / OpenAI Chat
+ * Completions 三种业务协议；`openaiModelsList` 仅用于 `GET /v1/models`
+ * 元数据查询（不入路由池）。
  */
-export type InboundProtocol = "claudeMessages" | "codexResponses" | "openaiModelsList";
+export type InboundProtocol =
+  "claudeMessages" | "codexResponses" | "openAiChatCompletions" | "openaiModelsList";
 
 export interface RouteLogEntry {
   /** 单调递增 ID；越大越新。 */

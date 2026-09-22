@@ -435,12 +435,21 @@ function normalizeOpenCodeNpm(npm: string | null | undefined): string {
   return npm === "@ai-sdk/anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai";
 }
 
-/** Pi / Oh-My-Pi 供应商允许配置的 HTTP API 格式。 */
+/** Pi / Oh-My-Pi 供应商允许配置的 HTTP API 格式。
+ *
+ * 2026-08-13 决策移除 Chat Completions（外部 OpenAI client 统一走 Responses）；
+ * 2026-09-22 路由聚合新增 CC→CC 同协议透传后恢复该选项。
+ */
 const PI_API_OPTIONS: AppSelectOption[] = [
   {
     value: "openai-responses",
     label: "OpenAI Responses",
     sub: "/v1/responses",
+  },
+  {
+    value: "openai-chat-completions",
+    label: "OpenAI Chat Completions",
+    sub: "/v1/chat/completions",
   },
   {
     value: "anthropic-messages",
@@ -454,9 +463,12 @@ function piApiLabel(api: string): string {
   return PI_API_OPTIONS.find((option) => option.value === normalized)?.label ?? normalized;
 }
 
-/** 旧版本可能保存了 Chat Completions；编辑时迁移到当前允许的 Responses。 */
+/** 归一化历史保存的 API 值：旧版本未保存 Chat Completions 时的默认值为
+ * openai-responses；2026-09-22 起 openai-chat-completions 为合法值，保留不回退。 */
 function normalizePiApi(api: string | null | undefined): string {
-  return api === "anthropic-messages" ? "anthropic-messages" : "openai-responses";
+  if (api === "anthropic-messages") return "anthropic-messages";
+  if (api === "openai-chat-completions") return "openai-chat-completions";
+  return "openai-responses";
 }
 
 /** Pi/OMP 的 OpenAI 接口约定 Base URL 以 /v1 结尾。 */

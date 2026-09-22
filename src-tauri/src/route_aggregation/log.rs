@@ -29,10 +29,12 @@ pub const BODY_PREVIEW_MAX_BYTES: usize = 64 * 1024;
 /// Inbound protocol of a logged request. Phase 5+：路由聚合只保留两种入站
 /// 协议（Claude Messages + Codex Responses），与 RouteGroup 一一对应。
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum InboundProtocol {
     ClaudeMessages,
     CodexResponses,
+    OpenAiChatCompletions,
+    #[serde(rename = "openaiModelsList")]
     OpenAiModelsList,
 }
 
@@ -42,6 +44,7 @@ impl InboundProtocol {
         match group {
             RouteGroup::ClaudeCode => InboundProtocol::ClaudeMessages,
             RouteGroup::Codex => InboundProtocol::CodexResponses,
+            RouteGroup::OpenAiChat => InboundProtocol::OpenAiChatCompletions,
         }
     }
 
@@ -50,6 +53,7 @@ impl InboundProtocol {
         match self {
             InboundProtocol::ClaudeMessages => "Claude Messages",
             InboundProtocol::CodexResponses => "Codex Responses",
+            InboundProtocol::OpenAiChatCompletions => "OpenAI Chat Completions",
             InboundProtocol::OpenAiModelsList => "Models",
         }
     }
@@ -400,6 +404,30 @@ mod tests {
         assert_eq!(redacted["headers"]["authorization"], "***");
         assert_eq!(redacted["headers"]["cookie"], "***");
         assert_eq!(redacted["items"][0]["access_token"], "***");
+    }
+
+    #[test]
+    fn inbound_protocol_serializes_to_frontend_contract() {
+        // 前端 InboundProtocol 类型与 PROTOCOL_LABEL 使用 camelCase 值；
+        // 这里把序列化契约钉死，防止再次漂移导致 UI 显示小写原文。
+        let serialized: Vec<String> = [
+            InboundProtocol::ClaudeMessages,
+            InboundProtocol::CodexResponses,
+            InboundProtocol::OpenAiChatCompletions,
+            InboundProtocol::OpenAiModelsList,
+        ]
+        .iter()
+        .map(|protocol| serde_json::to_string(protocol).unwrap())
+        .collect();
+        assert_eq!(
+            serialized,
+            vec![
+                "\"claudeMessages\"",
+                "\"codexResponses\"",
+                "\"openAiChatCompletions\"",
+                "\"openaiModelsList\"",
+            ]
+        );
     }
 
     #[tokio::test]

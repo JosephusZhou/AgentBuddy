@@ -84,7 +84,7 @@ impl ProviderRouter {
                     row.provider_type == crate::ai_provider::TYPE_ANTHROPIC
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
                 }
-                RouteGroup::Codex => {
+                RouteGroup::Codex | RouteGroup::OpenAiChat => {
                     row.provider_type == crate::ai_provider::TYPE_OPENAI
                         || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
                 }
@@ -140,12 +140,12 @@ impl ProviderRouter {
                 .unwrap_or_default(),
             );
 
-            // For universal type in Codex group, append /v1 so the upstream OpenAI Responses
-            // endpoint at `{base}/v1/responses` is reachable. In ClaudeCode group the
-            // raw Anthropic base URL is used (Anthropic Messages endpoint already
-            // lives at `{base}/v1/messages`).
+            // For universal type in OpenAI 两组（Codex / OpenAiChat），append /v1 so
+            // the upstream OpenAI endpoint at `{base}/v1/...` is reachable. In
+            // ClaudeCode group the raw Anthropic base URL is used (Anthropic
+            // Messages endpoint already lives at `{base}/v1/messages`).
             let base_url = if row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                && group == RouteGroup::Codex
+                && group != RouteGroup::ClaudeCode
             {
                 crate::ai_provider::derive_openai_base_url(&row.provider_type, &row.base_url)
             } else {
@@ -300,8 +300,8 @@ impl ProviderRouter {
     pub async fn get_enabled_model_ids(&self) -> Vec<String> {
         let pools = self.pools.read().await;
         let mut model_ids = std::collections::BTreeSet::new();
-        // 合并两个入口的启用 provider 模型；BTreeSet 自动去重。
-        for group in [RouteGroup::Codex, RouteGroup::ClaudeCode] {
+        // 合并三个入口的启用 provider 模型；BTreeSet 自动去重。
+        for group in RouteGroup::ALL {
             let pool = match pools.get(&group) {
                 Some(p) => p,
                 None => continue,
@@ -355,12 +355,13 @@ impl ProviderRouter {
         result
     }
 
-    /// Get merged status snapshots across both API formats (for the UI).
-    /// A provider appears once; circuit state is the worst of both formats,
+    /// Get merged status snapshots across all API formats (for the UI).
+    /// A provider appears once; circuit state is the worst of all formats,
     /// counters are summed, and the most recent error is kept.
     pub async fn get_merged_statuses(&self) -> Vec<ProviderRouteStatus> {
         let cc = self.get_provider_statuses(RouteGroup::ClaudeCode).await;
         let codex = self.get_provider_statuses(RouteGroup::Codex).await;
+        let chat = self.get_provider_statuses(RouteGroup::OpenAiChat).await;
 
         let rank = |state: &str| -> u8 {
             match state {
@@ -371,7 +372,9 @@ impl ProviderRouter {
         };
 
         let mut merged: Vec<ProviderRouteStatus> = cc;
-        for item in codex {
+        // OpenAI 两组（Codex Responses + Chat Completions）共享 openai/universal
+        // 供应商池，合并时同一供应商只出现一次。
+        for item in codex.into_iter().chain(chat) {
             match merged.iter_mut().find(|m| m.id == item.id) {
                 Some(existing) => {
                     if rank(&item.circuit_state) > rank(&existing.circuit_state) {

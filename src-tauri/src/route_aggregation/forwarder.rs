@@ -52,8 +52,9 @@ pub struct ForwardResult {
 
 /// 把客户端入口（RouteGroup）映射为协议格式。
 ///
-/// Phase 5+：路由聚合只支持两种入站协议，每个 group 对应唯一一个 ProviderFormat；
-/// `format_for_group` 与 `format_for_provider_type` 总是在 group 一致时返回相同结果。
+/// Phase 5+：路由聚合只支持同协议 passthrough，每个 group 对应唯一一个
+/// ProviderFormat；`format_for_group` 与 `format_for_provider_type` 总是在
+/// group 一致时返回相同结果。
 #[allow(dead_code)] // 公开 API，外部 caller 可能依赖；Forwarder 内部不再使用
 pub fn format_for_group(group: RouteGroup) -> ProviderFormat {
     match group {
@@ -61,17 +62,21 @@ pub fn format_for_group(group: RouteGroup) -> ProviderFormat {
         RouteGroup::ClaudeCode => ProviderFormat::Anthropic,
         // Codex CLI 客户端 → OpenAI Responses 协议
         RouteGroup::Codex => ProviderFormat::OpenAiResponses,
+        // OpenAI SDK 等 Chat Completions 客户端 → OpenAI Chat Completions 协议
+        RouteGroup::OpenAiChat => ProviderFormat::OpenAiChatCompletions,
     }
 }
 
 /// 把上游 provider 类型映射为协议格式。
 ///
 /// `group` 是客户端入口，决定同一 provider_type 在不同入站组下使用哪种 ProviderFormat：
-/// - universal（同时支持 Anthropic + OpenAI Responses）：ClaudeCode 组走 Anthropic
-///   （`/v1/messages`），Codex 组走 OpenAiResponses（`/v1/responses`）。两组下都不需要
-///   协议转换，直接 passthrough。
-/// - openai 类型：Codex 组走 OpenAiResponses（用户拍板决策 2026-08-13：去掉 Chat 兼容，
-///   外部 OpenAI client 全部走 Responses 协议）。
+/// - universal（同时支持 Anthropic + OpenAI 各格式）：ClaudeCode 组走 Anthropic
+///   （`/v1/messages`），Codex 组走 OpenAiResponses（`/v1/responses`），OpenAiChat
+///   组走 OpenAiChatCompletions（`/v1/chat/completions`）。各组下都不需要协议转换，
+///   直接 passthrough。
+/// - openai 类型：Codex 组走 OpenAiResponses，OpenAiChat 组走 OpenAiChatCompletions
+///   （2026-08-13 决策：去掉 Chat 兼容、外部 OpenAI client 走 Responses；2026-09-22
+///   新增：Chat Completions 客户端走 CC→CC 同协议透传）。
 /// - anthropic 类型：固定 Anthropic（ClaudeCode 组的同方言 passthrough）。
 /// - 其它类型：兜底为 OpenAiResponses；正常路径不会命中。
 pub fn format_for_provider_type(provider_type: &str, group: RouteGroup) -> ProviderFormat {
@@ -80,15 +85,21 @@ pub fn format_for_provider_type(provider_type: &str, group: RouteGroup) -> Provi
         crate::ai_provider::TYPE_UNIVERSAL => match group {
             RouteGroup::ClaudeCode => ProviderFormat::Anthropic,
             RouteGroup::Codex => ProviderFormat::OpenAiResponses,
+            RouteGroup::OpenAiChat => ProviderFormat::OpenAiChatCompletions,
         },
-        crate::ai_provider::TYPE_OPENAI => ProviderFormat::OpenAiResponses,
+        crate::ai_provider::TYPE_OPENAI => match group {
+            RouteGroup::Codex => ProviderFormat::OpenAiResponses,
+            RouteGroup::OpenAiChat => ProviderFormat::OpenAiChatCompletions,
+            // openai 类型供应商不会进入 ClaudeCode 池（pool 过滤），兜底分支。
+            RouteGroup::ClaudeCode => ProviderFormat::Anthropic,
+        },
         _ => ProviderFormat::OpenAiResponses,
     }
 }
 
 /// Forward a request through the route group's provider pool with failover.
 ///
-/// 路由聚合只走 A→A / OR→OR 的 passthrough——入站协议 = upstream 协议，
+/// 路由聚合只走 A→A / OR→OR / CC→CC 的 passthrough——入站协议 = upstream 协议，
 /// body / SSE / header（除 auth）原样转发，仅在 provider 选择层做 failover。
 pub async fn forward(
     group: RouteGroup,
@@ -157,6 +168,12 @@ pub async fn forward(
                 cloaking::codex_cloaking::apply_cloaking(&body, client_headers, config)
                     .map_err(ForwardError::CloakingError)?
             }
+            // CC→CC 透传：真实 OpenAI SDK 客户端本身就是目标指纹，不做伪装，
+            // 仅清理代理追踪头；auth 头由下方 build_auth_headers 统一替换。
+            RouteGroup::OpenAiChat => (
+                body.clone(),
+                cloaking::header_scrub::passthrough_client_headers(client_headers),
+            ),
         };
 
         // 2. Effective body = cloaked body + 变体模型回写（passthrough 不做协议转换）
@@ -291,7 +308,7 @@ fn build_auth_headers(
             }
             headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
         }
-        ProviderFormat::OpenAiResponses => {
+        ProviderFormat::OpenAiResponses | ProviderFormat::OpenAiChatCompletions => {
             headers.push((
                 "authorization".to_string(),
                 format!("Bearer {}", provider.api_key),
@@ -304,9 +321,10 @@ fn build_auth_headers(
 
 /// Build the upstream URL for the given provider and target protocol.
 ///
-/// Phase 5+：路由聚合只支持 A→A / OR→OR 同方言 passthrough。
+/// Phase 5+：路由聚合只支持 A→A / OR→OR / CC→CC 同方言 passthrough。
 /// - Anthropic → `{base}/v1/messages`
 /// - OpenAI Responses → `{base}/v1/responses`
+/// - OpenAI Chat Completions → `{base}/v1/chat/completions`
 fn build_upstream_url(
     provider: &RouteProvider,
     target: ProviderFormat,
@@ -321,6 +339,7 @@ fn build_upstream_url(
         ProviderFormat::Anthropic if count_tokens => format!("{}/v1/messages/count_tokens", base),
         ProviderFormat::Anthropic => format!("{}/v1/messages", base),
         ProviderFormat::OpenAiResponses => format!("{}/v1/responses", base),
+        ProviderFormat::OpenAiChatCompletions => format!("{}/v1/chat/completions", base),
     }
 }
 
@@ -758,5 +777,91 @@ mod tests {
         );
         assert!(headers.contains(&("x-api-key".to_string(), "sk-provider-key".to_string())));
         assert!(!headers.iter().any(|(n, _)| n == "authorization"));
+    }
+
+    fn openai_provider(base_url: &str) -> super::RouteProvider {
+        super::RouteProvider {
+            id: "p2".into(),
+            name: "p2".into(),
+            provider_type: crate::ai_provider::TYPE_OPENAI.into(),
+            base_url: base_url.into(),
+            api_key: "sk-openai-key".into(),
+            model_ids: Vec::new(),
+            enabled: true,
+            supported_model_ids: None,
+        }
+    }
+
+    #[test]
+    fn chat_completions_auth_uses_bearer_always() {
+        // CC→CC：OpenAI SDK 客户端统一走 Authorization: Bearer，不随客户端
+        // 鉴权形态变化（OpenAI 协议只认 Bearer）。
+        let headers = super::build_auth_headers(
+            &openai_provider("https://relay.test"),
+            super::ProviderFormat::OpenAiChatCompletions,
+            &axum::http::HeaderMap::new(),
+        );
+        assert!(headers.contains(&(
+            "authorization".to_string(),
+            "Bearer sk-openai-key".to_string()
+        )));
+    }
+
+    #[test]
+    fn chat_completions_upstream_url_strips_v1_and_appends_path() {
+        // base_url 以 /v1 结尾（openai.com 风格）与裸域名（中转网关）都要拼出
+        // `{base}/v1/chat/completions`。
+        let with_v1 = openai_provider("https://api.openai.test/v1");
+        assert_eq!(
+            super::build_upstream_url(
+                &with_v1,
+                super::ProviderFormat::OpenAiChatCompletions,
+                "gpt-4o",
+                false,
+                false,
+            ),
+            "https://api.openai.test/v1/chat/completions"
+        );
+        let bare = openai_provider("https://relay.test");
+        assert_eq!(
+            super::build_upstream_url(
+                &bare,
+                super::ProviderFormat::OpenAiChatCompletions,
+                "gpt-4o",
+                false,
+                false,
+            ),
+            "https://relay.test/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn format_maps_openai_chat_group_and_provider_types() {
+        use super::{format_for_group, format_for_provider_type};
+        use crate::route_aggregation::RouteGroup;
+
+        assert_eq!(
+            format_for_group(RouteGroup::OpenAiChat),
+            super::ProviderFormat::OpenAiChatCompletions
+        );
+        // openai / universal 供应商在 OpenAiChat 组走 Chat Completions。
+        assert_eq!(
+            format_for_provider_type(crate::ai_provider::TYPE_OPENAI, RouteGroup::OpenAiChat),
+            super::ProviderFormat::OpenAiChatCompletions
+        );
+        assert_eq!(
+            format_for_provider_type(crate::ai_provider::TYPE_UNIVERSAL, RouteGroup::OpenAiChat),
+            super::ProviderFormat::OpenAiChatCompletions
+        );
+        // 既有映射不回退：Codex 组仍是 Responses。
+        assert_eq!(
+            format_for_provider_type(crate::ai_provider::TYPE_OPENAI, RouteGroup::Codex),
+            super::ProviderFormat::OpenAiResponses
+        );
+        // anthropic 类型供应商在 OpenAiChat 组固定走 Anthropic（pool 过滤后不会出现）。
+        assert_eq!(
+            format_for_provider_type(crate::ai_provider::TYPE_ANTHROPIC, RouteGroup::OpenAiChat),
+            super::ProviderFormat::Anthropic
+        );
     }
 }

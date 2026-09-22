@@ -3,7 +3,8 @@
  * 始终按当前监听配置返回该虚拟供应商，以便已保存的环境在服务停止后仍能回显；
  * 选中后各页面按普通供应商流程回填 Base URL / API Key（主 Key）：
  * - Claude 环境（anthropic/universal 语义）：baseUrl = `http://host:port`（/v1/messages）
- * - Codex / OpenCode / Pi / OMP（openai 语义）：baseUrl = `http://host:port/v1`
+ * - Codex / OpenCode / Pi / OMP / OpenAI SDK（openai 语义）：baseUrl = `http://host:port/v1`
+ *   （/v1/responses 或 /v1/chat/completions）
  * 模型列表 = 已勾选供应商自定义模型的去重并集（见 fetchRouteAggregationProvider）。
  */
 

@@ -41,6 +41,15 @@
       "upstream_format": "OpenAiResponses",
       "transport": "同协议转发（不做协议转换）；启用 cloaking 时模拟 Codex CLI 请求头和身份字段；流式响应按 SSE 帧直接回写",
       "header_rewrite": "Authorization: Bearer <provider key>，覆盖客户端指纹头并清理代理追踪头"
+    },
+    {
+      "id": "openai_chat_completions_passthrough",
+      "label": "OpenAI Chat Completions → OpenAI Chat Completions (CC → CC)",
+      "inbound": "/v1/chat/completions",
+      "client": "OpenAI SDK 等 Chat Completions 客户端 (RouteGroup::OpenAiChat)",
+      "upstream_format": "OpenAiChatCompletions",
+      "transport": "同协议转发（不做协议转换）；真实 OpenAI SDK 客户端即目标指纹，不做 cloaking，仅清理代理追踪头；流式响应按 SSE 帧直接回写",
+      "header_rewrite": "Authorization: Bearer <provider key>，清理代理追踪头"
     }
   ],
   "client_fingerprint_anchors": [

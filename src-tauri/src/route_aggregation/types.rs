@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub enum ProviderFormat {
     Anthropic,
     OpenAiResponses,
+    OpenAiChatCompletions,
 }
 
 /// API format — determines which API paths and cloaking strategy to use.
@@ -17,10 +18,16 @@ pub enum ProviderFormat {
 pub enum RouteGroup {
     ClaudeCode,
     Codex,
+    /// OpenAI Chat Completions 客户端（OpenAI SDK 等）→ CC→CC 同协议透传。
+    OpenAiChat,
 }
 
 impl RouteGroup {
-    pub const ALL: [RouteGroup; 2] = [RouteGroup::ClaudeCode, RouteGroup::Codex];
+    pub const ALL: [RouteGroup; 3] = [
+        RouteGroup::ClaudeCode,
+        RouteGroup::Codex,
+        RouteGroup::OpenAiChat,
+    ];
 }
 
 /// Cloaking mode for Claude Code rectifier.

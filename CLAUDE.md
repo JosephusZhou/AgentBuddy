@@ -158,13 +158,14 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
 
 ## 路由聚合
 
-`src-tauri/src/route_aggregation/` 提供本地 Axum 代理，维护两种协议、三个入口：
+`src-tauri/src/route_aggregation/` 提供本地 Axum 代理，维护三种协议、四个入口：
 
 | 入口 | 协议 | 行为 |
 |------|------|------|
 | `POST /v1/messages` | Anthropic Messages | 同协议转发，Claude cloaking，工具名响应恢复 |
 | `POST /v1/messages/count_tokens` | Anthropic `count_tokens` | 专用 system relocation 和请求级 cloaking |
 | `POST /v1/responses` | OpenAI Responses | 同协议转发，Codex CLI cloaking |
+| `POST /v1/chat/completions` | OpenAI Chat Completions | 同协议转发（CC→CC），OpenAI SDK 客户端即目标指纹，不做 cloaking |
 
 另有 `GET /v1/models`，只返回启用供应商的自定义模型并集，不向远端查询。
 

@@ -24,7 +24,7 @@
 | # | 决策 | 理由 |
 |---|------|------|
 | 1 | **同协议透传** | 请求体、响应体和 SSE 不做协议转换 |
-| 2 | **CLI 入站仅支持两种协议** | `/v1/messages` 与 `/v1/messages/count_tokens` 对应 Claude，`/v1/responses` 对应 Codex |
+| 2 | **CLI 入站仅支持同协议透传** | `/v1/messages` 与 `/v1/messages/count_tokens` 对应 Claude，`/v1/responses` 对应 Codex，`/v1/chat/completions` 对应 OpenAI Chat Completions |
 | 3 | **Cloaking 跟踪客户端版本** | Claude Code / Codex CLI 版本变化时重新核对上游提交和本地夹具 |
 
 任何与以上决策冲突的 PR 都需先开 issue 重新讨论，并同步更新本节与 sync_state.json。

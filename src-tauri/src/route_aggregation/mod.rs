@@ -2,7 +2,8 @@
 //! behind a single local endpoint with automatic failover and request cloaking.
 //!
 //! 仅 passthrough：A→A（Claude Code → Anthropic 兼容 provider）+ OR→OR
-//! （Codex CLI → OpenAI Responses 兼容 provider）。路由聚合不做协议翻译。
+//! （Codex CLI → OpenAI Responses 兼容 provider）+ CC→CC（OpenAI SDK →
+//! OpenAI Chat Completions 兼容 provider）。路由聚合不做协议翻译。
 //!
 //! Architecture:
 //! - `server` — Axum HTTP server lifecycle (start/stop/config)

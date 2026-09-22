@@ -1,9 +1,9 @@
 //! Request handlers — entry points for Axum routes.
 //!
-//! The aggregated endpoint always serves both API formats (Claude messages
-//! and Codex responses) while the server is running. Each handler
-//! authenticates the request against the configured API key list, then
-//! delegates to the forwarder and returns the upstream response
+//! The aggregated endpoint always serves the supported API formats (Claude
+//! messages, Codex responses, OpenAI Chat Completions) while the server is
+//! running. Each handler authenticates the request against the configured API
+//! key list, then delegates to the forwarder and returns the upstream response
 //! (with SSE passthrough for streaming).
 //!
 //! Every handler also writes a `LogEntry` to the shared `LogStore` so the
@@ -105,7 +105,25 @@ pub async fn handle_codex_responses(
     .await
 }
 
-/// Common handler body shared by all three inbound endpoints.
+/// Handler for OpenAI Chat Completions: POST /v1/chat/completions
+/// OpenAI SDK 等 Chat Completions 客户端 → CC→CC 同协议透传（不做格式转换）。
+pub async fn handle_openai_chat_completions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    handle_with_log(
+        state,
+        RouteGroup::OpenAiChat,
+        InboundProtocol::OpenAiChatCompletions,
+        headers,
+        body,
+        false,
+    )
+    .await
+}
+
+/// Common handler body shared by all inbound POST endpoints.
 ///
 /// Responsibilities:
 /// 1. Authenticate against the configured API key list.
@@ -129,6 +147,7 @@ async fn handle_with_log(
         InboundProtocol::ClaudeMessages if count_tokens => "/v1/messages/count_tokens",
         InboundProtocol::ClaudeMessages => "/v1/messages",
         InboundProtocol::CodexResponses => "/v1/responses",
+        InboundProtocol::OpenAiChatCompletions => "/v1/chat/completions",
         InboundProtocol::OpenAiModelsList => "/v1/models",
     }
     .to_string();
@@ -421,10 +440,15 @@ pub async fn handle_list_models(State(state): State<AppState>, headers: HeaderMa
 }
 
 fn error_response(status: StatusCode, message: &str) -> Response {
+    // D5（2026-09-22）：本地代理错误统一输出 OpenAI error schema
+    // （{ error: { message, type, param, code } }），OpenAI SDK 客户端可直接
+    // 解析；type 按状态码映射到 OpenAI 语义。
     let body = serde_json::json!({
         "error": {
-            "type": "route_aggregation_error",
             "message": message,
+            "type": error_type_for_status(status),
+            "param": null,
+            "code": null,
         }
     });
     Response::builder()
@@ -432,4 +456,17 @@ fn error_response(status: StatusCode, message: &str) -> Response {
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
+/// Map an HTTP status to the OpenAI error `type` vocabulary.
+fn error_type_for_status(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        400 => "invalid_request_error",
+        401 => "authentication_error",
+        403 => "permission_error",
+        404 => "invalid_request_error",
+        429 => "rate_limit_error",
+        500..=599 => "server_error",
+        _ => "api_error",
+    }
 }

@@ -53,6 +53,12 @@ pub fn build_router(
         )
         // Codex: POST /v1/responses (Responses API, not Chat Completions)
         .route("/v1/responses", post(handler::handle_codex_responses))
+        // OpenAI SDK / Chat Completions clients: POST /v1/chat/completions
+        // (CC→CC same-protocol passthrough, no format conversion)
+        .route(
+            "/v1/chat/completions",
+            post(handler::handle_openai_chat_completions),
+        )
         // /v1/models is always available when the server is running
         .route("/v1/models", get(handler::handle_list_models))
         .with_state(state)
