@@ -172,8 +172,8 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
 Universal；provider pool 按启用状态和自定义模型过滤，失败时按配置执行 failover，并通过
 每个 provider × route group 的 Closed/Open/HalfOpen 熔断器保护上游。
 
-默认后端配置：`127.0.0.1:16888`、自动 failover、最多 3 次重试、Claude `2.1.220`、Codex
-`0.146.0`、cloaking `auto`。监听端点使用 `Authorization: Bearer <API Key>`，主 API Key 首次启动自动生成，
+默认后端配置：`127.0.0.1:16888`、自动 failover、最多 3 次重试、Claude `2.1.258`、Codex
+`0.154.0`、cloaking `auto`。监听端点使用 `Authorization: Bearer <API Key>`，主 API Key 首次启动自动生成，
 配置中的 Key 经加密落盘。
 
 cloaking 模块按客户端行为维护：

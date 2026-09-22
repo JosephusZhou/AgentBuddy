@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
   nonStreamTotalTimeout: 600,
   cloakingMode: "auto",
   claudeCodeVersion: "2.1.63",
-  codexVersion: "0.146.0",
+  codexVersion: "0.154.0",
   apiKeys: [],
   autoStart: false,
 };

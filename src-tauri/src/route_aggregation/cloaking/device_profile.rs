@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const DEFAULT_CLAUDE_VERSION: &str = "2.1.220";
-const DEFAULT_PACKAGE_VERSION: &str = "0.94.0";
+const DEFAULT_CLAUDE_VERSION: &str = "2.1.258";
+const DEFAULT_PACKAGE_VERSION: &str = "0.112.1";
 const DEFAULT_RUNTIME_VERSION: &str = "v26.3.0";
 const DEFAULT_OS: &str = "MacOS";
 const DEFAULT_ARCH: &str = "arm64";
@@ -178,14 +178,14 @@ mod tests {
     #[test]
     fn parses_and_orders_cli_versions() {
         assert_eq!(
-            ClaudeCliVersion::parse("claude-cli/2.1.220 (external, cli)"),
-            Some(ClaudeCliVersion::new(2, 1, 220))
+            ClaudeCliVersion::parse("claude-cli/2.1.258 (external, cli)"),
+            Some(ClaudeCliVersion::new(2, 1, 258))
         );
         assert_eq!(
-            DeviceProfile::from_user_agent("claude-cli/2.1.220 (external, cli)")
+            DeviceProfile::from_user_agent("claude-cli/2.1.258 (external, cli)")
                 .unwrap()
                 .version,
-            ClaudeCliVersion::new(2, 1, 220)
+            ClaudeCliVersion::new(2, 1, 258)
         );
         assert!(ClaudeCliVersion::new(2, 1, 221) > ClaudeCliVersion::new(2, 1, 220));
         assert!(ClaudeCliVersion::parse("claude-cli/not-a-version").is_none());
@@ -210,10 +210,10 @@ mod tests {
     #[test]
     fn cache_isolated_by_scope_and_version() {
         clear_profile_cache();
-        let first = get_stable_profile_for_scope("account-a", "2.1.220");
-        let second = get_stable_profile_for_scope("account-b", "2.1.221");
+        let first = get_stable_profile_for_scope("account-a", "2.1.258");
+        let second = get_stable_profile_for_scope("account-b", "2.1.259");
         assert_ne!(first.version, second.version);
-        assert_eq!(first.user_agent, "claude-cli/2.1.220 (external, cli)");
-        assert_eq!(second.user_agent, "claude-cli/2.1.221 (external, cli)");
+        assert_eq!(first.user_agent, "claude-cli/2.1.258 (external, cli)");
+        assert_eq!(second.user_agent, "claude-cli/2.1.259 (external, cli)");
     }
 }

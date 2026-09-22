@@ -55,11 +55,11 @@ python3 scripts/check_upstream_sync.py
   • OpenAI Responses → OpenAI Responses (OR → OR)
 
 === Cloaking 客户端指纹 (2 clients) ===
-    📦 Claude Code 客户端指纹 (config: claude_code_version = 2.1.220, 11 files)
+    📦 Claude Code 客户端指纹 (config: claude_code_version = 2.1.258, 11 files)
     ⚠ cloaking/claude_billing.rs (上游 2d 内有新 commit)
     ✗ cloaking/device_profile.rs (上游 135d 未同步，超 SLA 14d)
     ...
-  📦 Codex CLI 客户端指纹 (config: codex_version = 0.146.0, 2 files)
+  📦 Codex CLI 客户端指纹 (config: codex_version = 0.154.0, 2 files)
     ⚠ cloaking/codex_cloaking.rs (上游 12d 内有新 commit)
     ...
 
@@ -146,7 +146,7 @@ CI 行为：
 6. **更新 `config.rs` 版本常量**（如新版本号）：
    ```rust
    fn default_claude_code_version() -> String {
-       "2.1.220".to_string()  // 当前 CLIProxyAPI Claude Code 指纹基线
+       "2.1.258".to_string()  // 当前 CLIProxyAPI Claude Code 指纹基线
    }
    ```
 

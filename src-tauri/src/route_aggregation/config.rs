@@ -76,11 +76,11 @@ fn default_non_stream_total_timeout() -> u64 {
 }
 
 fn default_claude_code_version() -> String {
-    "2.1.220".to_string()
+    "2.1.258".to_string()
 }
 
 fn default_codex_version() -> String {
-    "0.146.0".to_string()
+    "0.154.0".to_string()
 }
 
 fn default_claude_sensitive_words() -> Vec<String> {

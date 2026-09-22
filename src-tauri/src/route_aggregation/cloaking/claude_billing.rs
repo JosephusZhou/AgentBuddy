@@ -58,33 +58,55 @@ pub fn serialize_body_without_html_escaping(value: &Value) -> Result<Vec<u8>, St
     Ok(output)
 }
 
+/// 计算 billing fingerprint 的输入文本。
+///
+/// 与上游 claude_executor_cloaking.go `claudeBillingFingerprintMessageText`
+/// （f86a33f 起）对齐：只取**第一条** role=user 消息的 content；数组形态下取
+/// **最后一个非 currentDate / 非上下文提醒**的 text 块。早期实现取最后一条
+/// user 消息，与 2.1.258 指纹链不一致，会破坏 cch 签名与缓存稳定性。
 pub fn billing_message_text(body: &Value) -> String {
-    body.get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-        .filter_map(|message| message.get("content"))
-        .filter_map(|content| match content {
-            Value::String(text) => Some(text.clone()),
-            Value::Array(blocks) => Some(
-                blocks
-                    .iter()
-                    .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-                    .filter_map(|block| block.get("text").and_then(Value::as_str))
-                    .next_back()
-                    .unwrap_or_default()
-                    .to_string(),
-            ),
-            _ => None,
-        })
-        .filter(|text| !text.is_empty())
-        .next_back()
-        .unwrap_or_default()
+    let Some(messages) = body.get("messages").and_then(Value::as_array) else {
+        return String::new();
+    };
+    let Some(first_user) = messages
+        .iter()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+    else {
+        return String::new();
+    };
+    match first_user.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .filter(|text| !is_fingerprint_reminder(text))
+            .next_back()
+            .unwrap_or_default()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 与上游 `isClaudeCodeCurrentDateReminder` / `isClaudeCodeContextReminder`
+/// 对齐：currentDate 提醒与任意 `<system-reminder>` 包裹的上下文提醒不参与
+/// billing fingerprint 计算。
+fn is_fingerprint_reminder(text: &str) -> bool {
+    text.starts_with(super::claude_system_prompt::CURRENT_DATE_PREFIX)
+        || (text.starts_with("<system-reminder>") && text.contains("</system-reminder>"))
 }
 
 /// Insert the billing placeholder and sign the final body in one operation.
 /// Returns the billing value used in the body and the signed body bytes.
+///
+/// CCH 门控对齐说明（上游 claude_signing.go f3e836c）：
+/// 上游按凭证类型区分——真实 Claude OAuth 总是签名；API key / 委派供应商只有
+/// 在显式选用 claude-code-cli 指纹且 upstream 是 api.anthropic.com 时才签名。
+/// 本地路由聚合不区分 OAuth 与 API key 凭证，且仅在**全量伪装为 Claude Code CLI
+/// 指纹**的路径（full_cloak_applies）调用本函数——等价于上游 ProfileClaudeCodeCLI
+/// 为真的场景，因此总是执行 CCH 签名；未伪装的真客户端透传不会走到这里。上游
+/// 「非 Anthropic 网关省略 cch」的收敛在本地未建模（cloaking 层不感知 upstream
+/// origin），保留为已知差异。
 pub fn finalize_body_with_cch(
     body: &mut Value,
     version: &str,
@@ -386,12 +408,48 @@ fn is_excluded_key(key: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_fingerprint, finalize_body_with_cch, normalize_cch_input};
+    use super::{
+        billing_message_text, compute_fingerprint, finalize_body_with_cch, normalize_cch_input,
+    };
     use serde_json::json;
 
     #[test]
     fn fingerprint_uses_zero_fallbacks_for_short_messages() {
-        assert_eq!(compute_fingerprint("abc", "2.1.220").len(), 6);
+        assert_eq!(compute_fingerprint("abc", "2.1.258").len(), 6);
+    }
+
+    #[test]
+    fn fingerprint_text_uses_first_user_message_not_last() {
+        let body = json!({
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "first turn"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "reply"}]},
+                {"role": "user", "content": [{"type": "text", "text": "second turn"}]}
+            ]
+        });
+        // 与上游 377c315 / 086ad91 的 2.1.258 指纹链一致：锚定初始轮（第一条 user 消息）
+        assert_eq!(billing_message_text(&body), "first turn");
+    }
+
+    #[test]
+    fn fingerprint_text_skips_current_date_and_context_reminders() {
+        let body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is 2026-09-22.\n\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n"},
+                    {"type": "text", "text": "<system-reminder>\nProject rules go here.\n</system-reminder>\n"},
+                    {"type": "text", "text": "real user text"}
+                ]}
+            ]}
+        );
+        assert_eq!(billing_message_text(&body), "real user text");
+    }
+
+    #[test]
+    fn fingerprint_text_returns_string_content_verbatim() {
+        let body = json!({"messages": [{"role": "user", "content": "plain"}]});
+        assert_eq!(billing_message_text(&body), "plain");
+        assert_eq!(billing_message_text(&json!({"messages": []})), "");
     }
 
     #[test]
@@ -407,7 +465,7 @@ mod tests {
     #[test]
     fn finalizer_replaces_placeholder_without_losing_json_shape() {
         let mut body = json!({"model":"claude-opus-5","messages":[{"role":"user","content":"Hello"}],"system":[{"type":"text","text":"placeholder"}]});
-        let (billing, signed) = finalize_body_with_cch(&mut body, "2.1.220").unwrap();
+        let (billing, signed) = finalize_body_with_cch(&mut body, "2.1.258").unwrap();
         assert!(billing.contains("cch="));
         assert!(String::from_utf8(signed).unwrap().contains("cch="));
         assert!(body["system"][0]["text"].as_str().unwrap().contains("cch="));

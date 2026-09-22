@@ -95,16 +95,27 @@ fn obfuscate_text_value(value: &mut serde_json::Value, matcher: &SensitiveWordMa
     }
 }
 
+/// 与上游 5b8e382 对齐：以 `x-anthropic-billing-header:` 开头的 system 文本
+/// 是内部指纹标记（billing header / cch 签名的一部分），混淆它会破坏 CCH
+/// 签名与缓存稳定性，必须跳过。
+fn is_billing_header_text(text: &str) -> bool {
+    text.starts_with("x-anthropic-billing-header:")
+}
+
 fn obfuscate_system(body: &mut serde_json::Value, matcher: &SensitiveWordMatcher) {
     match body.get_mut("system") {
         Some(serde_json::Value::String(text)) => {
-            *text = matcher.obfuscate_text(text);
+            if !is_billing_header_text(text) {
+                *text = matcher.obfuscate_text(text);
+            }
         }
         Some(serde_json::Value::Array(blocks)) => {
             for block in blocks {
                 if block.get("type").and_then(|value| value.as_str()) == Some("text") {
                     if let Some(text) = block.get_mut("text") {
-                        obfuscate_text_value(text, matcher);
+                        if !text.as_str().map(is_billing_header_text).unwrap_or(false) {
+                            obfuscate_text_value(text, matcher);
+                        }
                     }
                 }
             }
@@ -188,6 +199,37 @@ mod tests {
         assert_eq!(body["messages"][0]["content"], "r\u{200b}elay");
         assert_eq!(body["metadata"]["note"], "proxy");
         assert_eq!(body["tools"][0]["name"], "proxy_tool");
+    }
+
+    #[test]
+    fn billing_header_system_text_is_never_obfuscated() {
+        // 与上游 5b8e382 对齐：billing header 参与 CCH 签名，混淆会破坏签名。
+        let mut body = serde_json::json!({
+            "system": [
+                {"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.258.abc; cc_entrypoint=cli; cch=00000; proxy"},
+                {"type": "text", "text": "proxy relay upstream"}
+            ],
+            "messages": [{"role": "user", "content": "relay"}]
+        });
+        obfuscate_claude_body(&mut body, &[]);
+        assert_eq!(
+            body["system"][0]["text"],
+            "x-anthropic-billing-header: cc_version=2.1.258.abc; cc_entrypoint=cli; cch=00000; proxy"
+        );
+        assert_eq!(
+            body["system"][1]["text"],
+            "p\u{200b}roxy r\u{200b}elay u\u{200b}pstream"
+        );
+
+        let mut body = serde_json::json!({
+            "system": "x-anthropic-billing-header: cc_version=2.1.258.abc; proxy",
+            "messages": []
+        });
+        obfuscate_claude_body(&mut body, &[]);
+        assert_eq!(
+            body["system"],
+            "x-anthropic-billing-header: cc_version=2.1.258.abc; proxy"
+        );
     }
 
     #[test]

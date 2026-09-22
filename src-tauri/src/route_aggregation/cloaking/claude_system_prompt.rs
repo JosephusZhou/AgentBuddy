@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 pub const CLAUDE_CODE_AGENT_IDENTIFIER: &str =
     "You are Claude Code, Anthropic's official CLI for Claude.";
 
-const CURRENT_DATE_PREFIX: &str =
+pub(crate) const CURRENT_DATE_PREFIX: &str =
     "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is ";
 
 const LEGACY_MODELS: &[&str] = &[
@@ -228,7 +228,17 @@ fn inject_current_date(messages: &mut [Value]) {
                 cache.insert("type".into(), Value::String("ephemeral".into()));
                 block["cache_control"] = Value::Object(cache);
             }
-            blocks.insert(0, text_block(date_text));
+            // Anthropic 要求 assistant tool_use 之后的 user 消息以 tool_result 块
+            // 开头，因此提醒块要放在它们后面；其它内容形态保持原生首块位置。
+            // 与上游 297139c fix(claude): keep tool_result blocks first when
+            // injecting currentDate 对齐。
+            let mut insert_at = 0;
+            while insert_at < blocks.len()
+                && blocks[insert_at].get("type").and_then(Value::as_str) == Some("tool_result")
+            {
+                insert_at += 1;
+            }
+            blocks.insert(insert_at, text_block(date_text));
         }
         _ => {}
     }

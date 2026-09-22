@@ -1,18 +1,18 @@
 {
   "schema_version": 6,
-  "last_checked_at": "2026-08-15T00:00:00Z",
+  "last_checked_at": "2026-09-22T00:00:00Z",
   "sla_days": 14,
   "upstream_repo": "router-for-me/CLIProxyAPI",
   "schema_note": "v6: 路由聚合维护两种协议、三个同协议入口；Claude Code / Codex CLI 在边界内执行 cloaking，client_fingerprint_anchors 跟踪客户端行为与对应 upstream 提交哈希。",
   "local_cloaking_status": {
     "status": "implemented_and_tested",
-    "verified_at": "2026-08-15",
+    "verified_at": "2026-09-22",
     "scope": [
       "Claude Messages 请求头、设备 profile、system relocation、billing/CCH、user_id、工具名映射、敏感词、cache/context 策略",
       "count_tokens 请求路径与 system relocation",
       "非流式响应和 SSE 响应中的工具名反向映射"
     ],
-    "known_local_difference": "设备 profile 和 user_id 使用 AgentBuddy 作用域内存缓存，不复用 CLIProxyAPI 的 home KV；敏感词规则可配置，响应工具名恢复和 SSE 分帧属于本地 forwarder 集成；上游提交哈希未因本地实现完成而伪造推进。"
+    "known_local_difference": "设备 profile 和 user_id 使用 AgentBuddy 作用域内存缓存，不复用 CLIProxyAPI 的 home KV；敏感词规则可配置，响应工具名恢复和 SSE 分帧属于本地 forwarder 集成；CCH 签名仅在伪装为 Claude Code CLI 指纹的路径执行（等价上游 ProfileClaudeCodeCLI=true），本地不区分 OAuth 与 API-key 凭证、cloaking 层不感知 upstream origin，故未建模上游「非 Anthropic 网关省略 cch」的收敛；fake user_id 保留为 legacy 路径（本地无真实 OAuth 凭证元数据可应用）；上游 2.1.258 指纹链的 continuity 标签（cc_prev_req/cc_prompt_id/cc_is_subagent）、Fable 5.1 注入、advisor 拼接保护、subagent 1h cache 均依赖上游 KV/execution-metadata/OAuth 基础设施，本地简化实现不建模，仅 billing fingerprint 输入语义（第一条 user 消息 + 过滤 reminder）已对齐；上游提交哈希未因本地实现完成而伪造推进。"
   },
   "passthrough_paths": [
     {
@@ -48,32 +48,32 @@
       "id": "claude_code_fingerprint",
       "label": "Claude Code 客户端指纹",
       "config_version_field": "claude_code_version",
-      "current_version": "2.1.220",
+      "current_version": "2.1.258",
       "notes": "claude_code_version 变化时必须 review cloaking/claude_*.rs、obfuscate.rs、tool_remap.rs 和 header_scrub.rs；CLIProxyAPI 侧的 internal/runtime/executor/ 每次 Claude Code 发布新版本（通常 1-2 周）会有 commit 改动。",
       "files": [
         {
           "local_path": "cloaking/claude_billing.rs",
           "upstream_path": "internal/runtime/executor/claude_signing.go",
-          "last_verified_short_sha": "a8bbbea",
-          "last_verified_full_sha": "a8bbbea2b9b53149f90710d59668a53b4b0427a4",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "同步 CCH seed；本地保留简化的 billing header 生成流程"
+          "last_verified_short_sha": "a5ab695",
+          "last_verified_full_sha": "a5ab69521f7b4e0f244836d0419da8fcd89408ea",
+          "last_verified_date": "2026-09-20",
+          "last_verified_note": "a5ab695 为 Kimi OAuth 支持，本地无 Kimi provider 不适用；billing fingerprint 输入已对齐 claude_executor_cloaking.go f86a33f（取第一条 user 消息、过滤 currentDate/context reminder）"
         },
         {
           "local_path": "cloaking/claude_cloaking.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "核对 legacy-model system turn 处理；本地保留同协议透传范围内的提示词注入"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "核对 2.1.258 指纹链（086ad91/d7052c9/377c315）、Fable 5.1（de4aa60）、advisor 拼接保护（7c2f6ce/f86a33f）、subagent 1h cache（6a73f39）；除 billing fingerprint 输入语义外均依赖上游 KV/OAuth 基础设施，本地简化实现不建模"
         },
         {
           "local_path": "cloaking/claude_headers.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "核对 Claude 请求头；同步 2.1.220 指纹对应的 Stainless 版本"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "dynamic beta headers（d7052c9）为按 body 条件注入的 OAuth 路径行为，本地保持静态头；本窗口无其它适用变化"
         },
         {
           "local_path": "cloaking/claude_system_prompt.rs",
@@ -81,63 +81,63 @@
           "last_verified_short_sha": "f3e25ab",
           "last_verified_full_sha": "f3e25ab2bae6e7d533637d3ef1b64722525435d4",
           "last_verified_date": "2026-08-02",
-          "last_verified_note": "核对 Claude Code 2.1.220 的系统提示词入口；保留本地提示词片段布局"
+          "last_verified_note": "核对 Claude Code 系统提示词入口（锚点 f3e25ab 不变，入口与版本无关）；保留本地提示词片段布局"
         },
         {
           "local_path": "cloaking/device_profile.rs",
           "upstream_path": "internal/runtime/executor/helps/claude_device_profile.go",
-          "last_verified_short_sha": "903e41b",
-          "last_verified_full_sha": "903e41b6dcd08a698ab7109af446bf5485f2873e",
-          "last_verified_date": "2026-08-03",
-          "last_verified_note": "同步 Claude Code 2.1.220 / Stainless 0.94.0 / Node v26.3.0 基线"
+          "last_verified_short_sha": "c52ca7b",
+          "last_verified_full_sha": "c52ca7bd4e0b3e263d1157c572cdc75810df3d57",
+          "last_verified_date": "2026-09-20",
+          "last_verified_note": "patch floor（83a4913 接受同 major.minor 更高 patch 为原生客户端）本地 is_genuine 前缀判定天然成立，无需代码改动；仅更新锚点"
         },
         {
           "local_path": "cloaking/obfuscate.rs",
           "upstream_path": "internal/runtime/executor/helps/cloak_obfuscate.go",
-          "last_verified_short_sha": "42eef10",
-          "last_verified_full_sha": "42eef103d6d2cd4b90989c05525e04ba9dc2edcb",
-          "last_verified_date": "2026-08-04",
-          "last_verified_note": "同步 helps 路径迁移及零宽空格匹配规则；保留本地递归 JSON 字符串处理"
+          "last_verified_short_sha": "5b8e382",
+          "last_verified_full_sha": "5b8e3821b1fe942ff24e7d7324270d8730792d6b",
+          "last_verified_date": "2026-09-11",
+          "last_verified_note": "已对齐 5b8e382：system 块中以 x-anthropic-billing-header: 开头的文本跳过混淆（保护 CCH 签名）；Matches/ObfuscateText 为导出 API 形态，本地内部实现等效"
         },
         {
           "local_path": "cloaking/tool_remap.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "核对 OAuth tool rename map"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "advisor tool check（f86a33f）限制为 server tool use 属 OAuth 路径检测，本地静态重命名表不受影响；仅更新锚点"
         },
         {
           "local_path": "cloaking/header_scrub.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "核对代理追踪及指纹头剥离"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "本窗口无行为变化；仅更新锚点"
         },
         {
           "local_path": "cloaking/claude_cache.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "按上游 breakpoint、TTL 和 cache block 上限行为拆分实现；本地保留配置化上限"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "stripClaudeCacheControlTTL（6a73f39）依赖 subagent/probe 检测，本地不适用；仅更新锚点"
         },
         {
           "local_path": "cloaking/claude_context.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "按上游 thinking 能力和 clear_thinking 注入条件拆分实现"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "本窗口无行为变化；仅更新锚点"
         },
         {
           "local_path": "cloaking/claude_identity.rs",
           "upstream_path": "internal/runtime/executor/claude_executor_cloaking.go",
-          "last_verified_short_sha": "189776a",
-          "last_verified_full_sha": "189776aab1fc7523229633a830850b8375079849",
-          "last_verified_date": "2026-08-11",
-          "last_verified_note": "按上游 user/session/account 身份格式拆分实现；本地使用作用域内存缓存替代 home KV"
+          "last_verified_short_sha": "f86a33f",
+          "last_verified_full_sha": "f86a33f72175b34a17557128f12c79d55f6df611",
+          "last_verified_date": "2026-09-18",
+          "last_verified_note": "本窗口无行为变化（OAuth 凭证元数据路径不适用）；仅更新锚点"
         }
       ]
     },
@@ -145,24 +145,24 @@
       "id": "codex_fingerprint",
       "label": "Codex CLI 客户端指纹",
       "config_version_field": "codex_version",
-      "current_version": "0.146.0",
+      "current_version": "0.154.0",
       "notes": "codex_version 变化时必须 review cloaking/codex_*.rs。",
       "files": [
         {
           "local_path": "cloaking/codex_cloaking.rs",
           "upstream_path": "internal/runtime/executor/codex_executor_request.go",
-          "last_verified_short_sha": "f43aad7",
-          "last_verified_full_sha": "f43aad7637ad813745bf7d341acb5663617570c5",
-          "last_verified_date": "2026-08-12",
-          "last_verified_note": "同步 Session-Id 头规范及身份混淆核对"
+          "last_verified_short_sha": "f702bc1",
+          "last_verified_full_sha": "f702bc1ac2631953b3eea2d99eb6761b283a99ef",
+          "last_verified_date": "2026-09-13",
+          "last_verified_note": "UA 基线已升级 0.154.0（8461b4e，Mac OS 26.5.2 / iTerm 3.6.11）；X-Codex-Turn-State（e696ea4）为转发型头，本地合成路径无下游值可转；responses-lite（f702bc1）本地无 instructions 规范化，均不适用"
         },
         {
           "local_path": "cloaking/codex_headers.rs",
           "upstream_path": "internal/runtime/executor/codex_executor_request.go",
-          "last_verified_short_sha": "f43aad7",
-          "last_verified_full_sha": "f43aad7637ad813745bf7d341acb5663617570c5",
-          "last_verified_date": "2026-08-12",
-          "last_verified_note": "同步 Session-Id 头名称（由下划线改为连字符）"
+          "last_verified_short_sha": "f702bc1",
+          "last_verified_full_sha": "f702bc1ac2631953b3eea2d99eb6761b283a99ef",
+          "last_verified_date": "2026-09-13",
+          "last_verified_note": "UA 模板已对齐 0.154.0（Mac OS 26.5.2 / iTerm 3.6.11）；仅更新锚点"
         }
       ]
     }

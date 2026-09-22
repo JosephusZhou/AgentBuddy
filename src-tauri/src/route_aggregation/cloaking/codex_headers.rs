@@ -16,9 +16,9 @@ pub fn inject_codex_headers(
     account_id: Option<&str>,
     session_id: &str,
 ) {
-    // User-Agent
+    // User-Agent（对齐上游 8461b4e codex UA 0.154.0：Mac OS 26.5.2 / iTerm 3.6.11）
     let ua = format!(
-        "codex-tui/{} (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; {})",
+        "codex-tui/{} (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; {})",
         version, version
     );
     set_header(headers, "user-agent", &ua);
@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn uses_upstream_session_id_header_name() {
         let mut headers = HeaderMap::new();
-        inject_codex_headers(&mut headers, "0.146.0", None, "session-123");
+        inject_codex_headers(&mut headers, "0.154.0", None, "session-123");
 
         assert_eq!(headers.get("session-id").unwrap(), "session-123");
         assert!(headers.get("session_id").is_none());
