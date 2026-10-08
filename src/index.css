@@ -1030,23 +1030,30 @@ input {
   }
 }
 
-/* ===== APP LAYOUT ===== */
+/* ===== APP LAYOUT =====
+   注：外壳（侧栏 / 标题栏 / 拖拽区）已切换到新 UI 的 --kb-* 令牌（Kinetic Dark），
+   是永久深色、不随 data-theme 变化；内容区仍按主题渲染，直到各页面完成迁移。 */
 .app {
   display: flex;
   height: 100vh;
   width: 100%;
   overflow: hidden;
   position: relative;
+  /* 窗口底色跟随新 UI 深色调色板：浅色主题下窗口边缘/拖拽区不会露出亮色 */
+  background: var(--kb-canvas);
 }
 
-/* Top drag strip for Overlay titlebar (macOS traffic lights live in this band) */
+/* Top drag strip for Overlay titlebar (macOS traffic lights live in this band).
+   48px = 新 UI 集成标题栏高度。设计稿里这条带子是比侧栏/画布更浅的一层（#141a23），
+   横跨侧栏与内容区，因此用实色铺满而不是透明。 */
 .window-drag-region {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 32px;
+  height: 48px;
   z-index: 50;
+  background: #141a23;
 }
 
 /* Nested interactive controls must not start a window drag */
@@ -1071,73 +1078,93 @@ label,
 
 /* ===== SIDEBAR ===== */
 .sidebar {
-  width: 224px;
+  /* 侧栏宽度/配色按设计稿实测：240px 栏宽 + #151c25 底 + #1d242d 右边框 */
+  width: 240px;
   flex-shrink: 0;
-  /* Clear the Overlay drag strip / traffic lights so nav controls stay clickable */
-  padding-top: 32px;
-  background: var(--seed-surface);
-  border-right: 1px solid var(--seed-border);
+  /* Clear the 48px 集成标题栏 / 交通灯 */
+  padding-top: 48px;
+  background: var(--kb-surface-1);
+  border-right: 1px solid var(--kb-border-subtle);
   display: flex;
   flex-direction: column;
-  transition:
-    background 0.25s ease,
-    border-color 0.25s ease;
 }
-/* macOS 原生质感：侧栏半透明 + 背景模糊（Windows 保持实色，观感更扎实） */
+/* macOS 原生质感：侧栏半透明 + 背景模糊（Windows 保持实色，观感更扎实）。
+   底色必须自带不透明度或改用实色：否则会与窗口底色（浅色主题时是 --seed-bg）混色，
+   把 #151c25 洗成灰褐色。设计稿的侧栏就是一块纯色，这里改为纯色 + 保留 blur 供
+   内容滚动时的高光过渡（实际上无 alpha 时 blur 不生效，故直接去 blur）。 */
 [data-platform="macos"] .sidebar {
-  background: color-mix(in srgb, var(--seed-surface) 78%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  backdrop-filter: blur(20px) saturate(1.5);
+  background: var(--kb-surface-1);
+  -webkit-backdrop-filter: saturate(1.2);
+  backdrop-filter: saturate(1.2);
 }
+/* 品牌块：实测 32px 图标 + 12px 左边距，名称 15px，版本药丸 #2e353f/#a78b7d */
 .sidebar-header {
-  padding: 20px 16px 12px;
+  padding: 16px 12px 20px;
 }
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
 }
 .sidebar-brand-icon {
-  width: 28px;
-  height: 28px;
-  background: var(--seed-primary);
-  border-radius: var(--seed-radius-md);
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(150deg, var(--kb-amber), #b45309);
+  border-radius: var(--kb-radius);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.25s ease;
 }
 .sidebar-brand-icon svg {
-  color: var(--seed-primary-fg);
+  width: 18px;
+  height: 18px;
+  color: #552100; /* on-primary */
+}
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 .sidebar-brand-name {
-  font-size: var(--text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--seed-fg);
+  color: var(--kb-text);
+  white-space: nowrap;
+}
+.sidebar-brand-version {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-surface-4);
+  color: var(--kb-text-dim);
+  font-family: var(--kb-mono-sm);
+  font-size: 10px;
+  line-height: 16px;
 }
 .sidebar-nav {
   flex: 1;
-  padding: 8px;
+  padding: 0 8px 8px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* 设计稿实测：导航项高 30px、间距 4px */
+  gap: 4px;
 }
 .sidebar-bottom {
   padding: 8px;
 }
 
-/* Menu Items */
+/* Menu Items —— 实测：行高 30px、图标 16px、左右内边距 8px、圆角 8px */
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-radius: var(--seed-radius);
-  color: var(--seed-muted);
-  font-size: var(--text-sm);
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--kb-radius);
+  color: var(--kb-text-nav); /* on-surface-variant */
+  font-size: 13px;
+  line-height: 18px;
   font-weight: 450;
   cursor: pointer;
   border: none;
@@ -1155,69 +1182,92 @@ label,
   position: relative;
 }
 .menu-item:hover {
-  background: var(--seed-hover);
-  color: var(--seed-fg);
+  background: color-mix(in srgb, var(--kb-surface-3) 60%, transparent);
+  color: var(--kb-text);
 }
 .menu-item.active {
-  background: var(--seed-active-bg);
-  color: var(--seed-active-fg);
+  background: var(--kb-surface-3); /* surface-container-high */
+  color: var(--kb-text); /* on-surface */
   font-weight: 500;
 }
+/* 激活态：贴左边缘的琥珀指示条。绝对定位，切换时不影响文字位置。
+   圆角用负 margin 让指示条贴合圆角外沿（实测指示条与行同高、紧贴左缘）。 */
 .menu-item.active::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  background: var(--seed-primary);
-  border-radius: 0 3px 3px 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--kb-amber);
+  border-radius: 0 2px 2px 0;
 }
 .menu-item svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  opacity: 0.85;
+  opacity: 1; /* 设计稿里图标与文案同色，不做额外降透明 */
 }
 .menu-item.active svg {
-  opacity: 1;
+  color: inherit; /* 图标随文案变为 on-surface，不额外染琥珀 */
 }
 .menu-label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 导航项右侧计数徽章：surface-container-highest 底 + on-surface 字 */
+.menu-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-surface-4);
+  color: var(--kb-text);
+  font-family: var(--kb-mono-sm);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.menu-item.active .menu-count {
+  background: var(--kb-surface-4);
+  color: var(--kb-text);
 }
 
-/* Menu Groups (static labels) */
+/* Menu Groups —— 分组标题与导航项图标左对齐（实测同为 16px） */
 .menu-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  margin-top: 12px;
+}
+.menu-group:first-child {
+  margin-top: 0;
 }
 .menu-group-header {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  color: var(--seed-muted);
-  font-size: var(--text-xs);
+  padding: 4px 8px;
+  color: var(--kb-text-dim); /* outline */
+  font-size: 11px;
+  line-height: 14px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.menu-group-header svg {
-  width: 15px;
-  height: 15px;
-  opacity: 0.7;
-  flex-shrink: 0;
+  letter-spacing: 0.02em;
 }
 .menu-group-items {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-left: 16px;
+  gap: 4px;
 }
 
-/* ===== MAIN CONTENT ===== */
+/* ===== MAIN CONTENT =====
+   .kinetic-canvas 由 App.tsx 在 Agent 发现页挂载：新 UI 页面自带深色画布，
+   旧页面继续沿用 --seed-bg，直到逐页迁移完成。 */
 .main-content {
   flex: 1;
   display: flex;
@@ -1226,9 +1276,13 @@ label,
   background: var(--seed-bg);
   transition: background 0.25s ease;
 }
+/* 新 UI 页面画布：设计稿里画布最暗（#080f17），卡片（#151c25）浮于其上 */
+.main-content.kinetic-canvas {
+  background: var(--kb-canvas);
+}
 .content-header {
-  /* Extra top padding so header controls sit below the Overlay drag strip / traffic lights */
-  padding: 36px 28px 0;
+  /* Extra top padding so header controls sit below the 48px 拖拽区 / 交通灯 */
+  padding: 56px 28px 0;
   flex-shrink: 0;
 }
 .content-title {

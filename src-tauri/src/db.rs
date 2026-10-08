@@ -285,6 +285,15 @@ pub fn load_agents() -> Result<Vec<SniffResult>, String> {
     Ok(agents)
 }
 
+/// Unix 秒时间戳：最近一次 agent 扫描写库的时间；从未扫描过时为 `None`。
+pub fn last_agent_scan_time() -> Result<Option<u64>, String> {
+    let conn = get_connection()?;
+    let ts: Option<i64> = conn
+        .query_row("SELECT MAX(scan_time) FROM agents", [], |row| row.get(0))
+        .map_err(|e| format!("Failed to query last agent scan time: {}", e))?;
+    Ok(ts.and_then(|v| u64::try_from(v).ok()))
+}
+
 /* ===== MCP servers persistence ===== */
 
 fn row_to_mcp(row: &rusqlite::Row<'_>) -> rusqlite::Result<McpServerRecord> {

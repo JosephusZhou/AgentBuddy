@@ -318,9 +318,18 @@ fn agents_for_shared_root(agent: &str) -> Vec<String> {
     }
 }
 
-/// Count MCP entries in one agent's config file (0 for unknown agents or unreadable/missing files).
-pub(crate) fn count_agent_mcp_entries(agent: &str) -> usize {
-    read_agent_mcp_entries(agent).map(|v| v.len()).unwrap_or(0)
+/// MCP entry titles in one agent's config file, sorted for stable display.
+///
+/// 刻意**不过滤** `__agentbuddy*` 内部冒烟测试残留：调用方要在同一次读取结果上同时
+/// 得到"条目数"和"名称预览"，过滤会让两者口径不一致（计数含残留、名称不含）。
+pub(crate) fn agent_mcp_titles(agent: &str) -> Vec<String> {
+    let mut titles: Vec<String> = read_agent_mcp_entries(agent)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(title, _)| title)
+        .collect();
+    titles.sort();
+    titles
 }
 
 /// List MCP entries (title + draft) in one agent's config file.

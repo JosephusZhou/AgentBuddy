@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import AgentSniff from "./components/pages/AgentSniff";
 import AiProviders from "./components/pages/AiProviders";
@@ -71,6 +71,52 @@ function AutoBackupNotifier() {
   return <Toast message={message} />;
 }
 
+/**
+ * 集成标题栏右侧的路由聚合状态胶囊（新 UI 外壳）。
+ * 挂载时取一次、窗口重新聚焦时再取，避免常驻轮询；取不到就隐藏整个胶囊。
+ */
+function RouteStatusPill() {
+  const [status, setStatus] = useState<{ running: boolean; address: string } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const s = await (invoke("get_route_aggregation_status") as Promise<{
+        serverRunning?: boolean;
+        listenAddress?: string;
+        listenPort?: number;
+      }>);
+      setStatus({
+        running: s?.serverRunning === true,
+        address: `${s?.listenAddress ?? "127.0.0.1"}:${s?.listenPort ?? 0}`,
+      });
+    } catch {
+      // 非 Tauri 环境：静默隐藏。
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  if (!status) return null;
+  return (
+    <div
+      className={`kb-bar-status ${status.running ? "running" : ""}`}
+      role="status"
+      title={`路由聚合${status.running ? "运行中" : "未运行"} · ${status.address}`}
+    >
+      <span className="kb-bar-status-dot" />
+      <span className="kb-bar-status-label">路由聚合</span>
+      <span className="kb-bar-status-addr">{status.address}</span>
+    </div>
+  );
+}
+
 export default function App() {
   // 全局弹窗可访问性：打开自动聚焦主输入框 + Tab 焦点圈定（见 ui.tsx）
   useGlobalModalA11y();
@@ -133,7 +179,7 @@ export default function App() {
         onEnterSettings={() => setMode("settings")}
         onExitSettings={() => setMode("main")}
       />
-      <main className="main-content">
+      <main className={`main-content ${activeView === "agent-sniff" ? "kinetic-canvas" : ""}`}>
         {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
         {activeView === "ai-providers" && <AiProviders />}
         {activeView === "model-config" && <ModelConfig />}
@@ -150,6 +196,7 @@ export default function App() {
         {activeView === "webdav" && <WebDAV />}
         {activeView === "backup" && <BackupManage />}
       </main>
+      <RouteStatusPill />
       <AutoBackupNotifier />
     </div>
   );

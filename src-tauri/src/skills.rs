@@ -615,14 +615,18 @@ fn scan_applied_agents() -> HashMap<String, BTreeSet<String>> {
     map
 }
 
-/// Count skills installed in one agent's skills roots (unique dir names across all roots;
-/// 0 for unknown/unsupported agents). Mirrors `scan_applied_agents`'s entry filtering.
-pub(crate) fn count_agent_skills(agent: &str) -> usize {
+/// List the skill ids installed in one agent's skills roots (unique dir names across all
+/// roots, sorted; empty for unknown/unsupported agents). Mirrors `scan_applied_agents`'s
+/// entry filtering.
+///
+/// 与 `list_agent_skills` 的区别：只读目录名，**不解析 SKILL.md**。列表页要对全部已安装
+/// agent 批量取名，解析文档会把开销放大成「agent 数 × skill 数」次文件读。
+pub(crate) fn list_agent_skill_ids(agent: &str) -> Vec<String> {
     let Some(spec) = crate::agents::find(agent) else {
-        return 0;
+        return Vec::new();
     };
     if !spec.skills_supported {
-        return 0;
+        return Vec::new();
     }
     let mut names: BTreeSet<String> = BTreeSet::new();
     for root in spec.skills_roots.iter().map(|&r| expand_tilde(r)) {
@@ -645,7 +649,7 @@ pub(crate) fn count_agent_skills(agent: &str) -> usize {
             names.insert(id);
         }
     }
-    names.len()
+    names.into_iter().collect()
 }
 
 /// One skill installed in an agent's skills roots (for the agent detail view).
@@ -663,7 +667,7 @@ pub struct AgentSkillInfo {
 }
 
 /// List skills installed in one agent's skills roots (unique dir names across all roots;
-/// empty for unknown/unsupported agents). Mirrors `count_agent_skills`'s entry filtering.
+/// empty for unknown/unsupported agents). Mirrors `list_agent_skill_ids`'s entry filtering.
 pub(crate) fn list_agent_skills(agent: &str) -> Vec<AgentSkillInfo> {
     let Some(spec) = crate::agents::find(agent) else {
         return vec![];

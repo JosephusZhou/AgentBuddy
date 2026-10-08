@@ -4,6 +4,7 @@
 
 mod agent_model_config;
 mod agent_open;
+mod agent_version;
 mod agents;
 mod ai_provider;
 mod backup;
@@ -89,28 +90,105 @@ async fn open_agent_config_file(
         .map_err(|e| format!("打开配置文件任务失败: {e}"))?
 }
 
+/// Agent 发现页卡片的挂载统计：数量 + 少量名称预览。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentConfigStat {
     name: String,
     mcp_count: usize,
     skill_count: usize,
+    /// 排序后的前 N 个 MCP 名称（供卡片标签展示，不含任何密钥字段）。
+    mcp_titles: Vec<String>,
+    /// 排序后的前 N 个 Skill id（目录名）。
+    skill_ids: Vec<String>,
 }
+
+/// 卡片只展示少量名称，超出部分由计数体现，避免标签过长。
+const AGENT_STAT_NAME_PREVIEW: usize = 3;
 
 #[tauri::command]
 async fn get_agent_config_stats(names: Vec<String>) -> Result<Vec<AgentConfigStat>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         names
             .iter()
-            .map(|name| AgentConfigStat {
-                name: name.clone(),
-                mcp_count: mcp_config::count_agent_mcp_entries(name),
-                skill_count: skills::count_agent_skills(name),
+            .map(|name| {
+                // MCP 标题与计数取自同一次读取，两者口径天然一致（内部残留条目同进同出）。
+                let mcp_titles = mcp_config::agent_mcp_titles(name);
+                let skill_ids = skills::list_agent_skill_ids(name);
+                AgentConfigStat {
+                    name: name.clone(),
+                    mcp_count: mcp_titles.len(),
+                    skill_count: skill_ids.len(),
+                    mcp_titles: mcp_titles
+                        .into_iter()
+                        .take(AGENT_STAT_NAME_PREVIEW)
+                        .collect(),
+                    skill_ids: skill_ids
+                        .into_iter()
+                        .take(AGENT_STAT_NAME_PREVIEW)
+                        .collect(),
+                }
             })
             .collect()
     })
     .await
     .map_err(|e| format!("读取 Agent 配置统计任务失败: {e}"))
+}
+
+/// 注册表里的静态展示元数据（形态 / 职责描述 / Skills 支持度）。
+/// 刻意不带 `SniffResult`：后者落库是显式列，加字段会污染 `load_agents` 的还原逻辑。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentProfile {
+    name: String,
+    /// "cli" | "desktop" | "hybrid"
+    form: String,
+    description: String,
+    skills_supported: bool,
+}
+
+#[tauri::command]
+async fn get_agent_profiles() -> Result<Vec<AgentProfile>, String> {
+    Ok(agents::agents()
+        .iter()
+        .map(|spec| AgentProfile {
+            name: spec.name.to_string(),
+            form: spec.form.as_str().to_string(),
+            description: spec.description.to_string(),
+            skills_supported: spec.skills_supported,
+        })
+        .collect())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentVersionInfo {
+    name: String,
+    /// None = 无 CLI 入口 / 未安装 / 探测失败或超时。
+    version: Option<String>,
+}
+
+#[tauri::command]
+async fn get_agent_versions(names: Vec<String>) -> Result<Vec<AgentVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_version::probe_versions(&names)
+            .into_iter()
+            .map(|probe| AgentVersionInfo {
+                name: probe.name,
+                version: probe.version,
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("探测 Agent 版本任务失败: {e}"))
+}
+
+/// 最近一次 agent 扫描的 Unix 秒时间戳；从未扫描过时为 None。
+#[tauri::command]
+async fn get_last_agent_scan_time() -> Result<Option<u64>, String> {
+    tauri::async_runtime::spawn_blocking(db::last_agent_scan_time)
+        .await
+        .map_err(|e| format!("读取扫描时间任务失败: {e}"))?
 }
 
 /// One MCP entry shown on the agent detail page (secrets like env/headers omitted).
@@ -1525,6 +1603,9 @@ pub fn run() {
             get_cached_agents,
             get_agent_config_stats,
             get_agent_detail,
+            get_agent_profiles,
+            get_agent_versions,
+            get_last_agent_scan_time,
             add_agent_manual,
             agent_open_targets,
             reveal_agent_config_dir,

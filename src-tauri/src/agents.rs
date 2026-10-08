@@ -40,11 +40,39 @@ pub struct McpSpec {
     pub jsonc: bool,
 }
 
+/// agent 的形态：命令行 / 桌面应用 / 两者皆有。
+/// 仅描述"安装形态"这一客观事实，供前端展示类型药丸（CLI / 桌面端 / CLI + 桌面端）。
+#[derive(Clone, Copy)]
+pub enum AgentForm {
+    /// 纯命令行工具。
+    Cli,
+    /// 仅桌面应用（无 CLI 入口，`search_names` 为空）。
+    Desktop,
+    /// 同时提供 CLI 与桌面应用。
+    Hybrid,
+}
+
+impl AgentForm {
+    /// 前端展示用的稳定小写标识（camelCase JSON 字段）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentForm::Cli => "cli",
+            AgentForm::Desktop => "desktop",
+            AgentForm::Hybrid => "hybrid",
+        }
+    }
+}
+
 /// 一个 agent 的完整规格：身份 + 发现 + MCP + Skills。
 pub struct AgentSpec {
     pub name: &'static str,
     pub display_name: &'static str,
     pub icon: &'static str,
+    /// 安装形态（CLI / 桌面端 / 两者皆有）。
+    pub form: AgentForm,
+    /// 一句话职责描述，供 Agent 发现页卡片展示。必须与本 spec 的真实路径、
+    /// MCP 方言与 Skills 支持度一致，不得臆造未实现的能力。
+    pub description: &'static str,
 
     // ---- 发现（sniff）----
     /// 静态安装路径（App 和/或 CLI 的固定位置）。
@@ -174,6 +202,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "codex",
         display_name: "Codex",
         icon: "Co",
+        form: AgentForm::Hybrid,
+        description: "OpenAI Codex CLI 与 ChatGPT 桌面端共享 ~/.codex，MCP 走 config.toml 的 [mcp_servers]",
         bin_paths: &[
             "/usr/local/bin/codex",
             "/opt/homebrew/bin/codex",
@@ -196,6 +226,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "claude-code",
         display_name: "Claude Code",
         icon: "Cc",
+        form: AgentForm::Cli,
+        description: "Anthropic 官方终端编程 Agent，MCP 写入 ~/.claude.json，支持 CLAUDE_CONFIG_DIR 多环境",
         bin_paths: &[
             "~/.local/bin/claude",
             "/usr/local/bin/claude",
@@ -218,6 +250,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "claude-desktop",
         display_name: "Claude Desktop",
         icon: "Cd",
+        form: AgentForm::Desktop,
+        description: "Anthropic 官方桌面客户端，MCP 配置在 ~/Library/Application Support 扫描，当前不支持本地 Skills",
         bin_paths: &["/Applications/Claude.app"],
         search_names: &[],
         config_paths: &[],
@@ -236,6 +270,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "opencode",
         display_name: "OpenCode",
         icon: "Oc",
+        form: AgentForm::Hybrid,
+        description: "本地多模型 CLI 代理，MCP 走 opencode.json(c) 顶层 mcp，接入 models.dev 统一分派",
         bin_paths: &[
             "/usr/local/bin/opencode",
             "/opt/homebrew/bin/opencode",
@@ -259,6 +295,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "antigravity",
         display_name: "Antigravity",
         icon: "Ag",
+        form: AgentForm::Hybrid,
+        description: "Google Antigravity，agy CLI 与桌面端共享 ~/.gemini，MCP 混用 stdio 与远程 httpUrl",
         bin_paths: &["~/.local/bin/agy", "/Applications/Antigravity.app"],
         search_names: &["agy", "antigravity"],
         config_paths: &["~/.gemini"],
@@ -278,6 +316,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "codebuddy-cn",
         display_name: "CodeBuddy CN",
         icon: "Cn",
+        form: AgentForm::Desktop,
+        description: "腾讯国内版桌面客户端，MCP 与 Skills 写入 ~/.codebuddy（与 WorkBuddy 共享物理根）",
         bin_paths: &["/Applications/CodeBuddy CN.app"],
         search_names: &[],
         config_paths: &["~/.codebuddy"],
@@ -296,6 +336,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "workbuddy",
         display_name: "WorkBuddy",
         icon: "Wb",
+        form: AgentForm::Hybrid,
+        description: "腾讯 WorkBuddy 桌面端与 CLI，MCP 写入 ~/.workbuddy/.mcp.json，与 CodeBuddy CN 共享物理根",
         bin_paths: &["/Applications/WorkBuddy.app"],
         search_names: &["workbuddy"],
         config_paths: &["~/.workbuddy"],
@@ -315,6 +357,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "pi",
         display_name: "Pi",
         icon: "Pi",
+        form: AgentForm::Cli,
+        description: "badlogic/pi-mono 纯 CLI，MCP 依赖社区 pi-mcp-adapter 扩展，Skills 位于 ~/.pi/agent/skills",
         bin_paths: &[
             "~/.local/bin/pi",
             "/usr/local/bin/pi",
@@ -337,6 +381,8 @@ static AGENTS: &[AgentSpec] = &[
         name: "oh-my-pi",
         display_name: "Oh-My-Pi",
         icon: "Om",
+        form: AgentForm::Cli,
+        description: "Pi 的全功能 fork（omp），纯 CLI，MCP 与 Skills 位于 ~/.omp/agent",
         bin_paths: &[
             "~/.bun/bin/omp",
             "~/.local/bin/omp",

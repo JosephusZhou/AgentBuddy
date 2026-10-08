@@ -208,6 +208,42 @@ pub fn is_agent_installed(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 解析指定 agent 的 CLI 可执行文件路径，供版本探测等需要"可执行文件"的场景使用。
+/// 与 `sniff_agents` 共用同一套候选顺序与 shim 过滤；桌面端安装（`.app`、
+/// Windows `Program Files` 下的 `.exe`）返回 `None`，避免探测时误拉起 GUI 进程。
+pub fn cli_executable(name: &str) -> Option<PathBuf> {
+    let spec = crate::agents::find(name)?;
+    collect_install_paths(spec)
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.is_file() && is_launchable_cli(&p.to_string_lossy()))
+}
+
+/// 是否是"可安全带参执行的 CLI 二进制"。与 `order_install_paths` 的排序偏好
+/// 不同：这里只排除真正的桌面安装产物，Windows 上裸 `.exe`（npm/pip 生成的
+/// 命令 shim）仍视为 CLI。
+fn is_launchable_cli(path: &str) -> bool {
+    if path.is_empty() {
+        // 与 `is_shim_path` 同理：空路径永远不是可执行文件位置。
+        return false;
+    }
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    if normalized.ends_with(".app") || normalized.contains(".app/") {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        if normalized.ends_with(".exe")
+            && (normalized.contains("/programs/")
+                || normalized.contains("/program files/")
+                || normalized.contains("/program files (x86)/"))
+        {
+            return false;
+        }
+    }
+    true
+}
+
 pub fn sniff_agents() -> Vec<SniffResult> {
     crate::agents::agents()
         .iter()
@@ -267,7 +303,7 @@ fn order_install_paths(paths: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_agent_installed, is_shim_path};
+    use super::{is_agent_installed, is_launchable_cli, is_shim_path};
 
     #[test]
     fn unknown_agent_is_not_installed() {
@@ -324,5 +360,15 @@ mod tests {
         assert!(!is_shim_path(
             r"C:\Users\x\AppData\Local\Programs\Claude\Claude.exe"
         ));
+    }
+
+    #[test]
+    fn desktop_installs_are_not_launchable_cli() {
+        // macOS app bundles must never be probed with `--version` (would launch the GUI).
+        assert!(!is_launchable_cli("/Applications/Claude.app"));
+        assert!(!is_launchable_cli("/Applications/CodeBuddy CN.app"));
+        assert!(is_launchable_cli("/opt/homebrew/bin/codex"));
+        assert!(is_launchable_cli("/Users/x/.local/bin/claude"));
+        assert!(!is_launchable_cli(""));
     }
 }

@@ -39,11 +39,13 @@ src/
   App.tsx                         视图状态与页面路由
   components/pages/               功能页面与 Tauri API helper
   components/ui.tsx               页面无关的共享 UI
-  index.css                       主题和全局样式
+  index.css                       多主题遗留层（--seed-*）+ 未迁移页面的样式
+  kinetic.css                     新 UI（Kinetic Dark）令牌与组件类，唯一新样式来源
 
 src-tauri/src/
   lib.rs                          Tauri command 注册、启动初始化
-  agents.rs                       Agent 注册表：身份、路径、MCP 方言、Skills 根
+  agents.rs                       Agent 注册表：身份、形态、简介、路径、MCP 方言、Skills 根
+  agent_version.rs                CLI 版本探测（`--version` + 超时，纯函数解析版本号）
   sniff.rs                        Agent 安装发现和 shim 过滤
   mcp_config.rs                   MCP 多方言读写、扫描和连通性探测
   skills.rs                       Skills 库、导入、更新、导出和分发
@@ -194,6 +196,33 @@ CLIProxyAPI 只提供行为同步参考，不是运行时依赖。上游变更�
 
 主界面包含 Agent 发现、MCP 管理、Skills 管理、Claude 环境、Codex 环境、OpenCode 配置、AI
 供应商、路由聚合、项目 AI 配置和备份管理；设置界面包含偏好、网络代理和 WebDAV。
+
+### 界面风格：Kinetic Dark 新 UI（迁移中）
+
+界面正在从「多主题 + 浅色默认」迁移到统一的新 UI。迁移期的硬约束：
+
+1. 新代码只准消费 `src/kinetic.css` 的 `--kb-*` 令牌与 `.kb-*` 类，禁止写裸色值、
+   禁止引用 `--seed-*`。`kinetic.css` 必须在 `index.css` 之后引入。
+   令牌取自设计稿实测（Material 3 容器色阶：画布 `#080f17` 最暗、卡片/侧栏 `#151c25`
+   浮于其上、激活态 `#232a34`、徽章 `#2e353f`），**不是** DESIGN.md 正文里那套
+   `#0D0F12 → #161A1F` 的描述色；两者不一致时以设计稿像素为准。
+2. `--seed-*` 与 `lib/theme.ts` 的 28 套主题是**遗留层**，仅供尚未迁移的旧页面使用；
+   新代码不得依赖 `data-theme`，外观不再可切换。
+3. 外壳（侧栏、48px 标题栏与状态胶囊）已永久深色；内容区按页面逐步迁移，未迁移页面
+   仍是「深色侧栏 + 主题内容区」的过渡态。
+4. `.agent-card` / `.agent-icon` / `.agent-path-*` 等旧类名仍被 AgentDetail 等未迁移页面
+   共用，**不要 redefined 它们**；新页面另起 `.kb-` 前缀类名。
+
+全部页面迁移完成后，按以下顺序下线多主题（纯删除，新 UI 无需返工）：
+
+1. 删 `index.css` 中 28 个 `[data-theme]` 块与 `:root` 的 `--text-*` / `--space-*` /
+   `--seed-*` 兜底；
+2. 删 `lib/theme.ts` 的 `THEMES` / `Theme` / `getThemeCategory` / `saveTheme`，
+   `App.tsx` 去掉 theme 状态与 `applyTheme`；
+3. 删 `Preferences.tsx` 的外观分区与 `.pref-theme-*` 样式；
+4. Rust 侧删 `set_theme` command、config.json 的 `theme` 字段与 `set_window_appearance`
+   （窗口固定 DarkAqua）；
+5. 老用户 config.json 残留的 `theme` 字段按无害未知字段忽略。
 
 ## 修改规则
 
