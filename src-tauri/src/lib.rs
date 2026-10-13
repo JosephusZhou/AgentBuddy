@@ -1518,8 +1518,56 @@ fn set_ns_window_appearance(app: &tauri::AppHandle, dark: bool) {
     });
 }
 
+// ── Menu bar tray icon ────────────────────────────────────────────────────
+// 菜单栏托盘图标（macOS 菜单栏 / Windows 托盘）。关闭窗口时隐藏到托盘保持后台
+// 运行，通过托盘菜单「打开窗口」恢复，「退出应用」才真正退出。
+
+/// Tray icon id（同时用于判断「关闭即隐藏」是否可用）。
+const TRAY_ID: &str = "main";
+
+/// Create the menu bar tray icon with "打开窗口" / "退出应用" actions.
+/// Best-effort: a failure is logged and the app continues without a tray.
+fn setup_tray(app: &tauri::AppHandle) {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::TrayIconBuilder;
+
+    let result = (|| -> tauri::Result<()> {
+        let open = MenuItem::with_id(app, "tray-open", "打开窗口", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "tray-quit", "退出应用", true, None::<&str>)?;
+        let menu = Menu::with_items(app, &[&open, &quit])?;
+
+        // 单色模板图标（黑色 + alpha）：macOS 会根据菜单栏深浅自动反色，
+        // Windows 上按原样显示为黑色轮廓。
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+
+        TrayIconBuilder::with_id(TRAY_ID)
+            .icon(icon)
+            .icon_as_template(true)
+            .tooltip("AgentBuddy")
+            .menu(&menu)
+            .show_menu_on_left_click(true)
+            .build(app)?;
+        Ok(())
+    })();
+
+    if let Err(err) = result {
+        eprintln!("[agent-buddy] failed to create tray icon: {err}");
+    }
+}
+
+/// Show and focus the main window (used by the tray menu and Dock reopen).
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    use tauri::Manager;
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             sniff_agents,
             get_cached_agents,
@@ -1651,8 +1699,27 @@ pub fn run() {
             get_route_aggregation_log_file_path,
             reveal_route_aggregation_log_file,
         ])
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray-open" => show_main_window(app),
+            "tray-quit" => app.exit(0),
+            _ => {}
+        })
+        .on_window_event(|window, event| {
+            // 关闭主窗口不退出：只要托盘图标存在就改为隐藏，进程继续在后台运行。
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let tray_exists = window
+                    .app_handle()
+                    .tray_by_id(&tauri::tray::TrayIconId::new(TRAY_ID))
+                    .is_some();
+                if tray_exists {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|_app| {
-            use tauri::Manager;
+            // 菜单栏托盘图标：打开窗口 / 退出应用；失败仅告警，不影响启动。
+            setup_tray(_app.handle());
             // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.
             if let Err(err) = config::ensure_app_config() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
@@ -1789,6 +1856,20 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // macOS：点击 Dock 图标时恢复被隐藏的主窗口（关闭窗口驻留菜单栏的配套行为）。
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main_window(app_handle);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (app_handle, event);
+        }
+    });
 }
