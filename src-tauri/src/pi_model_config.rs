@@ -1,12 +1,8 @@
-//! Pi / Oh-My-Pi（omp）供应商与模型配置读写（通用模型配置框架的 Pi 家族后端）。
+//! Pi 供应商与模型配置读写（通用模型配置框架的 Pi 家族后端）。
 //!
 //! - Pi：`~/.pi/agent/models.json`（JSON，顶层 `providers`）
 //!   - 密钥：`~/.pi/agent/auth.json`（`{ providerId: { type: "api_key", key } }`）
 //!   - 默认模型：`~/.pi/agent/settings.json` 的 `defaultProvider` / `defaultModel`
-//! - Oh-My-Pi：`~/.omp/agent/models.yml`（YAML；兼容读 `.yaml` 与旧版 `models.json`）
-//!   - 密钥：自定义 provider 的 `apiKey`（可为环境变量名或字面密钥）；旧版
-//!     `auth.json` 仅在首次读取时迁移，不再作为运行时来源
-//!   - 默认模型暂不支持可视化编辑（请在 omp 内用 `/model` 或 `omp config` 管理）
 //!
 //! 字段映射到通用 DTO：`contextWindow`→limitContext、`maxTokens`→limitOutput、
 //! `input`→modalitiesInput；未建模字段经 extraOptions 原样往返。
@@ -34,7 +30,7 @@ const MODEL_KNOWN_KEYS: &[&str] = &[
     "maxTokens",
 ];
 
-/// Pi / Oh-My-Pi 的 models schema 只接受 `text` 或 `text + image`。
+/// Pi 的 models schema 只接受 `text` 或 `text + image`。
 /// 其它通用目录模态（pdf/audio/video）不能写入 Pi 家族配置。
 fn normalize_input_modalities(input: &[String]) -> Vec<String> {
     let has_text = input.iter().any(|value| value == "text");
@@ -49,12 +45,8 @@ fn normalize_input_modalities(input: &[String]) -> Vec<String> {
 /* ===== Paths ===== */
 
 struct FamilyPaths {
-    /// 模型配置文件（存在者优先，否则取默认名）。
+    /// 模型配置文件。
     models: PathBuf,
-    /// models 文件是否按 YAML 读写。
-    yaml: bool,
-    /// OMP 的模型配置可能包含明文 apiKey，写入后必须限制为当前用户可读写。
-    private_models: bool,
     auth: PathBuf,
     /// 默认模型 settings（仅 Pi）。
     settings: Option<PathBuf>,
@@ -69,37 +61,9 @@ fn family_paths(agent: ModelConfigAgent) -> Result<FamilyPaths, String> {
     match agent {
         ModelConfigAgent::Pi => Ok(FamilyPaths {
             models: home.join(".pi/agent/models.json"),
-            yaml: false,
-            private_models: false,
             auth: home.join(".pi/agent/auth.json"),
             settings: Some(home.join(".pi/agent/settings.json")),
         }),
-        ModelConfigAgent::OhMyPi => {
-            let base = home.join(".omp/agent");
-            let yml = base.join("models.yml");
-            let yaml = base.join("models.yaml");
-            let legacy = base.join("models.json");
-            let models = if yml.exists() {
-                yml
-            } else if yaml.exists() {
-                yaml
-            } else if legacy.exists() {
-                legacy
-            } else {
-                yml
-            };
-            let yaml_flag = matches!(
-                models.extension().and_then(|e| e.to_str()),
-                Some("yml") | Some("yaml")
-            );
-            Ok(FamilyPaths {
-                models,
-                yaml: yaml_flag,
-                private_models: true,
-                auth: base.join("auth.json"),
-                settings: None,
-            })
-        }
         ModelConfigAgent::Opencode => unreachable!("opencode 不走 Pi 家族后端"),
     }
 }
@@ -112,12 +76,8 @@ fn load_models_root(paths: &FamilyPaths) -> Result<(Value, bool), String> {
     }
     let raw = fs::read_to_string(&paths.models)
         .map_err(|e| format!("读取 {} 失败: {e}", paths.models.display()))?;
-    let v: Value = if paths.yaml {
-        serde_yaml::from_str(&raw)
-            .map_err(|e| format!("解析 {} 失败: {e}", paths.models.display()))?
-    } else {
-        json5::from_str(&raw).map_err(|e| format!("解析 {} 失败: {e}", paths.models.display()))?
-    };
+    let v: Value =
+        json5::from_str(&raw).map_err(|e| format!("解析 {} 失败: {e}", paths.models.display()))?;
     match v {
         Value::Object(_) => Ok((v, true)),
         _ => Err(format!("{} 根节点必须是对象", paths.models.display())),
@@ -125,16 +85,8 @@ fn load_models_root(paths: &FamilyPaths) -> Result<(Value, bool), String> {
 }
 
 fn write_models_root(paths: &FamilyPaths, root: &Value) -> Result<(), String> {
-    let text = if paths.yaml {
-        serde_yaml::to_string(root).map_err(|e| format!("序列化 YAML 失败: {e}"))?
-    } else {
-        let t = serde_json::to_string_pretty(root).map_err(|e| format!("序列化失败: {e}"))?;
-        format!("{t}\n")
-    };
-    atomic_write(&paths.models, &text)?;
-    if paths.private_models {
-        platform::set_owner_only_file(&paths.models);
-    }
+    let t = serde_json::to_string_pretty(root).map_err(|e| format!("序列化失败: {e}"))?;
+    atomic_write(&paths.models, &format!("{t}\n"))?;
     Ok(())
 }
 
@@ -172,82 +124,6 @@ fn provider_object_mut<'a>(
     entry
         .as_object_mut()
         .ok_or_else(|| format!("providers.{id} 必须是对象"))
-}
-
-/// 将旧版 OMP `auth.json` 的供应商密钥一次性迁移到模型配置。
-///
-/// 当前 OMP 对自定义模型的校验只认 `models.yml`/`models.yaml` 中的
-/// `apiKey`（可为环境变量名或字面密钥），因此迁移成功后删除旧条目，
-/// 避免两个文件长期成为并行事实来源。显式 `auth: none` 不会被覆盖。
-fn migrate_omp_legacy_auth(paths: &FamilyPaths, root: &mut Value) -> Result<(), String> {
-    let provider_ids: Vec<String> = root
-        .get("providers")
-        .and_then(|providers| providers.as_object())
-        .map(|providers| {
-            providers
-                .iter()
-                .filter_map(|(provider_id, raw)| {
-                    let provider = raw.as_object()?;
-                    let has_models = provider
-                        .get("models")
-                        .and_then(|models| models.as_array())
-                        .map(|models| !models.is_empty())
-                        .unwrap_or(false);
-                    let auth_none =
-                        provider.get("auth").and_then(|value| value.as_str()) == Some("none");
-                    let has_api_key = provider
-                        .get("apiKey")
-                        .and_then(|value| value.as_str())
-                        .map(|value| !value.is_empty())
-                        .unwrap_or(false);
-                    (has_models && !auth_none && !has_api_key).then(|| provider_id.clone())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if provider_ids.is_empty() {
-        return Ok(());
-    }
-
-    let mut auth = load_auth_file(&paths.auth)?;
-    let mut models_changed = false;
-    let mut auth_changed = false;
-
-    for provider_id in provider_ids {
-        let Some(key) = auth_get_key(&auth, &provider_id) else {
-            continue;
-        };
-        let provider = provider_object_mut(root, &provider_id)?;
-        let auth_none = provider.get("auth").and_then(|value| value.as_str()) == Some("none");
-        let has_api_key = provider
-            .get("apiKey")
-            .and_then(|value| value.as_str())
-            .map(|value| !value.is_empty())
-            .unwrap_or(false);
-
-        if !auth_none && !has_api_key {
-            provider.insert("apiKey".into(), Value::String(key));
-            models_changed = true;
-        }
-        auth.remove(&provider_id);
-        auth_changed = true;
-    }
-
-    if models_changed {
-        write_models_root(paths, root)?;
-    }
-    if auth_changed {
-        save_auth_file(&paths.auth, &auth)?;
-    }
-    Ok(())
-}
-
-fn remove_omp_legacy_auth(paths: &FamilyPaths, provider_id: &str) -> Result<(), String> {
-    let mut auth = load_auth_file(&paths.auth)?;
-    if auth.remove(provider_id).is_some() {
-        save_auth_file(&paths.auth, &auth)?;
-    }
-    Ok(())
 }
 
 /* ===== Parse view ===== */
@@ -347,10 +223,7 @@ pub fn get_config(agent: ModelConfigAgent) -> Result<AgentModelConfigView, Strin
     let paths = family_paths(agent)?;
     let installed = crate::sniff::is_agent_installed(agent.id());
     let exists = paths.models.exists();
-    let mut warnings = Vec::new();
-    if paths.yaml {
-        warnings.push("当前配置为 YAML；保存后注释会丢失。".into());
-    }
+    let warnings = Vec::new();
 
     let (model, small_model) = read_defaults(&paths);
 
@@ -373,37 +246,20 @@ pub fn get_config(agent: ModelConfigAgent) -> Result<AgentModelConfigView, Strin
         return Ok(not_installed_view());
     }
 
-    let (mut root, _) = load_models_root(&paths)?;
-    if paths.private_models && paths.models.exists() {
-        platform::set_owner_only_file(&paths.models);
-    }
-    let mut migration_failed = false;
-    if agent == ModelConfigAgent::OhMyPi {
-        if let Err(error) = migrate_omp_legacy_auth(&paths, &mut root) {
-            warnings.push(format!("OMP 旧版密钥迁移失败，暂不展示供应商: {error}"));
-            migration_failed = true;
-        }
-    }
-    let auth = if agent == ModelConfigAgent::Pi {
-        load_auth_file(&paths.auth).unwrap_or_default()
-    } else {
-        Map::new()
-    };
-    let providers = if migration_failed {
-        Vec::new()
-    } else {
-        root.get("providers")
-            .and_then(|p| p.as_object())
-            .map(|obj| {
-                let mut list: Vec<_> = obj
-                    .iter()
-                    .map(|(id, raw)| parse_provider(id, raw, &auth))
-                    .collect();
-                list.sort_by(|a, b| a.id.cmp(&b.id));
-                list
-            })
-            .unwrap_or_default()
-    };
+    let (root, _) = load_models_root(&paths)?;
+    let auth = load_auth_file(&paths.auth).unwrap_or_default();
+    let providers = root
+        .get("providers")
+        .and_then(|p| p.as_object())
+        .map(|obj| {
+            let mut list: Vec<_> = obj
+                .iter()
+                .map(|(id, raw)| parse_provider(id, raw, &auth))
+                .collect();
+            list.sort_by(|a, b| a.id.cmp(&b.id));
+            list
+        })
+        .unwrap_or_default();
 
     Ok(AgentModelConfigView {
         agent: agent.id().into(),
@@ -437,11 +293,7 @@ pub fn upsert_provider(
     let paths = family_paths(agent)?;
     let (mut root, _) = load_models_root(&paths)?;
 
-    if agent == ModelConfigAgent::OhMyPi {
-        migrate_omp_legacy_auth(&paths, &mut root)?;
-    }
-
-    // Rename: move previous_id → id（Pi 还需同步移动 auth 条目）
+    // Rename: move previous_id → id（同步移动 auth 条目）
     if let Some(prev) = payload
         .previous_id
         .as_ref()
@@ -455,12 +307,10 @@ pub fn upsert_provider(
             }
             map.insert(id.clone(), old);
         }
-        if agent != ModelConfigAgent::OhMyPi {
-            let mut auth = load_auth_file(&paths.auth)?;
-            if let Some(a) = auth.remove(&prev) {
-                auth.insert(id.clone(), a);
-                save_auth_file(&paths.auth, &auth)?;
-            }
+        let mut auth = load_auth_file(&paths.auth)?;
+        if let Some(a) = auth.remove(&prev) {
+            auth.insert(id.clone(), a);
+            save_auth_file(&paths.auth, &auth)?;
         }
     }
 
@@ -478,31 +328,21 @@ pub fn upsert_provider(
         // OpenCode 特有字段（npm/setCacheKey/timeout/whitelist/blacklist）在 Pi 家族中忽略。
     }
 
-    // Pi 的 config 内 apiKey 多为环境变量名，保持原样不动。OMP 的
-    // apiKey 是自定义模型的必需配置字段，模型配置是唯一运行时来源。
+    // Pi 的 config 内 apiKey 多为环境变量名，保持原样不动；密钥写入 auth.json。
     if let Some(ref key) = payload.api_key {
-        if agent == ModelConfigAgent::OhMyPi {
-            let provider = provider_object_mut(&mut root, &id)?;
-            if key.is_empty() {
-                provider.remove("apiKey");
-            } else {
-                provider.insert("apiKey".into(), Value::String(key.clone()));
-            }
+        let mut auth = load_auth_file(&paths.auth)?;
+        if key.is_empty() {
+            auth.remove(&id);
         } else {
-            let mut auth = load_auth_file(&paths.auth)?;
-            if key.is_empty() {
-                auth.remove(&id);
-            } else {
-                auth.insert(
-                    id.clone(),
-                    json!({
-                        "type": "api_key",
-                        "key": key,
-                    }),
-                );
-            }
-            save_auth_file(&paths.auth, &auth)?;
+            auth.insert(
+                id.clone(),
+                json!({
+                    "type": "api_key",
+                    "key": key,
+                }),
+            );
         }
+        save_auth_file(&paths.auth, &auth)?;
     }
 
     write_models_root(&paths, &root)?;
@@ -537,10 +377,7 @@ pub fn delete_provider(
         return Err(format!("未找到供应商 `{id}`"));
     }
     write_models_root(&paths, &root)?;
-    if agent == ModelConfigAgent::OhMyPi {
-        remove_omp_legacy_auth(&paths, &id)?;
-    }
-    if delete_auth && agent != ModelConfigAgent::OhMyPi {
+    if delete_auth {
         let mut auth = load_auth_file(&paths.auth)?;
         auth.remove(&id);
         save_auth_file(&paths.auth, &auth)?;
@@ -663,12 +500,6 @@ pub fn upsert_model(
         }
     }
 
-    // 兼容在 AgentBuddy 修复前创建的 OMP provider：添加模型前，将旧
-    // auth.json 密钥迁移到模型配置；迁移成功后旧条目会被清理。
-    if agent == ModelConfigAgent::OhMyPi {
-        migrate_omp_legacy_auth(&paths, &mut root)?;
-    }
-
     write_models_root(&paths, &root)?;
     Ok(AgentActionResult {
         ok: true,
@@ -719,13 +550,11 @@ pub fn delete_model(
 pub fn get_provider_secret(agent: ModelConfigAgent, provider_id: String) -> Result<String, String> {
     let id = provider_id.trim().to_string();
     let paths = family_paths(agent)?;
-    if agent != ModelConfigAgent::OhMyPi {
-        let auth = load_auth_file(&paths.auth)?;
-        if let Some(k) = auth_get_key(&auth, &id) {
-            return Ok(k);
-        }
+    let auth = load_auth_file(&paths.auth)?;
+    if let Some(k) = auth_get_key(&auth, &id) {
+        return Ok(k);
     }
-    // Pi 回退到配置侧 apiKey；OMP 以配置侧 apiKey 作为唯一来源。
+    // Pi 回退到配置侧 apiKey。
     let (root, _) = load_models_root(&paths)?;
     if let Some(k) = root
         .pointer(&format!("/providers/{id}/apiKey"))
@@ -766,10 +595,6 @@ pub fn set_defaults(
     payload: SetDefaultsPayload,
 ) -> Result<AgentActionResult, String> {
     match agent {
-        ModelConfigAgent::OhMyPi => Err(
-            "Oh-My-Pi 暂不支持可视化编辑默认模型，请在 omp 内使用 /model 或 omp config 命令管理。"
-                .into(),
-        ),
         ModelConfigAgent::Pi => {
             let paths = family_paths(agent)?;
             let sp = paths
@@ -838,7 +663,6 @@ pub fn reveal_config(agent: ModelConfigAgent) -> Result<AgentActionResult, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     // 触碰 HOME 环境的测试串行化：使用跨模块共享锁（见 config::TEST_HOME_LOCK）。
 
@@ -881,10 +705,6 @@ mod tests {
             }
             let _ = fs::remove_dir_all(&self.path);
         }
-    }
-
-    fn write_yaml(path: &Path, v: &Value) {
-        fs::write(path, serde_yaml::to_string(v).unwrap()).unwrap();
     }
 
     #[test]
@@ -1022,217 +842,5 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(h.path.join(".pi/agent/auth.json")).unwrap())
                 .unwrap();
         assert!(auth.get("deepseek").is_none());
-    }
-
-    #[test]
-    fn omp_model_upsert_syncs_auth_key_to_models_config() {
-        let h = TempHome::new(&[".omp/agent"]);
-        let models = h.path.join(".omp/agent/models.yml");
-        write_yaml(
-            &models,
-            &json!({
-                "providers": {
-                    "router": {
-                        "baseUrl": "http://127.0.0.1:16888",
-                        "api": "anthropic-messages",
-                        "models": [{"id": "existing-model"}]
-                    }
-                }
-            }),
-        );
-        fs::write(
-            h.path.join(".omp/agent/auth.json"),
-            r#"{"router":{"type":"api_key","key":"route-key-for-test"}}"#,
-        )
-        .unwrap();
-
-        let view = get_config(ModelConfigAgent::OhMyPi).unwrap();
-        assert_eq!(view.providers.len(), 1);
-        let migrated: Value = serde_yaml::from_str(&fs::read_to_string(&models).unwrap()).unwrap();
-        assert_eq!(
-            migrated
-                .pointer("/providers/router/apiKey")
-                .and_then(|value| value.as_str()),
-            Some("route-key-for-test")
-        );
-        let legacy_auth: Value =
-            serde_json::from_str(&fs::read_to_string(h.path.join(".omp/agent/auth.json")).unwrap())
-                .unwrap();
-        assert!(legacy_auth.get("router").is_none());
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&models).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600);
-        }
-
-        upsert_model(
-            ModelConfigAgent::OhMyPi,
-            UpsertModelPayload {
-                provider_id: "router".into(),
-                id: "claude-test".into(),
-                previous_id: None,
-                name: Some("Claude Test".into()),
-                limit_context: Some(128000.0),
-                limit_input: None,
-                limit_output: Some(8192.0),
-                modalities_input: Some(vec!["text".into()]),
-                modalities_output: None,
-                reasoning: Some(false),
-                tool_call: None,
-                attachment: None,
-                status: None,
-                thinking_type: None,
-                thinking_budget_tokens: None,
-                reasoning_effort: None,
-                text_verbosity: None,
-                variants: None,
-                extra_options: None,
-                replace_extra_options: None,
-            },
-        )
-        .unwrap();
-
-        let raw: Value = serde_yaml::from_str(&fs::read_to_string(&models).unwrap()).unwrap();
-        assert_eq!(
-            raw.pointer("/providers/router/apiKey")
-                .and_then(|value| value.as_str()),
-            Some("route-key-for-test")
-        );
-        let model_ids = raw
-            .pointer("/providers/router/models")
-            .and_then(|value| value.as_array())
-            .unwrap();
-        assert!(model_ids
-            .iter()
-            .any(|value| { value.get("id").and_then(|id| id.as_str()) == Some("claude-test") }));
-
-        set_provider_secret(ModelConfigAgent::OhMyPi, "router".into(), String::new()).unwrap();
-        let cleared: Value = serde_yaml::from_str(&fs::read_to_string(&models).unwrap()).unwrap();
-        assert!(cleared.pointer("/providers/router/apiKey").is_none());
-    }
-
-    #[test]
-    fn omp_legacy_auth_does_not_override_auth_none() {
-        let h = TempHome::new(&[".omp/agent"]);
-        let models = h.path.join(".omp/agent/models.yml");
-        write_yaml(
-            &models,
-            &json!({
-                "providers": {
-                    "local": {
-                        "baseUrl": "http://127.0.0.1:11434",
-                        "api": "openai-completions",
-                        "auth": "none",
-                        "models": [{"id": "local-model"}]
-                    }
-                }
-            }),
-        );
-        fs::write(
-            h.path.join(".omp/agent/auth.json"),
-            r#"{"local":{"type":"api_key","key":"legacy-key"}}"#,
-        )
-        .unwrap();
-
-        let view = get_config(ModelConfigAgent::OhMyPi).unwrap();
-        assert_eq!(view.providers.len(), 1);
-        let raw: Value = serde_yaml::from_str(&fs::read_to_string(&models).unwrap()).unwrap();
-        assert!(raw.pointer("/providers/local/apiKey").is_none());
-    }
-
-    #[test]
-    fn omp_legacy_auth_migration_failure_hides_providers() {
-        let h = TempHome::new(&[".omp/agent"]);
-        let models = h.path.join(".omp/agent/models.yml");
-        write_yaml(
-            &models,
-            &json!({
-                "providers": {
-                    "router": {
-                        "baseUrl": "http://127.0.0.1:16888",
-                        "api": "anthropic-messages",
-                        "models": [{"id": "claude-test"}]
-                    }
-                }
-            }),
-        );
-        fs::write(h.path.join(".omp/agent/auth.json"), "not-json").unwrap();
-
-        let view = get_config(ModelConfigAgent::OhMyPi).unwrap();
-        assert!(view.providers.is_empty());
-        assert!(view
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("迁移失败")));
-    }
-
-    #[test]
-    fn omp_yaml_roundtrip_preserves_unknown_fields() {
-        let h = TempHome::new(&[".omp/agent"]);
-        let models = h.path.join(".omp/agent/models.yml");
-        let initial = json!({
-            "providers": {
-                "qiniu": {
-                    "baseUrl": "https://api.qnaigc.com/v1",
-                    "api": "openai-completions",
-                    "authHeader": true,
-                    "models": [
-                        {
-                            "id": "gpt-x",
-                            "name": "GPT X",
-                            "reasoning": true,
-                            "input": ["text", "image"],
-                            "contextWindow": 400000,
-                            "maxTokens": 128000,
-                            "compat": { "supportsToolChoice": false }
-                        }
-                    ]
-                }
-            }
-        });
-        write_yaml(&models, &initial);
-
-        let view = get_config(ModelConfigAgent::OhMyPi).unwrap();
-        assert_eq!(view.agent, "oh-my-pi");
-        assert!(view.defaults_supported == false);
-        let p = &view.providers[0];
-        assert_eq!(p.models[0].limit_context, Some(400000.0));
-        assert!(p.models[0].extra_options.contains_key("compat"));
-
-        // Delete model; provider-level unknown fields must survive
-        delete_model(ModelConfigAgent::OhMyPi, "qiniu".into(), "gpt-x".into()).unwrap();
-        let raw = fs::read_to_string(&models).unwrap();
-        let v: Value = serde_yaml::from_str(&raw).unwrap();
-        let providers = v.get("providers").and_then(|p| p.as_object()).unwrap();
-        let q = providers.get("qiniu").and_then(|q| q.as_object()).unwrap();
-        let models_arr = q.get("models").and_then(|m| m.as_array()).unwrap();
-        assert!(models_arr.is_empty());
-        assert_eq!(q.get("authHeader").and_then(|x| x.as_bool()), Some(true));
-
-        // Delete provider entirely
-        delete_provider(ModelConfigAgent::OhMyPi, "qiniu".into(), false).unwrap();
-        let raw = fs::read_to_string(&models).unwrap();
-        let v: Value = serde_yaml::from_str(&raw).unwrap();
-        let providers = v.get("providers").and_then(|p| p.as_object()).unwrap();
-        assert!(providers.get("qiniu").is_none());
-        let _ = &h;
-    }
-
-    #[test]
-    fn omp_defaults_rejected() {
-        let _h = TempHome::new(&[".omp/agent"]);
-        let err = set_defaults(
-            ModelConfigAgent::OhMyPi,
-            SetDefaultsPayload {
-                model: Some("a/b".into()),
-                small_model: None,
-                enabled_providers: None,
-                disabled_providers: None,
-            },
-        )
-        .unwrap_err();
-        assert!(err.contains("omp"));
     }
 }

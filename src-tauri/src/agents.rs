@@ -9,7 +9,7 @@
 pub enum McpDialect {
     /// Codex: `config.toml` → `[mcp_servers.*]`
     TomlMcpServers,
-    /// Claude Desktop / CodeBuddy CN / WorkBuddy: 顶层 `mcpServers`
+    /// Claude Desktop / WorkBuddy / Pi: 顶层 `mcpServers`
     JsonMcpServers,
     /// OpenCode: 顶层 `mcp`（JSON/JSONC）
     JsonMcp,
@@ -26,8 +26,6 @@ pub enum McpPath {
     Fixed(&'static str),
     /// OpenCode: `~/.config/opencode/opencode.{jsonc,json}`（存在优先，默认 `.json`）。
     OpencodeConfig,
-    /// CodeBuddy CN: `~/.codebuddy/{.mcp.json,mcp.json}`（存在优先，默认 `.mcp.json`）。
-    CodebuddyMcp,
     /// Claude Desktop: 在 `~/Library/Application Support` 下扫描。
     ClaudeDesktopScan,
 }
@@ -140,16 +138,6 @@ pub fn windows_bin_candidates(spec: &AgentSpec) -> Vec<std::path::PathBuf> {
             push(
                 &mut out,
                 windows_env_path("LOCALAPPDATA", "Programs/Antigravity/Antigravity.exe"),
-            );
-        }
-        "codebuddy-cn" => {
-            push(
-                &mut out,
-                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy CN"),
-            );
-            push(
-                &mut out,
-                windows_env_path("LOCALAPPDATA", "Programs/CodeBuddy CN/CodeBuddy.exe"),
             );
         }
         "workbuddy" => {
@@ -272,26 +260,7 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
-    // 7. CodeBuddy CN（腾讯国内），独占 ~/.codebuddy
-    // （原国际版 CodeBuddy 已移除；历史共享根标识保留，旧配置不受影响）
-    AgentSpec {
-        name: "codebuddy-cn",
-        display_name: "CodeBuddy CN",
-        icon: "Cn",
-        bin_paths: &["/Applications/CodeBuddy CN.app"],
-        search_names: &[],
-        config_paths: &["~/.codebuddy"],
-        scan_app_support: false,
-        mcp: McpSpec {
-            dialect: McpDialect::JsonMcpServers,
-            path: McpPath::CodebuddyMcp,
-            jsonc: false,
-        },
-        skills_roots: &["~/.codebuddy/skills"],
-        skills_supported: true,
-        shared_root: Some("codebuddy-shared"),
-    },
-    // 8. WorkBuddy（腾讯）
+    // 6. WorkBuddy（腾讯）
     AgentSpec {
         name: "workbuddy",
         display_name: "WorkBuddy",
@@ -309,7 +278,7 @@ static AGENTS: &[AgentSpec] = &[
         skills_supported: true,
         shared_root: None,
     },
-    // 9. Pi（badlogic/pi-mono，CLI-only）
+    // 7. Pi（badlogic/pi-mono，CLI-only）
     // MCP 非内置：社区标准 pi-mcp-adapter 扩展读取 `~/.pi/agent/mcp.json`（标准 mcpServers）。
     AgentSpec {
         name: "pi",
@@ -329,29 +298,6 @@ static AGENTS: &[AgentSpec] = &[
             jsonc: false,
         },
         skills_roots: &["~/.pi/agent/skills"],
-        skills_supported: true,
-        shared_root: None,
-    },
-    // 10. Oh-My-Pi（can1357/oh-my-pi，CLI `omp`，Pi 的全功能 fork）
-    AgentSpec {
-        name: "oh-my-pi",
-        display_name: "Oh-My-Pi",
-        icon: "Om",
-        bin_paths: &[
-            "~/.bun/bin/omp",
-            "~/.local/bin/omp",
-            "/usr/local/bin/omp",
-            "/opt/homebrew/bin/omp",
-        ],
-        search_names: &["omp"],
-        config_paths: &["~/.omp"],
-        scan_app_support: false,
-        mcp: McpSpec {
-            dialect: McpDialect::JsonMcpServers,
-            path: McpPath::Fixed(".omp/agent/mcp.json"),
-            jsonc: false,
-        },
-        skills_roots: &["~/.omp/agent/skills"],
         skills_supported: true,
         shared_root: None,
     },

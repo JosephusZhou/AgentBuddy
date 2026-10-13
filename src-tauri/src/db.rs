@@ -244,7 +244,7 @@ pub fn save_agents(agents: &[SniffResult]) -> Result<(), String> {
 /// 删除已从注册表移除的 agent 的历史缓存行（版本升级后的自愈）。
 ///
 /// 背景：`save_agents` 只做 upsert、从不删除——旧版本扫描缓存（如 kiro /
-/// codebuddy）在注册表移除对应 agent 后仍永远残留，导致 Agent 管理页
+/// deveco-code 等）在注册表移除对应 agent 后仍永远残留，导致 Agent 管理页
 /// （get_cached_agents）继续展示已移除的 agent。启动时调用一次本函数清除。
 /// 手动添加的同名 agent 会一并被删——与已移除的注册表项同名本就冲突，可接受。
 pub fn purge_removed_agents(names: &[&str]) -> Result<usize, String> {
@@ -433,6 +433,59 @@ pub fn delete_mcp_server(id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM mcp_servers WHERE id = ?1", params![id])
         .map_err(|e| format!("Failed to delete mcp: {}", e))?;
     Ok(())
+}
+
+/// 从所有 `mcp_servers.applied_agents`（JSON 数组）中剔除已下线的 agent 名，
+/// 供版本升级清理使用。返回被改写的行数。
+pub fn scrub_mcp_applied_agents(remove: &[&str]) -> Result<usize, String> {
+    if remove.is_empty() {
+        return Ok(0);
+    }
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare("SELECT id, applied_agents FROM mcp_servers")
+        .map_err(|e| format!("Failed to prepare mcp scrub: {}", e))?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| format!("Failed to query mcp servers: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect mcp servers: {}", e))?;
+
+    let mut changed = 0usize;
+    for (id, raw) in rows {
+        let agents: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        let kept: Vec<String> = agents
+            .iter()
+            .filter(|a| !remove.contains(&a.as_str()))
+            .cloned()
+            .collect();
+        if kept.len() != agents.len() {
+            let new_raw = serde_json::to_string(&kept).unwrap_or_else(|_| "[]".into());
+            conn.execute(
+                "UPDATE mcp_servers SET applied_agents = ?1 WHERE id = ?2",
+                params![new_raw, id],
+            )
+            .map_err(|e| format!("Failed to update mcp applied_agents: {}", e))?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+/// 删除指定 `agent_type` 的全局供应商绑定行，供版本升级清理使用。
+pub fn delete_agent_provider_bindings_by_agent_type(agent_types: &[&str]) -> Result<usize, String> {
+    if agent_types.is_empty() {
+        return Ok(0);
+    }
+    let conn = get_connection()?;
+    let placeholders = agent_types
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("DELETE FROM agent_provider_bindings WHERE agent_type IN ({placeholders})");
+    conn.execute(&sql, rusqlite::params_from_iter(agent_types.iter()))
+        .map_err(|e| format!("Failed to delete agent provider bindings: {}", e))
 }
 
 /* ===== WebDAV connections persistence ===== */
@@ -1248,10 +1301,10 @@ pub fn delete_provider_route_toggles(provider_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/* ===== Agent provider bindings (全局供应商 → opencode/pi/omp provider) ===== */
+/* ===== Agent provider bindings (全局供应商 → opencode/pi provider) ===== */
 
 /// A binding: one global ai_provider is linked to one provider entry inside
-/// another agent's config file (opencode / pi / oh-my-pi).
+/// another agent's config file (opencode / pi).
 #[derive(Debug, Clone)]
 pub struct AgentProviderBinding {
     /// Kept for completeness / future "list all bindings" views; current

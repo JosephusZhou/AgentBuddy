@@ -275,7 +275,7 @@ pub struct ClaudeEnvMcpStatusResult {
 /// Models exposed by an OpenAI-compatible endpoint configured for a Claude environment.
 ///
 /// 该结构是**临时配置**路径下的模型来源——当 Claude 环境 / Codex 环境 / 模型配置页
-/// （OpenCode / Pi / Oh-My-Pi）选择手填 baseUrl + apiKey 而非关联 AI 供应商库时，
+/// （OpenCode / Pi）选择手填 baseUrl + apiKey 而非关联 AI 供应商库时，
 /// 通过远端拉取 `/v1/models` 填入。**不**适用于"软件内
 /// 已配置 AI 供应商"——后者以 `ai_providers.custom_models_json` 为唯一来源。
 #[derive(Debug, Clone, Serialize)]
@@ -2786,7 +2786,7 @@ pub fn get_mcp_sync_status() -> Result<ClaudeEnvMcpStatusResult, String> {
 
 // 远端拉取实现（fetch_remote_models / models_endpoint_urls /
 // parse_remote_model_ids）仅服务于"临时配置"路径：
-// Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi / Oh-My-Pi）当用户不关联
+// Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi）当用户不关联
 // AI 供应商库、手填 baseUrl + apiKey 时使用。本函数**不**被 AI 供应商库本身
 // （`ai_providers`）调用——AI 供应商库以 `custom_models_json` 为唯一来源。
 

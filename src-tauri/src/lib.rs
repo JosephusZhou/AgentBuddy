@@ -22,6 +22,7 @@ mod project_config;
 mod route_aggregation;
 mod skills;
 mod sniff;
+mod upgrade;
 mod webdav;
 
 #[tauri::command]
@@ -767,7 +768,7 @@ async fn get_claude_env_mcp_status() -> Result<claude_env::ClaudeEnvMcpStatusRes
 }
 
 /// 远端拉取模型列表。仅服务于"临时配置"路径：Claude 环境 / Codex 环境 / 模型配置页
-/// （OpenCode / Pi / Oh-My-Pi）在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
+/// （OpenCode / Pi）在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
 /// **不**适用于"已配置 AI 供应商"——后者以 `custom_models_json` 为唯一来源。
 #[tauri::command]
 async fn fetch_claude_env_remote_models(
@@ -779,7 +780,7 @@ async fn fetch_claude_env_remote_models(
         .map_err(|e| format!("拉取远端模型任务失败: {e}"))?
 }
 
-/* ===== Agent 通用模型配置（OpenCode / Pi / Oh-My-Pi）===== */
+/* ===== Agent 通用模型配置（OpenCode / Pi）===== */
 
 #[tauri::command]
 async fn get_agent_model_config(
@@ -1120,7 +1121,7 @@ async fn reorder_ai_providers(
     Ok(())
 }
 
-/* ===== Agent provider bindings (全局供应商 → opencode/pi/omp 绑定) ===== */
+/* ===== Agent provider bindings (全局供应商 → opencode/pi 绑定) ===== */
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1783,6 +1784,16 @@ pub fn run() {
                 eprintln!("[agent-buddy] failed to ensure app config: {}", err);
             }
 
+            // 版本升级适配清理：读取 config.json 的 version 字段，按升序执行
+            // 存量版本与运行版本之间的各版本适配步骤（清理配置与数据库中的
+            // 历史下线 agent 残留等），全部成功后把运行版本写回配置。
+            if let Err(err) = config::run_startup_config_upgrade() {
+                eprintln!(
+                    "[agent-buddy] failed to run startup config upgrade: {}",
+                    err
+                );
+            }
+
             // Models.dev 目录由后端统一维护：启动时优先使用 7 天内的磁盘缓存，
             // 过期或缺失时后台刷新一次，避免各页面首次打开时重复请求。
             tauri::async_runtime::spawn_blocking(|| {
@@ -1792,8 +1803,8 @@ pub fn run() {
             });
 
             // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
-            // 否则 Agent 管理页会一直展示 kiro / codebuddy / deveco-code 等已下线的 agent）。
-            if let Err(err) = db::purge_removed_agents(&["kiro", "codebuddy", "deveco-code"]) {
+            // 否则 Agent 管理页会一直展示 kiro / deveco-code 等已下线的 agent）。
+            if let Err(err) = db::purge_removed_agents(&["kiro", "deveco-code"]) {
                 eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
             }
 

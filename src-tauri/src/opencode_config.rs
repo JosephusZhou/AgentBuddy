@@ -5,7 +5,7 @@
 //! - 目录：Models.dev `https://models.dev/api.json`（精简后返回，磁盘 + 进程缓存）
 //!
 //! 列表 DTO **永不**回传明文 API Key；编辑时用 `get_provider_secret` 按需拉取。
-//! Pi / Oh-My-Pi 后端见 `pi_model_config`，共用本模块的 DTO 与 IO helper。
+//! Pi 后端见 `pi_model_config`，共用本模块的 DTO 与 IO helper。
 
 use crate::platform;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ const CATALOG_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentModelConfigView {
-    /// agent 标识：opencode | pi | oh-my-pi
+    /// agent 标识：opencode | pi
     pub agent: String,
     pub config_path: String,
     pub config_exists: bool,

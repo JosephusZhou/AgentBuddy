@@ -668,7 +668,7 @@ fn build_generic_agent_unit(
             }
         }
         // OpenCode auth（配置目录外）与 Pi 家族 auth/模型文件
-        if matches!(spec.name, "opencode" | "pi" | "oh-my-pi") {
+        if matches!(spec.name, "opencode" | "pi") {
             if let Some(auth) = agent_auth_path(spec.name) {
                 if auth.is_file() {
                     bytes = bytes.saturating_add(file_size(&auth));
@@ -708,7 +708,7 @@ fn build_generic_agent_unit(
         kind: "agent".into(),
         available,
         selected_by_default: is_found && available,
-        contains_secrets: secrets || matches!(spec.name, "opencode" | "codex" | "pi" | "oh-my-pi"),
+        contains_secrets: secrets || matches!(spec.name, "opencode" | "codex" | "pi"),
         estimated_bytes: bytes,
         path_summary: paths.into_iter().take(3).collect::<Vec<_>>().join(" · "),
         warnings: if is_found {
@@ -832,18 +832,17 @@ fn resolve_sub2api_root(settings: &BackupSettings) -> Option<PathBuf> {
 }
 
 /// 配置目录之外的 auth.json：OpenCode 存于 `~/.local/share/opencode`；
-/// Pi / Oh-My-Pi 的 auth 在各自 agent 目录内，但仍统一登记以便清单与打包。
+/// Pi 的 auth 在 agent 目录内，但仍统一登记以便清单与打包。
 fn agent_auth_path(agent_name: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     Some(match agent_name {
         "opencode" => home.join(".local/share/opencode/auth.json"),
         "pi" => home.join(".pi/agent/auth.json"),
-        "oh-my-pi" => home.join(".omp/agent/auth.json"),
         _ => return None,
     })
 }
 
-/// Pi 家族的供应商/默认模型文件（不随 MCP 文件打包，需单独纳入备份）。
+/// Pi 的供应商/默认模型文件（不随 MCP 文件打包，需单独纳入备份）。
 fn agent_model_files(agent_name: &str) -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
@@ -853,22 +852,6 @@ fn agent_model_files(agent_name: &str) -> Vec<PathBuf> {
             home.join(".pi/agent/models.json"),
             home.join(".pi/agent/settings.json"),
         ],
-        "oh-my-pi" => {
-            let base = home.join(".omp/agent");
-            let yml = base.join("models.yml");
-            let yaml = base.join("models.yaml");
-            let legacy = base.join("models.json");
-            let models = if yml.exists() {
-                yml
-            } else if yaml.exists() {
-                yaml
-            } else if legacy.exists() {
-                legacy
-            } else {
-                yml
-            };
-            vec![models]
-        }
         _ => Vec::new(),
     }
 }
@@ -2175,14 +2158,7 @@ fn collect_codex_env(env_id: &str, out: &mut Vec<FileEntry>, warnings: &mut Vec<
 
 fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Vec<String>) {
     let unit = format!("agent:{}", name);
-    // 历史兼容：旧备份/配置可能引用已移除的 codebuddy（与 codebuddy-cn 同一物理根 ~/.codebuddy）
-    let Some(spec) = agents::find(name).or_else(|| {
-        if name == "codebuddy" {
-            agents::find("codebuddy-cn")
-        } else {
-            None
-        }
-    }) else {
+    let Some(spec) = agents::find(name) else {
         warnings.push(format!("未知 Agent: {}", name));
         return;
     };
@@ -2220,8 +2196,8 @@ fn collect_generic_agent(name: &str, out: &mut Vec<FileEntry>, warnings: &mut Ve
         }
     }
 
-    // OpenCode / Pi 家族配置目录外的补充文件（auth、供应商模型配置）
-    if matches!(spec.name, "opencode" | "pi" | "oh-my-pi") {
+    // OpenCode / Pi 配置目录外的补充文件（auth、供应商模型配置）
+    if matches!(spec.name, "opencode" | "pi") {
         if let Some(auth) = agent_auth_path(spec.name) {
             push_file(
                 out,

@@ -230,13 +230,13 @@ function reasoningOptionsFor(
  *   - context/input/output 限制
  *   - 输入/输出模态（input modalities / output modalities）
  * 写回表单。
- * agent 无关：opencode / pi / oh-my-pi 三个 tab 共用本函数，因为 ModelForm 的 limit 字段对三者都是
+ * agent 无关：opencode / pi 两个 tab 共用本函数，因为 ModelForm 的 limit 字段对两者都是
  * 同一组（`limitContext` / `limitInput` / `limitOutput`），后端在 `UpsertModelPayload` 里也接受。
  * - 默认（overwrite=false）只补空白字段，避免覆盖用户已输入的值。
  * - overwrite=true 时强制按目录覆盖（含「把已填值清空」）：用于「从目录补全」按钮和
  *   供应商模型列表选择场景——必须支持从有 input 的模型切到无 input 的模型时把 input 字段清空。
  * - `agent` 用于决定 `limitInput` 与「输出模态」是否生效：
- *   - Pi / Oh-My-Pi 后端没有 limit.input / output modalities 字段，填了会被静默丢弃。
+ *   - Pi 后端没有 limit.input / output modalities 字段，填了会被静默丢弃。
  * - 模态字段（modalities）永远跟随 overwrite 一起被覆盖，因为目录里这些字段几乎齐全
  *   （都有至少 text），让用户从 picker 切换模型时能立刻看到正确的能力范围。
  * 目录未命中时返回原表单。
@@ -249,7 +249,7 @@ function applyCatalogLimits(
   const hit = findCatalogModel(catalog, form.providerId, form.id.trim());
   if (!hit) return form;
   const overwrite = options.overwrite ?? false;
-  // Pi / Oh-My-Pi 后端对 limit_input / output modalities 是 no-op，跳过避免无效回填
+  // Pi 后端对 limit_input / output modalities 是 no-op，跳过避免无效回填
   const supportsInputLimit = options.agent == null || options.agent === "opencode";
   const supportsOutputModality = options.agent == null || options.agent === "opencode";
   let next: ModelForm = form;
@@ -435,7 +435,7 @@ function normalizeOpenCodeNpm(npm: string | null | undefined): string {
   return npm === "@ai-sdk/anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai";
 }
 
-/** Pi / Oh-My-Pi 供应商允许配置的 HTTP API 格式。
+/** Pi 供应商允许配置的 HTTP API 格式。
  *
  * 2026-08-13 决策移除 Chat Completions（外部 OpenAI client 统一走 Responses）；
  * 2026-09-22 路由聚合新增 CC→CC 同协议透传后恢复该选项。
@@ -471,7 +471,7 @@ function normalizePiApi(api: string | null | undefined): string {
   return "openai-responses";
 }
 
-/** Pi/OMP 的 OpenAI 接口约定 Base URL 以 /v1 结尾。 */
+/** Pi 的 OpenAI 接口约定 Base URL 以 /v1 结尾。 */
 function ensureOpenAiV1(baseUrl: string): string {
   const value = baseUrl.trim();
   if (!value) return value;
@@ -646,7 +646,7 @@ function toggleModality(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
 }
 
-/** 将通用目录的输入能力收敛到 Pi/Oh-My-Pi 的 models.json schema。 */
+/** 将通用目录的输入能力收敛到 Pi 的 models.json schema。 */
 function normalizePiInputModalities(input: ReadonlyArray<string>): string[] {
   const hasText = input.includes("text");
   const hasImage = input.includes("image");
@@ -688,12 +688,6 @@ const AGENT_TABS: { id: ModelConfigAgentId; label: string; notInstalledHint: str
     notInstalledHint:
       "请先安装 Pi CLI（例如 npm install -g @earendil-works/pi-coding-agent，或 pi.dev/install.sh），安装后重新打开本页即可管理供应商与模型配置。",
   },
-  {
-    id: "oh-my-pi",
-    label: "Oh-My-Pi",
-    notInstalledHint:
-      "请先安装 Oh-My-Pi（例如 brew install can1357/tap/omp，或 omp.sh/install），安装后重新打开本页即可管理供应商与模型配置。",
-  },
 ];
 
 function agentLabel(id: ModelConfigAgentId): string {
@@ -705,8 +699,6 @@ function credentialLocationHint(id: ModelConfigAgentId): string {
   switch (id) {
     case "pi":
       return "~/.pi/agent/auth.json";
-    case "oh-my-pi":
-      return "~/.omp/agent/models.yml（或 models.yaml）";
     default:
       return "~/.local/share/opencode/auth.json";
   }
@@ -823,7 +815,7 @@ export default function ModelConfig() {
   const [modelSearch, setModelSearch] = useState("");
 
   // 模型弹窗内的「从供应商模型列表选择」：拉取当前供应商端点的模型列表
-  // **临时配置专用**：当 OpenCode / Pi / Oh-My-Pi provider **不**关联 AI 供应商库、
+  // **临时配置专用**：当 OpenCode / Pi provider **不**关联 AI 供应商库、
   // 手填 baseUrl + apiKey 时调用。"已配置 AI 供应商"路径以 `customModels` 为唯一来源。
   const [providerPickOpen, setProviderPickOpen] = useState(false);
   const [providerPickQuery, setProviderPickQuery] = useState("");
@@ -1117,7 +1109,7 @@ export default function ModelConfig() {
 
   /** 点击「从供应商模型列表选择」：从当前 provider 的 Base URL 拉取模型列表。
    *
-   * **临时配置专用**：仅当 OpenCode / Pi / Oh-My-Pi provider **不**关联 AI 供应商
+   * **临时配置专用**：仅当 OpenCode / Pi provider **不**关联 AI 供应商
    * 库、手填 baseUrl + apiKey 时使用。"已配置 AI 供应商"路径以 `customModels` 为
    * 唯一来源，**不**触发远端拉取。
    */
@@ -1365,8 +1357,8 @@ export default function ModelConfig() {
     ...EFFORT_PRESETS,
   ];
   // 当前表单的 providerId/modelId 是否在 Models.dev 目录里命中，且至少带有限制字段
-  // 该判断同时覆盖 opencode / pi / oh-my-pi 三个 tab：表单共享同一组 limit 字段
-  // Pi/Oh-My-Pi 后端不写 limitInput，故仅当 context/output 至少有一个非空时才显示按钮/提示
+  // 该判断同时覆盖 opencode / pi 两个 tab：表单共享同一组 limit 字段
+  // Pi 后端不写 limitInput，故仅当 context/output 至少有一个非空时才显示按钮/提示
   const catalogMatchForLimits = modelForm
     ? (() => {
         const hit = findCatalogModel(catalog, modelForm.providerId, modelForm.id);
@@ -1447,13 +1439,7 @@ export default function ModelConfig() {
             <div className="oc-defaults-main">
               <div className="oc-defaults-row">
                 <span className="oc-defaults-label">默认模型</span>
-                {view.defaultsSupported ? (
-                  <code className="oc-defaults-value">{view.model || "未设置"}</code>
-                ) : (
-                  <span className="oc-defaults-value">
-                    请在 omp 内使用 /model 或 omp config 命令管理
-                  </span>
-                )}
+                <code className="oc-defaults-value">{view.model || "未设置"}</code>
               </div>
               {view.smallModelSupported && (
                 <div className="oc-defaults-row">
@@ -1758,7 +1744,7 @@ export default function ModelConfig() {
                       disabled={busy}
                       placeholder="请选择 API 格式"
                     />
-                    <p className="oc-form-hint">选择后会写入 Pi/Oh-My-Pi 的供应商配置。</p>
+                    <p className="oc-form-hint">选择后会写入 Pi 的供应商配置。</p>
                   </div>
                 )}
                 <div className="form-group">
@@ -1880,17 +1866,8 @@ export default function ModelConfig() {
                     </button>
                   </div>
                   <p className="oc-form-hint">
-                    {agent === "oh-my-pi" ? (
-                      <>
-                        密钥写入模型配置供 OMP
-                        校验自定义模型；列表不会回传明文。清空输入并保存可删除密钥。
-                      </>
-                    ) : (
-                      <>
-                        密钥默认写入 <code>auth.json</code>
-                        ，列表不会回传明文。清空输入并保存可删除密钥。
-                      </>
-                    )}
+                    密钥默认写入 <code>auth.json</code>
+                    ，列表不会回传明文。清空输入并保存可删除密钥。
                   </p>
                   <button
                     type="button"
@@ -2527,23 +2504,17 @@ export default function ModelConfig() {
             <p>
               确定删除供应商 <strong>{deleteProvider?.id}</strong> 及其下全部模型？
             </p>
-            {agent === "oh-my-pi" ? (
-              <p className="oc-form-hint" style={{ marginTop: 12 }}>
-                OMP 的密钥保存在模型配置中，删除供应商时会一并清理旧版兼容密钥。
-              </p>
-            ) : (
-              <label className="ui-check" style={{ marginTop: 12 }}>
-                <input
-                  type="checkbox"
-                  className="ui-check-input"
-                  checked={deleteAuthToo}
-                  onChange={(e) => setDeleteAuthToo(e.target.checked)}
-                  disabled={busy}
-                />
-                <CheckGlyph />
-                <span className="ui-check-label">同时删除 auth.json 中的密钥</span>
-              </label>
-            )}
+            <label className="ui-check" style={{ marginTop: 12 }}>
+              <input
+                type="checkbox"
+                className="ui-check-input"
+                checked={deleteAuthToo}
+                onChange={(e) => setDeleteAuthToo(e.target.checked)}
+                disabled={busy}
+              />
+              <CheckGlyph />
+              <span className="ui-check-label">同时删除 auth.json 中的密钥</span>
+            </label>
           </div>
           <div className="modal-footer">
             <button

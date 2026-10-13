@@ -6,7 +6,6 @@
 //!
 //! Intentionally excluded (not typical repo-level skeletons):
 //! - `claude-desktop` — desktop app config, not project tree
-//! - `codebuddy` — 国际版已移除支持，仅保留 CodeBuddy CN
 //!
 //! See also `PROJECT_AI_CONFIG_IMPROVEMENTS.md`.
 
@@ -134,19 +133,6 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         }),
     },
     AgentProjectSpec {
-        name: "codebuddy-cn",
-        root_file: Some("AGENTS.md"),
-        config_dir: ".codebuddy",
-        full_sub_dirs: &["rules", "skills"],
-        shared_sub_dirs: SHARED_SUB_DIRS,
-        config_files: &[],
-        mcp: Some(ProjectMcpSpec {
-            file: ".mcp.json",
-            dialect: McpDialect::JsonMcpServers,
-            jsonc: false,
-        }),
-    },
-    AgentProjectSpec {
         name: "workbuddy",
         root_file: Some("AGENTS.md"),
         config_dir: ".workbuddy",
@@ -168,19 +154,6 @@ static AGENT_SPECS: &[AgentProjectSpec] = &[
         config_files: &[],
         mcp: Some(ProjectMcpSpec {
             file: ".pi/agent/mcp.json",
-            dialect: McpDialect::JsonMcpServers,
-            jsonc: false,
-        }),
-    },
-    AgentProjectSpec {
-        name: "oh-my-pi",
-        root_file: Some("AGENTS.md"),
-        config_dir: ".omp/agent",
-        full_sub_dirs: &["skills"],
-        shared_sub_dirs: PI_SHARED_SUB_DIRS,
-        config_files: &[],
-        mcp: Some(ProjectMcpSpec {
-            file: ".omp/agent/mcp.json",
             dialect: McpDialect::JsonMcpServers,
             jsonc: false,
         }),
@@ -642,8 +615,8 @@ fn run_init(
 
     // --- Project-level MCP files (merge by server title; never gated on overwrite) ---
     if !mcp_servers.is_empty() {
-        // Dedupe target files across selected agents (claude-code / codebuddy-cn /
-        // workbuddy all share the repo-root `.mcp.json`).
+        // Dedupe target files across selected agents (claude-code / workbuddy
+        // both share the repo-root `.mcp.json`).
         let mut mcp_files: Vec<(PathBuf, McpDialect, bool)> = Vec::new();
         for req in selected_agents {
             let spec = match find_spec(&req.name) {
@@ -828,9 +801,9 @@ mod tests {
     }
 
     #[test]
-    fn full_mode_creates_shared_guide_and_codebuddy_cn_dir() {
+    fn full_mode_creates_shared_guide_and_workbuddy_dir() {
         let base = scratch("full-dedupe");
-        let agents = vec![req("codebuddy-cn"), req("codex"), req("opencode")];
+        let agents = vec![req("workbuddy"), req("codex"), req("opencode")];
         let result = init_project_config(
             base.to_str().unwrap(),
             &agents,
@@ -850,9 +823,9 @@ mod tests {
             "# AGENTS.md\n\nProject-specific guidance for AI coding agents working on this repository.\n"
         );
 
-        assert!(base.join(".codebuddy").is_dir());
-        assert!(base.join(".codebuddy/rules").is_dir());
-        assert!(base.join(".codebuddy/skills").is_dir());
+        assert!(base.join(".workbuddy").is_dir());
+        assert!(base.join(".workbuddy/rules").is_dir());
+        assert!(base.join(".workbuddy/skills").is_dir());
         assert!(base.join(".codex/instructions.md").is_file());
         assert!(base.join(".opencode/agent").is_dir());
 
@@ -911,9 +884,9 @@ mod tests {
     }
 
     #[test]
-    fn full_mode_creates_pi_family_dirs_and_mcp_files() {
-        let base = scratch("pi-family-full");
-        let agents = vec![req("pi"), req("oh-my-pi")];
+    fn full_mode_creates_pi_dirs_and_mcp_files() {
+        let base = scratch("pi-full");
+        let agents = vec![req("pi")];
         let result = init_project_config(
             base.to_str().unwrap(),
             &agents,
@@ -928,13 +901,11 @@ mod tests {
 
         assert!(base.join("AGENTS.md").is_file());
         assert!(base.join(".pi/agent/skills").is_dir());
-        assert!(base.join(".omp/agent/skills").is_dir());
 
-        for path in [".pi/agent/mcp.json", ".omp/agent/mcp.json"] {
-            let doc: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(base.join(path)).unwrap()).unwrap();
-            assert_eq!(doc["mcpServers"]["shared-server"]["command"], "npx");
-        }
+        let path = ".pi/agent/mcp.json";
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(base.join(path)).unwrap()).unwrap();
+        assert_eq!(doc["mcpServers"]["shared-server"]["command"], "npx");
 
         cleanup(&base);
     }
@@ -1074,11 +1045,11 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn symlink_mode_uses_nested_relative_links_for_pi_family() {
-        let base = scratch("pi-family-symlink");
+    fn symlink_mode_uses_nested_relative_links_for_pi() {
+        let base = scratch("pi-symlink");
         let result = init_project_config(
             base.to_str().unwrap(),
-            &[req("pi"), req("oh-my-pi")],
+            &[req("pi")],
             &InitMode::Symlink,
             false,
             &[],
@@ -1088,19 +1059,18 @@ mod tests {
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
 
-        for config_dir in [".pi/agent", ".omp/agent"] {
-            let link = base.join(config_dir).join("skills");
-            assert!(fs::symlink_metadata(&link)
-                .unwrap()
-                .file_type()
-                .is_symlink());
-            assert_eq!(
-                fs::read_link(&link).unwrap(),
-                PathBuf::from("../../.agents/skills")
-            );
-            assert!(base.join(config_dir).join("../../.agents/skills").is_dir());
-            assert!(!base.join(config_dir).join("commands").exists());
-        }
+        let config_dir = ".pi/agent";
+        let link = base.join(config_dir).join("skills");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            PathBuf::from("../../.agents/skills")
+        );
+        assert!(base.join(config_dir).join("../../.agents/skills").is_dir());
+        assert!(!base.join(config_dir).join("commands").exists());
         assert!(base.join(".agents/skills").is_dir());
 
         cleanup(&base);
@@ -1153,7 +1123,7 @@ mod tests {
     #[test]
     fn mcp_written_to_project_files_and_deduped() {
         let base = scratch("mcp");
-        let agents = vec![req("claude-code"), req("codebuddy-cn"), req("codex")];
+        let agents = vec![req("claude-code"), req("workbuddy"), req("codex")];
         let mcps = vec![mcp_draft("shared-server")];
         let result = init_project_config(
             base.to_str().unwrap(),
@@ -1167,7 +1137,7 @@ mod tests {
         .unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);
 
-        // claude-code + codebuddy-cn share the repo-root .mcp.json, written once
+        // claude-code + workbuddy share the repo-root .mcp.json, written once
         let mcp_json = base.join(".mcp.json");
         assert!(mcp_json.is_file());
         let doc: serde_json::Value =
@@ -1230,7 +1200,7 @@ mod tests {
         let sources = vec![("demo".to_string(), lib_skill.clone())];
         let result = run_init(
             &base,
-            &[req("claude-code"), req("codebuddy-cn")],
+            &[req("claude-code"), req("workbuddy")],
             &InitMode::Full,
             false,
             &[],
@@ -1259,7 +1229,7 @@ mod tests {
         let sources = vec![("demo".to_string(), lib_skill.clone())];
         let result = run_init(
             &base,
-            &[req("claude-code"), req("codebuddy-cn")],
+            &[req("claude-code"), req("workbuddy")],
             &InitMode::Full,
             false,
             &[],
@@ -1276,7 +1246,7 @@ mod tests {
         assert_eq!(fs::read_link(&store_entry).unwrap(), lib_skill);
 
         // Full mode: each agent's skills dir links to the shared store
-        for dir in [".claude", ".codebuddy"] {
+        for dir in [".claude", ".workbuddy"] {
             let link = base.join(dir).join("skills");
             assert!(
                 fs::symlink_metadata(&link)

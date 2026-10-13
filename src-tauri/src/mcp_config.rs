@@ -643,7 +643,8 @@ fn err(path: Option<PathBuf>, message: impl Into<String>) -> OpError {
     }
 }
 
-/// CodeBuddy / CodeBuddy CN share one config root — write once.
+/// 按 `shared_root` 对同一物理配置根的多个 agent 去重，只写一次（canonical 取注册表中
+/// 最靠前且本次被选中的 agent）。
 fn dedupe_write_targets(agents: &[String]) -> Vec<WriteTarget> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out = Vec::new();
@@ -716,24 +717,6 @@ fn resolve_target(agent: &str) -> Result<ResolvedTarget, OpError> {
                 path,
                 dialect,
                 jsonc: is_jsonc,
-            })
-        }
-        McpPath::CodebuddyMcp => {
-            let base = h.join(".codebuddy");
-            let dot = base.join(".mcp.json");
-            let plain = base.join("mcp.json");
-            // Prefer existing file; default to .mcp.json when neither exists
-            let path = if dot.exists() {
-                dot
-            } else if plain.exists() {
-                plain
-            } else {
-                dot
-            };
-            Ok(ResolvedTarget {
-                path,
-                dialect,
-                jsonc: false,
             })
         }
         McpPath::ClaudeDesktopScan => {
@@ -1840,13 +1823,11 @@ mod tests {
             "claude-desktop".into(),
             "opencode".into(),
             "antigravity".into(),
-            "codebuddy-cn".into(),
             "workbuddy".into(),
             "pi".into(),
-            "oh-my-pi".into(),
         ];
         let r = apply_mcp_to_agents(&draft_stdio(title), &agents);
-        assert_eq!(r.results.len(), 9, "{:?}", r.results);
+        assert_eq!(r.results.len(), 7, "{:?}", r.results);
         assert!(r.all_ok, "{:?}", r.results);
 
         // dialect-specific checks
@@ -1867,17 +1848,12 @@ mod tests {
         let codex = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
         assert!(codex.contains(title));
 
-        // Pi / Oh-My-Pi: standard mcpServers under agent dir
+        // Pi: standard mcpServers under agent dir
         let pi: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(home.join(".pi/agent/mcp.json")).unwrap(),
         )
         .unwrap();
         assert!(pi["mcpServers"][title]["command"].is_string());
-        let omp: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(home.join(".omp/agent/mcp.json")).unwrap(),
-        )
-        .unwrap();
-        assert!(omp["mcpServers"][title]["command"].is_string());
 
         // http mapping for gemini
         let title2 = "__agentbuddy_http_smoke__";
@@ -1911,11 +1887,6 @@ mod tests {
         )
         .unwrap();
         assert!(pi2["mcpServers"].get(title).is_none());
-        let omp2: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(home.join(".omp/agent/mcp.json")).unwrap(),
-        )
-        .unwrap();
-        assert!(omp2["mcpServers"].get(title).is_none());
     }
 
     #[test]

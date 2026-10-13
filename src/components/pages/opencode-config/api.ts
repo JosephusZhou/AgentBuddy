@@ -1,4 +1,4 @@
-/** 通用模型配置页（OpenCode / Pi / Oh-My-Pi）的 Tauri 命令封装。 */
+/** 通用模型配置页（OpenCode / Pi）的 Tauri 命令封装。 */
 
 import type {
   AgentActionResult,

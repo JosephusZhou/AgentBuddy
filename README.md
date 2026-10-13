@@ -10,7 +10,7 @@ AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统
 
 | 模块 | 说明 |
 |------|------|
-| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Claude Desktop、Codex CLI、OpenCode、Antigravity、CodeBuddy CN、WorkBuddy、Pi、Oh-My-Pi），展示安装路径、配置目录、MCP 状态等详情 |
+| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Claude Desktop、Codex CLI、OpenCode、Antigravity、WorkBuddy、Pi），展示安装路径、配置目录、MCP 状态等详情 |
 | MCP 管理 | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量应用/删除、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
 | Skills 管理 | 本地 / GitHub / GitCode 多源导入 Skill，支持批量应用到多个 Agent、标签管理、导出 |
 | Claude 多环境 | 管理多个 `CLAUDE_CONFIG_DIR` 环境（别名安装、Token 配置、MCP 同步、模型选择） |
@@ -158,8 +158,8 @@ src-tauri/src/                Rust 后端
   claude_env.rs               Claude 多环境管理
   codex_env.rs                Codex 多环境管理
   opencode_config.rs          OpenCode Provider/Model 配置
-  pi_model_config.rs          Pi / Oh-My-Pi 模型与认证配置
-  agent_model_config.rs       OpenCode / Pi / Oh-My-Pi 统一模型分派
+  pi_model_config.rs          Pi 模型与认证配置
+  agent_model_config.rs       OpenCode / Pi 统一模型分派
   ai_provider.rs              AI 供应商注册与加密存储
   project_config.rs           项目级 AI 配置初始化
   db.rs                       SQLite 持久化

@@ -657,6 +657,89 @@ fn write_raw(path: &Path, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// 当前运行版本（与 Cargo 包版本一致）。
+pub fn current_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// 比较点分版本号（如 `0.2.1`）；非纯数字段按字典序回退比较。
+/// `a < b` 表示 a 是更老的版本。
+pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let aa: Vec<&str> = a.split('.').collect();
+    let bb: Vec<&str> = b.split('.').collect();
+    let n = aa.len().max(bb.len());
+    for i in 0..n {
+        let x = aa.get(i).copied().unwrap_or("0");
+        let y = bb.get(i).copied().unwrap_or("0");
+        let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+            (Ok(xn), Ok(yn)) => xn.cmp(&yn),
+            _ => x.cmp(y),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// 启动时的版本升级适配清理。
+///
+/// 读取 `~/.agentbuddy/config.json` 的 `version` 字段（存量版本），与当前运行
+/// 版本比较后，**按升序**执行所有高于存量版本、且不高于运行版本的适配步骤
+/// （步骤注册表见 `upgrade::upgrade_steps`，基石版本 `upgrade::BASELINE_VERSION`
+/// 之后开始登记）。任一步骤失败即中止、版本号不推进，下次启动重试；全部成功
+/// 后才把运行版本号写回配置。整体在 config.json 锁内完成，与其它配置读写保持
+/// 原子性。
+pub fn run_startup_config_upgrade() -> Result<(), String> {
+    let _config_guard = lock_config_file()?;
+    let path = config_path()?;
+    let _ = ensure_app_config_locked()?;
+
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read config.json: {}", e))?;
+    let mut root: Value = if raw.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(&raw).unwrap_or_else(|_| json!({}))
+    };
+    if !root.is_object() {
+        root = json!({});
+    }
+
+    let running = current_version();
+    let stored = root
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    // 按升序取需要执行的适配步骤：高于存量版本（缺失视为 0.0.0）、不高于运行版本。
+    let pending =
+        crate::upgrade::pending_steps(stored.as_deref(), running, crate::upgrade::upgrade_steps());
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    // 按顺序逐个执行；任一失败即中止，版本号不推进，下次启动从存量版本重试。
+    for step in &pending {
+        eprintln!(
+            "[agent-buddy] 配置升级：执行版本 {} 的适配清理",
+            step.version
+        );
+        (step.apply)(&mut root)?;
+    }
+
+    root.as_object_mut()
+        .ok_or_else(|| "config.json 根节点必须是对象".to_string())?
+        .insert("version".to_string(), Value::String(running.to_string()));
+    write_raw(&path, &root)?;
+    eprintln!(
+        "[agent-buddy] 配置升级完成：config.json 版本 {} -> {}",
+        stored.as_deref().unwrap_or("(无)"),
+        running
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
-/** 通用模型配置页的共享类型（OpenCode / Pi / Oh-My-Pi）。 */
+/** 通用模型配置页的共享类型（OpenCode / Pi）。 */
 
 /** 支持可视化模型配置的 agent 标识。 */
-export type ModelConfigAgentId = "opencode" | "pi" | "oh-my-pi";
+export type ModelConfigAgentId = "opencode" | "pi";
 
 export interface AgentVariantView {
   id: string;
@@ -48,7 +48,7 @@ export interface AgentProviderView {
 }
 
 export interface AgentModelConfigView {
-  /** opencode | pi | oh-my-pi */
+  /** opencode | pi */
   agent: ModelConfigAgentId;
   configPath: string;
   configExists: boolean;
@@ -163,7 +163,7 @@ export interface UpsertModelPayload {
 export const MODALITY_OPTIONS = ["text", "image", "pdf", "audio", "video"] as const;
 export type Modality = (typeof MODALITY_OPTIONS)[number];
 
-/** Pi / Oh-My-Pi models.json 仅接受这两种输入模态。 */
+/** Pi models.json 仅接受这两种输入模态。 */
 export const PI_MODALITY_OPTIONS = ["text", "image"] as const;
 
 export const EFFORT_PRESETS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

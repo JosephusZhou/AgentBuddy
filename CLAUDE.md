@@ -49,8 +49,8 @@ src-tauri/src/
   skills.rs                       Skills 库、导入、更新、导出和分发
   claude_env.rs / codex_env.rs    CLAUDE_CONFIG_DIR / CODEX_HOME 多环境
   opencode_config.rs              OpenCode provider/model/auth
-  pi_model_config.rs              Pi / Oh-My-Pi 模型和 auth
-  agent_model_config.rs           OpenCode / Pi / Oh-My-Pi 的统一模型分派
+  pi_model_config.rs              Pi 模型和 auth
+  agent_model_config.rs           OpenCode / Pi 的统一模型分派
   project_config.rs               项目级 AI 骨架、MCP 和共享 Skills
   ai_provider.rs                  AI 供应商、加密 API Key 和 custom models
   db.rs                            SQLite 持久化
@@ -96,10 +96,15 @@ await invoke("command_name", { ... });
 
 ```text
 codex, claude-code, claude-desktop, opencode, antigravity,
-codebuddy-cn, workbuddy, pi, oh-my-pi
+workbuddy, pi
 ```
 
-`kiro` 和国际版 `codebuddy` 已移除。新增 Agent 或修改路径时，先改 `agents.rs`，必要时
+历史上下线的 agent 由启动时的版本适配升级统一清理：`config::run_startup_config_upgrade`
+读取 `~/.agentbuddy/config.json` 的 `version`，按升序执行所有高于存量版本、且不高于
+运行版本的适配步骤（步骤注册表 `upgrade::upgrade_steps`，基石版本
+`upgrade::BASELINE_VERSION` 之后开始登记），清除配置文件与 `agents.db` 中已下线
+agent 的残留（见 `upgrade.rs`）。
+新增 Agent 或修改路径时，先改 `agents.rs`，必要时
 扩展 `McpPath` 和 `mcp_config.rs`，再同步前端项目配置列表。
 
 `AGENT_MCP_SKILLS_MAP.md` 是跨 Agent 的详细规范来源，记录 5 种 MCP 方言、全局/项目路径、

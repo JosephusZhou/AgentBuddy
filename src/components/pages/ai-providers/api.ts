@@ -34,7 +34,7 @@ export async function invokeGetSecrets(id: string): Promise<string[]> {
 /**
  * 从 Base URL 拉取远端模型列表。
  *
- * **临时配置专用**：当 Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi / Oh-My-Pi）
+ * **临时配置专用**：当 Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi）
  * 在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
  *
  * **不**适用于 AI 供应商库（`ai_providers`）本身——后者以 `custom_models_json` 为
