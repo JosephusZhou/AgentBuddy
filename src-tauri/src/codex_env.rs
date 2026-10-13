@@ -2053,6 +2053,9 @@ pub fn upsert_environment(payload: CodexEnvUpsertPayload) -> Result<CodexEnvActi
 /// 反向同步：将供应商最新的 model / base_url / api_key 写入所有关联此供应商的环境（含默认）。
 /// 由 ai_provider::upsert_provider 在更新路径调用。
 /// 返回 (已同步数量, 失败列表)。
+///
+/// 目录不存在的环境视为「尚未初始化」：跳过而不记失败，避免默认环境目录
+/// （如 `~/.codex` 尚未创建）给用户报一条无法消除的噪音。此时也不计入同步数量。
 pub fn sync_provider_to_envs(
     provider_id: &str,
     model: &str,
@@ -2065,7 +2068,7 @@ pub fn sync_provider_to_envs(
     for env in &envs {
         let dir = PathBuf::from(&env.config_dir);
         if !dir.is_dir() {
-            errors.push(format!("{}（目录不存在）", env.name));
+            // 目录不存在 = 该环境尚未初始化，跳过（不写、不计失败、不计入同步数量）。
             continue;
         }
         // model_provider 设为空串：让 Codex 使用顶层 model + base_url 而非自定义 provider 表。
@@ -2597,6 +2600,142 @@ pub fn sync_mcp_to_all_environments() -> Result<CodexEnvMcpSyncResult, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 与既有 db / ai_provider 测试同款：持 HOME 锁 + 唯一 id + 结束（含 panic）清理，
+    /// **不交换 HOME**。交换 HOME 会与未持锁的 HOME 读取者（如 agent_open）产生竞态，
+    /// 使整套测试间歇性失败（该竞态在本次修改前已存在）。
+    ///
+    /// 本测试不需要换 HOME：`sync_provider_to_envs` 按每行自己的 `config_dir` 写入。
+    fn unique_tag(tag: &str) -> String {
+        format!(
+            "__agentbuddy_test_{}_{}",
+            tag,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }
+
+    /// Drop 时删除本测试插入的环境行（panic 展开也会执行）。
+    struct EnvRowsGuard(Vec<String>);
+
+    impl Drop for EnvRowsGuard {
+        fn drop(&mut self) {
+            for id in &self.0 {
+                let _ = db::delete_codex_environment_row(id);
+            }
+        }
+    }
+
+    fn env_row(
+        id: &str,
+        config_dir: &Path,
+        is_default: bool,
+        provider_id: &str,
+    ) -> CodexEnvironmentRow {
+        CodexEnvironmentRow {
+            id: id.into(),
+            name: format!("环境-{}", id),
+            slug: id.into(),
+            config_dir: config_dir.to_string_lossy().to_string(),
+            alias_name: format!("codex-{}", id),
+            is_default,
+            source: "managed".into(),
+            notes: String::new(),
+            alias_installed: false,
+            provider_id: provider_id.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// 回归：供应商被编辑时，默认环境必须与非默认环境一起被反向同步。
+    /// 旧实现按 `is_default = 0` 查找环境，导致默认环境被静默跳过。
+    #[test]
+    fn sync_provider_to_envs_includes_default_environment() {
+        let _home_guard = crate::config::lock_home_for_test();
+        let tag = unique_tag("codex_sync_provider");
+        let provider_id = format!("{}-prov", tag);
+        let base = std::env::temp_dir().join(&tag);
+        let default_dir = base.join("default");
+        let work_dir = base.join("work");
+        let missing_dir = base.join("missing");
+        let mut rows = EnvRowsGuard(Vec::new());
+
+        for dir in [&default_dir, &work_dir] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(
+                dir.join("config.toml"),
+                "model = \"gpt-old\"\nopenai_base_url = \"https://old.example/v1\"\n",
+            )
+            .unwrap();
+            fs::write(dir.join("auth.json"), r#"{"OPENAI_API_KEY":"old-token"}"#).unwrap();
+        }
+
+        let default_id = format!("{}-default", tag);
+        let work_id = format!("{}-work", tag);
+        let missing_id = format!("{}-missing", tag);
+        for (id, dir, is_default) in [
+            (&default_id, &default_dir, true),
+            (&work_id, &work_dir, false),
+            // 目录不存在的环境（例如默认环境尚未初始化）不得计入同步数量或失败列表。
+            (&missing_id, &missing_dir, false),
+        ] {
+            db::upsert_codex_environment_row(&env_row(id, dir, is_default, &provider_id)).unwrap();
+            rows.0.push(id.clone());
+        }
+
+        let (synced, errors) = sync_provider_to_envs(
+            &provider_id,
+            "gpt-5.6-sol",
+            "https://new.example/v1",
+            "new-secret-token",
+        )
+        .unwrap();
+
+        assert_eq!(
+            synced, 2,
+            "默认 + 非默认环境都应被同步；errors={:?}",
+            errors
+        );
+        assert!(
+            errors.is_empty(),
+            "不应有失败项（含目录不存在）: {:?}",
+            errors
+        );
+
+        for dir in [&default_dir, &work_dir] {
+            let cfg = read_managed_config(dir);
+            assert_eq!(cfg.model, "gpt-5.6-sol", "{} 未同步模型", dir.display());
+            assert_eq!(
+                cfg.base_url,
+                "https://new.example/v1",
+                "{} 未同步 Base URL",
+                dir.display()
+            );
+            assert_eq!(
+                cfg.bearer_token,
+                "new-secret-token",
+                "{} 未同步 API Key",
+                dir.display()
+            );
+        }
+
+        // 未关联任何环境时保持无副作用：清空关联后再同步，不写不报错。
+        db::clear_provider_id_on_envs(&provider_id).unwrap();
+        let (synced, errors) = sync_provider_to_envs(
+            &provider_id,
+            "gpt-other",
+            "https://other.example/v1",
+            "other-token",
+        )
+        .unwrap();
+        assert_eq!(synced, 0, "无关联环境时不应同步");
+        assert!(errors.is_empty(), "无关联环境时不应报错: {:?}", errors);
+
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn marker_block_append_and_replace() {

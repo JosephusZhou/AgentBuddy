@@ -2174,6 +2174,9 @@ pub fn upsert_environment(
 /// 反向同步：将供应商最新的 baseUrl / apiKey / model / 档位模型写入所有关联此供应商的环境（含默认）。
 /// 由 ai_provider::upsert_provider 在更新路径调用。
 /// 返回 (已同步数量, 失败列表)。
+///
+/// 目录不存在的环境视为「尚未初始化」：跳过而不记失败，避免默认环境目录
+/// （如 `~/.claude` 尚未创建）给用户报一条无法消除的噪音。此时也不计入同步数量。
 pub fn sync_provider_to_envs(
     provider_id: &str,
     base_url: &str,
@@ -2187,7 +2190,7 @@ pub fn sync_provider_to_envs(
     for env in &envs {
         let dir = PathBuf::from(&env.config_dir);
         if !dir.is_dir() {
-            errors.push(format!("{}（目录不存在）", env.name));
+            // 目录不存在 = 该环境尚未初始化，跳过（不写、不计失败、不计入同步数量）。
             continue;
         }
         let tiers = ModelTierOverrides {
@@ -2873,6 +2876,150 @@ fn display_path_for_msg(abs: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 与既有 db / ai_provider 测试同款：持 HOME 锁 + 唯一 id + 结束（含 panic）清理，
+    /// **不交换 HOME**。交换 HOME 会与未持锁的 HOME 读取者（如 agent_open）产生竞态，
+    /// 使整套测试间歇性失败（该竞态在本次修改前已存在）。
+    ///
+    /// 本测试不需要换 HOME：`sync_provider_to_envs` 按每行自己的 `config_dir` 写入。
+    fn unique_tag(tag: &str) -> String {
+        format!(
+            "__agentbuddy_test_{}_{}",
+            tag,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }
+
+    /// Drop 时删除本测试插入的环境行（panic 展开也会执行）。
+    struct EnvRowsGuard(Vec<String>);
+
+    impl Drop for EnvRowsGuard {
+        fn drop(&mut self) {
+            for id in &self.0 {
+                let _ = db::delete_claude_environment_row(id);
+            }
+        }
+    }
+
+    fn env_row(
+        id: &str,
+        config_dir: &Path,
+        is_default: bool,
+        provider_id: &str,
+    ) -> ClaudeEnvironmentRow {
+        ClaudeEnvironmentRow {
+            id: id.into(),
+            name: format!("环境-{}", id),
+            slug: id.into(),
+            config_dir: config_dir.to_string_lossy().to_string(),
+            alias_name: format!("claude-{}", id),
+            is_default,
+            source: "managed".into(),
+            notes: String::new(),
+            alias_installed: false,
+            provider_id: provider_id.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// 回归：供应商被编辑时，默认环境必须与非默认环境一起被反向同步。
+    /// 旧实现按 `is_default = 0` 查找环境，导致默认环境被静默跳过。
+    #[test]
+    fn sync_provider_to_envs_includes_default_environment() {
+        let _home_guard = crate::config::lock_home_for_test();
+        let tag = unique_tag("claude_sync_provider");
+        let provider_id = format!("{}-prov", tag);
+        let base = std::env::temp_dir().join(&tag);
+        let default_dir = base.join("default");
+        let work_dir = base.join("work");
+        let missing_dir = base.join("missing");
+        let mut rows = EnvRowsGuard(Vec::new());
+
+        for dir in [&default_dir, &work_dir] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(
+                dir.join("settings.json"),
+                r#"{"env":{"ANTHROPIC_BASE_URL":"https://old.example","ANTHROPIC_AUTH_TOKEN":"old-token","ANTHROPIC_MODEL":"claude-old","KEEP_ME":"yes"}}"#,
+            )
+            .unwrap();
+        }
+
+        let default_id = format!("{}-default", tag);
+        let work_id = format!("{}-work", tag);
+        let missing_id = format!("{}-missing", tag);
+        for (id, dir, is_default) in [
+            (&default_id, &default_dir, true),
+            (&work_id, &work_dir, false),
+            // 目录不存在的环境（例如默认环境尚未初始化）不得计入同步数量或失败列表。
+            (&missing_id, &missing_dir, false),
+        ] {
+            db::upsert_claude_environment_row(&env_row(id, dir, is_default, &provider_id)).unwrap();
+            rows.0.push(id.clone());
+        }
+
+        let mut tiers = std::collections::HashMap::new();
+        tiers.insert("opus".to_string(), "claude-opus-4-8".to_string());
+        let (synced, errors) = sync_provider_to_envs(
+            &provider_id,
+            "https://new.example/v1",
+            "new-secret-token",
+            "claude-sonnet-4-8",
+            &tiers,
+        )
+        .unwrap();
+
+        assert_eq!(
+            synced, 2,
+            "默认 + 非默认环境都应被同步；errors={:?}",
+            errors
+        );
+        assert!(
+            errors.is_empty(),
+            "不应有失败项（含目录不存在）: {:?}",
+            errors
+        );
+
+        for dir in [&default_dir, &work_dir] {
+            let (base_url, key, model, tier_values) = read_settings_env(dir);
+            assert_eq!(
+                base_url,
+                "https://new.example/v1",
+                "{} 未同步 Base URL",
+                dir.display()
+            );
+            assert_eq!(key, "new-secret-token", "{} 未同步 API Key", dir.display());
+            assert_eq!(model, "claude-sonnet-4-8", "{} 未同步主模型", dir.display());
+            assert_eq!(
+                tier_values.opus,
+                "claude-opus-4-8",
+                "{} 未同步档位模型",
+                dir.display()
+            );
+            // 无关键保留。
+            let raw = fs::read_to_string(dir.join("settings.json")).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(v["env"]["KEEP_ME"].as_str(), Some("yes"));
+        }
+
+        // 未关联任何环境时保持无副作用：清空关联后再同步，不写不报错。
+        db::clear_provider_id_on_envs(&provider_id).unwrap();
+        let (synced, errors) = sync_provider_to_envs(
+            &provider_id,
+            "https://other.example",
+            "other-token",
+            "claude-other",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(synced, 0, "无关联环境时不应同步");
+        assert!(errors.is_empty(), "无关联环境时不应报错: {:?}", errors);
+
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[cfg(unix)]
     #[test]

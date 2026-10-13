@@ -1120,6 +1120,61 @@ async fn reorder_ai_providers(
     Ok(())
 }
 
+/* ===== Agent provider bindings (全局供应商 → opencode/pi/omp 绑定) ===== */
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderBindingView {
+    pub agent_type: String,
+    pub agent_provider_id: String,
+}
+
+#[tauri::command]
+async fn list_agent_provider_bindings(
+    ai_provider_id: String,
+) -> Result<Vec<AgentProviderBindingView>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rows = db::load_agent_provider_bindings(&ai_provider_id)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| AgentProviderBindingView {
+                agent_type: r.agent_type,
+                agent_provider_id: r.agent_provider_id,
+            })
+            .collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| format!("读取绑定列表任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn add_agent_provider_binding(
+    ai_provider_id: String,
+    agent_type: String,
+    agent_provider_id: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        db::upsert_agent_provider_binding(&ai_provider_id, &agent_type, &agent_provider_id)
+    })
+    .await
+    .map_err(|e| format!("添加绑定任务失败: {e}"))??;
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_agent_provider_binding(
+    ai_provider_id: String,
+    agent_type: String,
+    agent_provider_id: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        db::delete_agent_provider_binding(&ai_provider_id, &agent_type, &agent_provider_id)
+    })
+    .await
+    .map_err(|e| format!("删除绑定任务失败: {e}"))??;
+    Ok(())
+}
+
 /* ===== Route aggregation (local proxy server) ===== */
 
 #[tauri::command]
@@ -1682,6 +1737,9 @@ pub fn run() {
             get_ai_provider_secret,
             get_ai_provider_secrets,
             reorder_ai_providers,
+            list_agent_provider_bindings,
+            add_agent_provider_binding,
+            remove_agent_provider_binding,
             get_route_aggregation_status,
             get_route_aggregation_config,
             update_route_aggregation_config,

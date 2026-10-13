@@ -490,6 +490,140 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
             }
         }
 
+        // 同步到绑定的 opencode / pi / omp provider
+        match db::load_agent_provider_bindings(&row.id) {
+            Err(e) => {
+                sync_parts.push(format!("加载 Agent 绑定失败: {}", e));
+            }
+            Ok(bindings) => {
+                use crate::agent_model_config::ModelConfigAgent;
+                use crate::opencode_config::{AgentModelConfigView, UpsertProviderPayload};
+
+                // 预加载各 agent 的配置（每个 agent 只读一次文件，避免循环里重复读）
+                let mut opencode_view: Option<Result<AgentModelConfigView, String>> = None;
+                let mut pi_view: Option<Result<AgentModelConfigView, String>> = None;
+                let mut omp_view: Option<Result<AgentModelConfigView, String>> = None;
+
+                for binding in &bindings {
+                    // 步骤 1：从缓存里找目标 provider，确定它的 api 格式
+                    let target_api: Option<String> = match binding.agent_type.as_str() {
+                        "opencode" => {
+                            if opencode_view.is_none() {
+                                opencode_view = Some(crate::opencode_config::get_config());
+                            }
+                            match opencode_view.as_ref().unwrap() {
+                                Ok(view) => view
+                                    .providers
+                                    .iter()
+                                    .find(|p| p.id == binding.agent_provider_id)
+                                    .and_then(|p| p.api.clone()),
+                                // 读配置失败：跳过这个绑定，不要硬同步
+                                Err(_) => continue,
+                            }
+                        }
+                        "pi" => {
+                            if pi_view.is_none() {
+                                pi_view =
+                                    Some(crate::pi_model_config::get_config(ModelConfigAgent::Pi));
+                            }
+                            match pi_view.as_ref().unwrap() {
+                                Ok(view) => view
+                                    .providers
+                                    .iter()
+                                    .find(|p| p.id == binding.agent_provider_id)
+                                    .and_then(|p| p.api.clone()),
+                                Err(_) => continue,
+                            }
+                        }
+                        "oh-my-pi" | "omp" => {
+                            if omp_view.is_none() {
+                                omp_view = Some(crate::pi_model_config::get_config(
+                                    ModelConfigAgent::OhMyPi,
+                                ));
+                            }
+                            match omp_view.as_ref().unwrap() {
+                                Ok(view) => view
+                                    .providers
+                                    .iter()
+                                    .find(|p| p.id == binding.agent_provider_id)
+                                    .and_then(|p| p.api.clone()),
+                                Err(_) => continue,
+                            }
+                        }
+                        other => {
+                            sync_parts.push(format!("未知的 agent 类型: {}", other));
+                            continue;
+                        }
+                    };
+
+                    // 步骤 2：根据目标 provider 的 api 格式，从全局供应商选对应侧的 base_url
+                    let base_url = match target_api.as_deref() {
+                        Some("openai") => codex_base.clone(),
+                        Some("anthropic") => claude_base.clone(),
+                        // provider 不存在或 api 字段为空（新建场景）：
+                        //   - anthropic 类型供应商 → 默认走 anthropic 侧
+                        //   - openai 类型供应商 → 默认走 openai 侧
+                        //   - universal 类型 → 默认走 anthropic 侧
+                        None => match row.provider_type.as_str() {
+                            TYPE_ANTHROPIC => claude_base.clone(),
+                            TYPE_OPENAI => codex_base.clone(),
+                            TYPE_UNIVERSAL => claude_base.clone(),
+                            _ => String::new(),
+                        },
+                        // 其他 api 类型（google/azure 等）：不同步 base_url，只同步 api_key
+                        _ => String::new(),
+                    };
+
+                    // 步骤 3：构造 payload，不传 api 字段（不覆盖用户已选的格式）
+                    let payload = UpsertProviderPayload {
+                        id: binding.agent_provider_id.clone(),
+                        previous_id: None,
+                        name: None,
+                        npm: None,
+                        api: None, // 不动用户已选的 api 格式
+                        base_url: if base_url.is_empty() {
+                            None
+                        } else {
+                            Some(base_url)
+                        },
+                        set_cache_key: None,
+                        timeout: None,
+                        chunk_timeout: None,
+                        whitelist: None,
+                        blacklist: None,
+                        api_key: Some(plain_key.clone()),
+                    };
+
+                    let result = match binding.agent_type.as_str() {
+                        "opencode" => crate::opencode_config::upsert_provider(payload)
+                            .map(|_| "OpenCode".to_string()),
+                        "pi" => {
+                            crate::pi_model_config::upsert_provider(ModelConfigAgent::Pi, payload)
+                                .map(|_| "Pi".to_string())
+                        }
+                        "oh-my-pi" | "omp" => crate::pi_model_config::upsert_provider(
+                            ModelConfigAgent::OhMyPi,
+                            payload,
+                        )
+                        .map(|_| "OMP".to_string()),
+                        _ => unreachable!(),
+                    };
+                    match result {
+                        Ok(label) => {
+                            sync_parts
+                                .push(format!("已同步 {} 的 {}", label, binding.agent_provider_id));
+                        }
+                        Err(e) => {
+                            sync_parts.push(format!(
+                                "{} 的 {} 同步失败: {}",
+                                binding.agent_type, binding.agent_provider_id, e
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         if !sync_parts.is_empty() {
             message.push_str("；");
             message.push_str(&sync_parts.join("；"));

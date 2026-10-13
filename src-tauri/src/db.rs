@@ -118,6 +118,13 @@ fn get_connection() -> Result<Connection, String> {
             enabled INTEGER NOT NULL DEFAULT 1,
             sort_order INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (provider_id, route_group)
+         );
+         CREATE TABLE IF NOT EXISTS agent_provider_bindings (
+            ai_provider_id TEXT NOT NULL,
+            agent_type TEXT NOT NULL,
+            agent_provider_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (ai_provider_id, agent_type, agent_provider_id)
          );",
     )
     .map_err(|e| format!("Failed to create table: {}", e))?;
@@ -972,7 +979,12 @@ pub fn set_codex_env_alias_installed_all(installed: bool) -> Result<(), String> 
     Ok(())
 }
 
-/// Find all non-default Claude environments linked to the given provider_id.
+/// Find all Claude environments linked to the given provider_id, **including the
+/// default environment**.
+///
+/// The default environment may legitimately be bound to a provider (the env
+/// upsert path and the UI selector both allow it), so excluding it here would
+/// make provider edits silently skip it.
 pub fn load_claude_envs_by_provider(
     provider_id: &str,
 ) -> Result<Vec<ClaudeEnvironmentRow>, String> {
@@ -982,7 +994,7 @@ pub fn load_claude_envs_by_provider(
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
                     alias_installed, created_at, updated_at, provider_id
              FROM claude_environments
-             WHERE provider_id = ?1 AND is_default = 0",
+             WHERE provider_id = ?1",
         )
         .map_err(|e| format!("Failed to prepare claude_env by provider query: {}", e))?;
     let rows = stmt
@@ -993,7 +1005,8 @@ pub fn load_claude_envs_by_provider(
     Ok(rows)
 }
 
-/// Find all non-default Codex environments linked to the given provider_id.
+/// Find all Codex environments linked to the given provider_id, **including the
+/// default environment** (see [`load_claude_envs_by_provider`] for the rationale).
 pub fn load_codex_envs_by_provider(provider_id: &str) -> Result<Vec<CodexEnvironmentRow>, String> {
     let conn = get_connection()?;
     let mut stmt = conn
@@ -1001,7 +1014,7 @@ pub fn load_codex_envs_by_provider(provider_id: &str) -> Result<Vec<CodexEnviron
             "SELECT id, name, slug, config_dir, alias_name, is_default, source, notes,
                     alias_installed, created_at, updated_at, provider_id
              FROM codex_environments
-             WHERE provider_id = ?1 AND is_default = 0",
+             WHERE provider_id = ?1",
         )
         .map_err(|e| format!("Failed to prepare codex_env by provider query: {}", e))?;
     let rows = stmt
@@ -1013,6 +1026,10 @@ pub fn load_codex_envs_by_provider(provider_id: &str) -> Result<Vec<CodexEnviron
 }
 
 /// Clear provider_id on all environments linked to the given provider (used on provider delete).
+///
+/// Deliberately has **no** `is_default` filter: deleting a provider must not leave
+/// a dangling `provider_id` on the default environment either. Locked by
+/// `envs_by_provider_include_default_and_clear_covers_default`.
 pub fn clear_provider_id_on_envs(provider_id: &str) -> Result<(), String> {
     let conn = get_connection()?;
     let now = SystemTime::now()
@@ -1144,6 +1161,12 @@ pub fn delete_ai_provider_row(id: &str) -> Result<(), String> {
     let conn = get_connection()?;
     conn.execute("DELETE FROM ai_providers WHERE id = ?1", params![id])
         .map_err(|e| format!("Failed to delete ai_provider {}: {}", id, e))?;
+    // Cascade: remove all agent bindings for this provider.
+    conn.execute(
+        "DELETE FROM agent_provider_bindings WHERE ai_provider_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Failed to delete agent bindings for {}: {}", id, e))?;
     Ok(())
 }
 
@@ -1225,6 +1248,84 @@ pub fn delete_provider_route_toggles(provider_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/* ===== Agent provider bindings (全局供应商 → opencode/pi/omp provider) ===== */
+
+/// A binding: one global ai_provider is linked to one provider entry inside
+/// another agent's config file (opencode / pi / oh-my-pi).
+#[derive(Debug, Clone)]
+pub struct AgentProviderBinding {
+    /// Kept for completeness / future "list all bindings" views; current
+    /// loaders always filter by ai_provider_id so callers already know it.
+    #[allow(dead_code)]
+    pub ai_provider_id: String,
+    pub agent_type: String,
+    pub agent_provider_id: String,
+}
+
+/// Upsert a binding. Idempotent: re-inserting the same triple is a no-op.
+pub fn upsert_agent_provider_binding(
+    ai_provider_id: &str,
+    agent_type: &str,
+    agent_provider_id: &str,
+) -> Result<(), String> {
+    let conn = get_connection()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("Clock error: {}", e))?
+        .as_secs() as i64;
+    conn.execute(
+        "INSERT INTO agent_provider_bindings
+            (ai_provider_id, agent_type, agent_provider_id, created_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(ai_provider_id, agent_type, agent_provider_id) DO NOTHING",
+        params![ai_provider_id, agent_type, agent_provider_id, now],
+    )
+    .map_err(|e| format!("Failed to upsert agent binding: {}", e))?;
+    Ok(())
+}
+
+/// Remove a single binding.
+pub fn delete_agent_provider_binding(
+    ai_provider_id: &str,
+    agent_type: &str,
+    agent_provider_id: &str,
+) -> Result<(), String> {
+    let conn = get_connection()?;
+    conn.execute(
+        "DELETE FROM agent_provider_bindings
+         WHERE ai_provider_id = ?1 AND agent_type = ?2 AND agent_provider_id = ?3",
+        params![ai_provider_id, agent_type, agent_provider_id],
+    )
+    .map_err(|e| format!("Failed to delete agent binding: {}", e))?;
+    Ok(())
+}
+
+/// List all bindings for a given global ai_provider.
+pub fn load_agent_provider_bindings(
+    ai_provider_id: &str,
+) -> Result<Vec<AgentProviderBinding>, String> {
+    let conn = get_connection()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT ai_provider_id, agent_type, agent_provider_id
+             FROM agent_provider_bindings
+             WHERE ai_provider_id = ?1",
+        )
+        .map_err(|e| format!("Failed to prepare binding query: {}", e))?;
+    let rows = stmt
+        .query_map([ai_provider_id], |row| {
+            Ok(AgentProviderBinding {
+                ai_provider_id: row.get(0)?,
+                agent_type: row.get(1)?,
+                agent_provider_id: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query bindings: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read bindings: {}", e))?;
+    Ok(rows)
+}
+
 /// One-time migration from legacy `skills-meta.json` into SQLite.
 /// Safe to call repeatedly; no-ops when file missing or already empty.
 pub fn migrate_skills_meta_json_if_present() -> Result<(), String> {
@@ -1298,6 +1399,187 @@ pub fn migrate_skills_meta_json_if_present() -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::skills::SkillSource;
+
+    /// 与既有 db / ai_provider 测试同款：持 HOME 锁 + 唯一 id + 测试结束（含 panic）清理，
+    /// **不交换 HOME**。交换 HOME 会与未持锁的 HOME 读取者（如 agent_open）产生竞态，
+    /// 使整套测试间歇性失败（该竞态在本次修改前已存在）。
+    fn unique_tag(tag: &str) -> String {
+        format!(
+            "__agentbuddy_test_{}_{}",
+            tag,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }
+
+    /// Drop 时删除本测试插入的环境行（panic 展开也会执行），
+    /// 避免在真实 agents.db 里留下垃圾行。
+    #[derive(Default)]
+    struct EnvRowsGuard {
+        claude: Vec<String>,
+        codex: Vec<String>,
+    }
+
+    impl Drop for EnvRowsGuard {
+        fn drop(&mut self) {
+            for id in &self.claude {
+                let _ = delete_claude_environment_row(id);
+            }
+            for id in &self.codex {
+                let _ = delete_codex_environment_row(id);
+            }
+        }
+    }
+
+    fn claude_row(
+        id: &str,
+        config_dir: &std::path::Path,
+        is_default: bool,
+        provider_id: &str,
+    ) -> ClaudeEnvironmentRow {
+        ClaudeEnvironmentRow {
+            id: id.into(),
+            name: format!("claude-{}", id),
+            slug: id.into(),
+            config_dir: config_dir.to_string_lossy().to_string(),
+            alias_name: format!("claude-{}", id),
+            is_default,
+            source: "managed".into(),
+            notes: String::new(),
+            alias_installed: false,
+            provider_id: provider_id.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn codex_row(
+        id: &str,
+        config_dir: &std::path::Path,
+        is_default: bool,
+        provider_id: &str,
+    ) -> CodexEnvironmentRow {
+        CodexEnvironmentRow {
+            id: id.into(),
+            name: format!("codex-{}", id),
+            slug: id.into(),
+            config_dir: config_dir.to_string_lossy().to_string(),
+            alias_name: format!("codex-{}", id),
+            is_default,
+            source: "managed".into(),
+            notes: String::new(),
+            alias_installed: false,
+            provider_id: provider_id.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// 回归：默认环境同样可以绑定供应商，按供应商查找环境时必须包含它；
+    /// 同时锁定 `clear_provider_id_on_envs` 不带 `is_default` 过滤（删除供应商后
+    /// 默认环境不得留下悬挂 provider_id）。
+    #[test]
+    fn envs_by_provider_include_default_and_clear_covers_default() {
+        let _home_guard = crate::config::lock_home_for_test();
+        let tag = unique_tag("envs_by_provider");
+        let tmp = std::env::temp_dir();
+        let mut guard = EnvRowsGuard::default();
+
+        let prov = format!("{}-prov", tag);
+        let claude_default_id = format!("{}-claude-default", tag);
+        let claude_work_id = format!("{}-claude-work", tag);
+        let claude_other_id = format!("{}-claude-other", tag);
+        let codex_default_id = format!("{}-codex-default", tag);
+        let codex_work_id = format!("{}-codex-work", tag);
+
+        upsert_claude_environment_row(&claude_row(
+            &claude_default_id,
+            &tmp.join(format!("{}-claude-default", tag)),
+            true,
+            &prov,
+        ))
+        .unwrap();
+        guard.claude.push(claude_default_id.clone());
+        upsert_claude_environment_row(&claude_row(
+            &claude_work_id,
+            &tmp.join(format!("{}-claude-work", tag)),
+            false,
+            &prov,
+        ))
+        .unwrap();
+        guard.claude.push(claude_work_id.clone());
+        upsert_claude_environment_row(&claude_row(
+            &claude_other_id,
+            &tmp.join(format!("{}-claude-other", tag)),
+            false,
+            &format!("{}-other", tag),
+        ))
+        .unwrap();
+        guard.claude.push(claude_other_id.clone());
+
+        // 按供应商查找必须同时命中默认环境与非默认环境，且不牵连其它供应商。
+        let claude = load_claude_envs_by_provider(&prov).unwrap();
+        let ids: Vec<_> = claude.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids.len(), 2, "默认环境与非默认环境都应命中: {:?}", ids);
+        assert!(
+            claude.iter().any(|r| r.is_default),
+            "默认环境被排除: {:?}",
+            ids
+        );
+        assert!(
+            claude.iter().any(|r| !r.is_default),
+            "非默认环境缺失: {:?}",
+            ids
+        );
+        assert!(
+            !claude.iter().any(|r| r.id == claude_other_id),
+            "其它供应商的环境不应被牵连"
+        );
+
+        upsert_codex_environment_row(&codex_row(
+            &codex_default_id,
+            &tmp.join(format!("{}-codex-default", tag)),
+            true,
+            &prov,
+        ))
+        .unwrap();
+        guard.codex.push(codex_default_id.clone());
+        upsert_codex_environment_row(&codex_row(
+            &codex_work_id,
+            &tmp.join(format!("{}-codex-work", tag)),
+            false,
+            &prov,
+        ))
+        .unwrap();
+        guard.codex.push(codex_work_id.clone());
+
+        let codex = load_codex_envs_by_provider(&prov).unwrap();
+        let ids: Vec<_> = codex.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids.len(), 2, "默认环境与非默认环境都应命中: {:?}", ids);
+        assert!(
+            codex.iter().any(|r| r.is_default),
+            "默认环境被排除: {:?}",
+            ids
+        );
+
+        // 删除供应商路径：默认环境的 provider_id 也必须被清空。
+        clear_provider_id_on_envs(&prov).unwrap();
+        for id in [
+            &claude_default_id,
+            &claude_work_id,
+            &codex_default_id,
+            &codex_work_id,
+        ] {
+            if let Some(row) = get_claude_environment_row(id).unwrap() {
+                assert_eq!(row.provider_id, "", "claude 环境 {} 仍挂着 provider", id);
+            }
+            if let Some(row) = get_codex_environment_row(id).unwrap() {
+                assert_eq!(row.provider_id, "", "codex 环境 {} 仍挂着 provider", id);
+            }
+        }
+    }
 
     #[test]
     fn skill_meta_upsert_and_load() {
