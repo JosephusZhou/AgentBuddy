@@ -115,13 +115,13 @@ jobs:
           DMG_DIR="src-tauri/target/${TARGET}/release/bundle/dmg"
           DMG="$(find "$DMG_DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$DMG"
-          mv "$DMG" "AgentBuddy_${VERSION}_${ARCH}.dmg"
+          mv "$DMG" "Octopus_${VERSION}_${ARCH}.dmg"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: dmg-${{ matrix.arch }}
-          path: AgentBuddy_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.dmg
+          path: Octopus_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.dmg
           if-no-files-found: error
 
   build-windows:
@@ -180,7 +180,7 @@ jobs:
           if (-not $installer) {
             throw "NSIS installer (.exe) not found under bundle/nsis"
           }
-          $out = "AgentBuddy_${env:VERSION}_x64-setup.exe"
+          $out = "Octopus_${env:VERSION}_x64-setup.exe"
           Move-Item -LiteralPath $installer -Destination $out -Force
           Write-Host "Prepared $out"
 
@@ -188,7 +188,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-windows
-          path: AgentBuddy_${{ needs.validate.outputs.version }}_x64-setup.exe
+          path: Octopus_${{ needs.validate.outputs.version }}_x64-setup.exe
           if-no-files-found: error
 
   release:
@@ -226,7 +226,7 @@ jobs:
             gh release create "$TAG_NAME" \
               --repo "$GH_REPO" \
               --verify-tag \
-              --title "AgentBuddy $TAG_NAME" \
+              --title "Octopus $TAG_NAME" \
               --generate-notes
           fi
           gh release upload "$TAG_NAME" artifacts/* --repo "$GH_REPO" --clobber
