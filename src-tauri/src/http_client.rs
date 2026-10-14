@@ -160,7 +160,10 @@ fn env_proxy_url() -> Option<String> {
 /// SOCKS → HTTPS → HTTP.
 #[cfg(target_os = "macos")]
 fn macos_system_proxy_url() -> Option<String> {
-    let output = Command::new("scutil").arg("--proxy").output().ok()?;
+    let output = std::process::Command::new("scutil")
+        .arg("--proxy")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
