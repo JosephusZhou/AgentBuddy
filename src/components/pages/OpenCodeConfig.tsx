@@ -26,7 +26,7 @@ import {
   invokeUpsertProvider,
 } from "./opencode-config/api";
 import { invokeFetchRemoteModels, invokeList as invokeAiProviderList } from "./ai-providers/api";
-import type { AiProvider } from "./ai-providers/types";
+import { hasAnyOpenaiType, hasApiType, type AiProvider, type ApiType } from "./ai-providers/types";
 import {
   fetchRouteAggregationProvider,
   isRouteAggregationProvider,
@@ -508,28 +508,28 @@ function normalizeBaseUrlForProtocol(baseUrl: string, protocol: ProviderProtocol
 }
 
 function protocolForNpm(
-  providerType: AiProvider["providerType"] | undefined,
+  types: ApiType[] | undefined,
   npm: string,
   providerId?: string,
 ): ProviderProtocol {
   if (isRouteAggregationProvider(providerId)) {
     return npm === "@ai-sdk/anthropic" ? "anthropic" : "openai";
   }
-  if (providerType === "anthropic") return "anthropic";
-  if (providerType === "openai") return "openai";
+  if (hasAnyOpenaiType(types) && npm !== "@ai-sdk/anthropic") return "openai";
+  if (hasApiType(types, "anthropic")) return "anthropic";
   return npm === "@ai-sdk/anthropic" ? "anthropic" : "openai";
 }
 
 function protocolForApi(
-  providerType: AiProvider["providerType"] | undefined,
+  types: ApiType[] | undefined,
   api: string,
   providerId?: string,
 ): ProviderProtocol {
   if (isRouteAggregationProvider(providerId)) {
     return api === "anthropic-messages" ? "anthropic" : "openai";
   }
-  if (providerType === "anthropic") return "anthropic";
-  if (providerType === "openai") return "openai";
+  if (hasAnyOpenaiType(types) && api !== "anthropic-messages") return "openai";
+  if (hasApiType(types, "anthropic")) return "anthropic";
   return api === "anthropic-messages" ? "anthropic" : "openai";
 }
 
@@ -960,9 +960,7 @@ export default function ModelConfig() {
     setFormAiProviderId("");
     try {
       const rows = await invokeAiProviderList();
-      const eligible = rows.filter(
-        (p) => p.providerType === "openai" || p.providerType === "universal",
-      );
+      const eligible = rows.filter((p) => hasAnyOpenaiType(p.providerTypes));
       const routeAgg = await fetchRouteAggregationProvider();
       const all = routeAgg ? [routeAgg, ...eligible] : eligible;
       setAiProviders(all);
@@ -988,7 +986,7 @@ export default function ModelConfig() {
         label: p.name,
         sub: isRouteAggregationProvider(p.id)
           ? `本地端点 · ${aiProviderOpenaiBaseUrl(p)}`
-          : `${p.providerType === "openai" ? "OpenAI" : "通用"} · ${aiProviderOpenaiBaseUrl(p)}`,
+          : `OpenAI · ${aiProviderOpenaiBaseUrl(p)}`,
       })),
     ],
     [aiProviders],
@@ -1002,8 +1000,8 @@ export default function ModelConfig() {
     const p = aiProviders.find((x) => x.id === v);
     if (!p) return;
     const protocol = isOpenCode
-      ? protocolForNpm(p.providerType, providerForm.npm, p.id)
-      : protocolForApi(p.providerType, providerForm.api, p.id);
+      ? protocolForNpm(p.providerTypes, providerForm.npm, p.id)
+      : protocolForApi(p.providerTypes, providerForm.api, p.id);
     setProviderForm({
       ...providerForm,
       name: p.name || providerForm.name,
@@ -1705,7 +1703,7 @@ export default function ModelConfig() {
                       options={NPM_SELECT_OPTIONS}
                       onChange={(v) => {
                         const selected = aiProviders.find((p) => p.id === formAiProviderId);
-                        const protocol = protocolForNpm(selected?.providerType, v, selected?.id);
+                        const protocol = protocolForNpm(selected?.providerTypes, v, selected?.id);
                         setProviderForm({
                           ...providerForm,
                           npm: v,
@@ -1734,7 +1732,7 @@ export default function ModelConfig() {
                           baseUrl: normalizeBaseUrlForProtocol(
                             providerForm.baseUrl,
                             protocolForApi(
-                              aiProviders.find((p) => p.id === formAiProviderId)?.providerType,
+                              aiProviders.find((p) => p.id === formAiProviderId)?.providerTypes,
                               api,
                               formAiProviderId,
                             ),

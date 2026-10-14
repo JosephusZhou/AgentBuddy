@@ -78,16 +78,20 @@ impl ProviderRouter {
 
         for row in &provider_rows {
             // Filter by provider type compatibility for this API format.
-            // Phase 5+：路由聚合只接受 Anthropic / OpenAI / Universal 三类 backend。
+            // 多类型勾选：供应商的 API 类型集合含本入口所需协议才进入该组池。
             let matches = match group {
-                RouteGroup::ClaudeCode => {
-                    row.provider_type == crate::ai_provider::TYPE_ANTHROPIC
-                        || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                }
-                RouteGroup::Codex | RouteGroup::OpenAiChat => {
-                    row.provider_type == crate::ai_provider::TYPE_OPENAI
-                        || row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                }
+                RouteGroup::ClaudeCode => crate::ai_provider::provider_types_contain(
+                    &row.provider_type,
+                    crate::ai_provider::API_TYPE_ANTHROPIC,
+                ),
+                RouteGroup::Codex => crate::ai_provider::provider_types_contain(
+                    &row.provider_type,
+                    crate::ai_provider::API_TYPE_OPENAI_RESPONSES,
+                ),
+                RouteGroup::OpenAiChat => crate::ai_provider::provider_types_contain(
+                    &row.provider_type,
+                    crate::ai_provider::API_TYPE_OPENAI_CHAT,
+                ),
             };
             if !matches {
                 continue;
@@ -140,16 +144,13 @@ impl ProviderRouter {
                 .unwrap_or_default(),
             );
 
-            // For universal type in OpenAI 两组（Codex / OpenAiChat），append /v1 so
-            // the upstream OpenAI endpoint at `{base}/v1/...` is reachable. In
-            // ClaudeCode group the raw Anthropic base URL is used (Anthropic
-            // Messages endpoint already lives at `{base}/v1/messages`).
-            let base_url = if row.provider_type == crate::ai_provider::TYPE_UNIVERSAL
-                && group != RouteGroup::ClaudeCode
-            {
-                crate::ai_provider::derive_openai_base_url(&row.provider_type, &row.base_url)
-            } else {
+            // ClaudeCode 组用 Anthropic 侧 Base URL（Anthropic Messages 端点在
+            // `{base}/v1/messages`）；Codex / OpenAiChat 组用 OpenAI 侧 Base URL
+            //（由用户独立填写，含所需的 /v1 前缀）。
+            let base_url = if group == RouteGroup::ClaudeCode {
                 row.base_url.clone()
+            } else {
+                row.openai_base_url.clone()
             };
 
             builds.push(ProviderBuild {
@@ -423,7 +424,7 @@ mod resolve_tests {
         RouteProvider {
             id: id.into(),
             name: id.into(),
-            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            provider_type: r#"["anthropic"]"#.into(),
             base_url: "https://relay.test".into(),
             api_key: String::new(),
             model_ids: Vec::new(),

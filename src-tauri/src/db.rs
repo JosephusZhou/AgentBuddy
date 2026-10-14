@@ -159,6 +159,40 @@ fn get_connection() -> Result<Connection, String> {
     );
     ensure_column(
         &conn,
+        "ai_providers",
+        "openai_base_url",
+        "TEXT NOT NULL DEFAULT ''",
+    );
+
+    // Migration: 供应商类型从单选（anthropic/openai/universal）升级为多类型勾选
+    // 集合（provider_type 列存 JSON 数组）。幂等：只精确匹配旧标量值，已迁移的行不受影响。
+    //   anthropic → ["anthropic"]
+    //   openai    → ["openai_chat","openai_responses"]，原 base_url（OpenAI URL）迁入
+    //               openai_base_url、原 default_model（OpenAI 模型）迁入 openai_default_model
+    //   universal → 三类型全勾，openai_base_url 取原派生值（base_url 去尾斜杠 + /v1）
+    if let Err(e) = conn.execute_batch(
+        "UPDATE ai_providers
+            SET provider_type = '[\"anthropic\"]'
+          WHERE provider_type = 'anthropic';
+         UPDATE ai_providers
+            SET provider_type = '[\"openai_chat\",\"openai_responses\"]',
+                openai_base_url = base_url,
+                base_url = '',
+                openai_default_model = default_model,
+                default_model = ''
+          WHERE provider_type = 'openai';
+         UPDATE ai_providers
+            SET provider_type = '[\"anthropic\",\"openai_chat\",\"openai_responses\"]',
+                openai_base_url = RTRIM(base_url, '/') || '/v1'
+          WHERE provider_type = 'universal';",
+    ) {
+        eprintln!(
+            "[agent-buddy] migrate ai_providers provider_types failed: {}",
+            e
+        );
+    }
+    ensure_column(
+        &conn,
         "claude_environments",
         "provider_id",
         "TEXT NOT NULL DEFAULT ''",
@@ -1122,6 +1156,7 @@ fn row_to_ai_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiProviderRow
         sort_order: row.get(13)?,
         api_keys_json: row.get(14)?,
         custom_models_json: row.get(15)?,
+        openai_base_url: row.get(16)?,
     })
 }
 
@@ -1131,7 +1166,8 @@ pub fn load_ai_provider_rows() -> Result<Vec<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json
+                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json,
+                    openai_base_url
              FROM ai_providers
              ORDER BY sort_order ASC, created_at ASC",
         )
@@ -1152,7 +1188,8 @@ pub fn get_ai_provider_row(id: &str) -> Result<Option<AiProviderRow>, String> {
         .prepare(
             "SELECT id, name, provider_type, base_url, api_key_salt, api_key_nonce,
                     api_key_cipher, default_model, openai_default_model, models_json,
-                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json
+                    notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json,
+                    openai_base_url
              FROM ai_providers
              WHERE id = ?1",
         )
@@ -1169,8 +1206,9 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
         "INSERT INTO ai_providers
             (id, name, provider_type, base_url, api_key_salt, api_key_nonce,
              api_key_cipher, default_model, openai_default_model, models_json,
-             notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+             notes, created_at, updated_at, sort_order, api_keys_json, custom_models_json,
+             openai_base_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             provider_type = excluded.provider_type,
@@ -1186,7 +1224,8 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             updated_at = excluded.updated_at,
             sort_order = excluded.sort_order,
             api_keys_json = excluded.api_keys_json,
-            custom_models_json = excluded.custom_models_json",
+            custom_models_json = excluded.custom_models_json,
+            openai_base_url = excluded.openai_base_url",
         params![
             row.id,
             row.name,
@@ -1204,6 +1243,7 @@ pub fn upsert_ai_provider_row(row: &AiProviderRow) -> Result<(), String> {
             row.sort_order,
             row.api_keys_json,
             row.custom_models_json,
+            row.openai_base_url,
         ],
     )
     .map_err(|e| format!("Failed to upsert ai_provider {}: {}", row.id, e))?;

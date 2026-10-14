@@ -35,7 +35,7 @@ import {
   isRouteAggregationProvider,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
-import { MODEL_TIERS, type AiProvider, type ProviderType } from "./ai-providers/types";
+import { MODEL_TIERS, apiTypesLabel, hasApiType, type AiProvider } from "./ai-providers/types";
 import {
   Blocks,
   ChevronDown,
@@ -141,8 +141,7 @@ const ProviderSelect = ({
     if (disabled) setOpen(false);
   }, [disabled]);
 
-  const typeLabel = (t: ProviderType) =>
-    t === "anthropic" ? "Anthropic" : t === "openai" ? "OpenAI" : "通用";
+  const typeLabel = (p: AiProvider) => apiTypesLabel(p.providerTypes);
 
   return (
     <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
@@ -156,7 +155,7 @@ const ProviderSelect = ({
         disabled={disabled}
       >
         <span className={`app-select-value ${value ? "" : "placeholder"}`}>
-          {value ? `${value.name} (${typeLabel(value.providerType)})` : "未选择（自行填写）"}
+          {value ? `${value.name} (${typeLabel(value)})` : "未选择（自行填写）"}
         </span>
         <span className="app-select-chevron" aria-hidden>
           <IconChevron open={open} />
@@ -192,7 +191,7 @@ const ProviderSelect = ({
             >
               <span className="app-select-option-title">{p.name}</span>
               <span className="app-select-option-sub">
-                {typeLabel(p.providerType)} · {p.baseUrl}
+                {typeLabel(p)} · {p.baseUrl}
               </span>
             </button>
           ))}
@@ -448,10 +447,8 @@ export default function ClaudeEnv() {
       // 加载供应商列表；路由聚合运行时将虚拟供应商「路由聚合」置顶
       void invokeProviderList()
         .then(async (rows) => {
-          // Claude 环境只展示 Anthropic / 通用供应商
-          const eligible = rows.filter(
-            (p) => p.providerType === "anthropic" || p.providerType === "universal",
-          );
+          // Claude 环境只展示勾选了 anthropic 协议的供应商
+          const eligible = rows.filter((p) => hasApiType(p.providerTypes, "anthropic"));
           const routeAgg = await fetchRouteAggregationProvider();
           setCloneProviders(routeAgg ? [routeAgg, ...eligible] : eligible);
         })
@@ -659,9 +656,7 @@ export default function ClaudeEnv() {
     // 加载供应商列表用于选择；路由聚合运行时将虚拟供应商「路由聚合」置顶
     void invokeProviderList()
       .then(async (rows) => {
-        const eligible = rows.filter(
-          (p) => p.providerType === "anthropic" || p.providerType === "universal",
-        );
+        const eligible = rows.filter((p) => hasApiType(p.providerTypes, "anthropic"));
         const routeAgg = await fetchRouteAggregationProvider();
         const all = routeAgg ? [routeAgg, ...eligible] : eligible;
         setEditProviders(all);

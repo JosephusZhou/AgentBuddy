@@ -31,7 +31,7 @@ import {
   type InboundProtocol,
 } from "./route-aggregation/types";
 import { invokeList } from "./ai-providers/api";
-import type { AiProvider } from "./ai-providers/types";
+import { apiTypesLabel, type AiProvider } from "./ai-providers/types";
 
 /**
  * 收起供应商列表时展示的模型 ID。
@@ -47,7 +47,10 @@ function getSelectedProviderModelIds(
   const modelIds = new Set<string>();
 
   for (const provider of providers) {
-    if (!isRouteableProviderType(provider.providerType) || enabledById.get(provider.id) === false) {
+    if (
+      !isRouteableProviderType(provider.providerTypes) ||
+      enabledById.get(provider.id) === false
+    ) {
       continue;
     }
 
@@ -875,9 +878,9 @@ function ProviderSelectRow({
   const [modelsLoading, setModelsLoading] = useState(true);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
 
-  // 路由聚合仅接受 Anthropic / OpenAI / Universal 三类 backend；其它类型
-  // 不会进 pool，强制禁用勾选并隐藏下游相关 UI。
-  const isRouteable = isRouteableProviderType(provider.providerType);
+  // 路由聚合仅接受勾选了 anthropic / openai_chat / openai_responses 的 backend；
+  // 其它供应商不会进 pool，强制禁用勾选并隐藏下游相关 UI。
+  const isRouteable = isRouteableProviderType(provider.providerTypes);
   // 无状态记录时视为默认勾选（与后端默认 enabled=true 对齐）
   const checked = routeStatus ? routeStatus.enabled : true;
 
@@ -971,7 +974,7 @@ function ProviderSelectRow({
                 border: "1px solid var(--seed-border)",
               }}
             >
-              {provider.providerType}
+              {apiTypesLabel(provider.providerTypes)}
             </span>
             {!isRouteable && (
               <span

@@ -32,7 +32,7 @@ import {
   openaiProviderBaseUrl,
   resolveProviderSecret,
 } from "./route-aggregation/virtual-provider";
-import type { AiProvider, ProviderType } from "./ai-providers/types";
+import { apiTypesLabel, hasApiType, type AiProvider } from "./ai-providers/types";
 import { OFFICIAL_OAUTH_PROVIDER_ID } from "./codex-env/types";
 import {
   Blocks,
@@ -97,7 +97,7 @@ const IconChevron = ({ open }: { open?: boolean }) => (
 const OFFICIAL_OAUTH_PROVIDER: AiProvider = {
   id: OFFICIAL_OAUTH_PROVIDER_ID,
   name: "官方 OAuth（Codex 登录）",
-  providerType: "openai",
+  providerTypes: ["openai_responses"],
   baseUrl: "",
   openaiBaseUrl: "",
   defaultModel: "",
@@ -157,8 +157,7 @@ const CodexProviderSelect = ({
     if (disabled) setOpen(false);
   }, [disabled]);
 
-  const typeLabel = (t: ProviderType) =>
-    t === "anthropic" ? "Anthropic" : t === "openai" ? "OpenAI" : "通用";
+  const typeLabel = (p: AiProvider) => apiTypesLabel(p.providerTypes);
 
   return (
     <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
@@ -172,7 +171,7 @@ const CodexProviderSelect = ({
         disabled={disabled}
       >
         <span className={`app-select-value ${value ? "" : "placeholder"}`}>
-          {value ? `${value.name} (${typeLabel(value.providerType)})` : "未选择（自行填写）"}
+          {value ? `${value.name} (${typeLabel(value)})` : "未选择（自行填写）"}
         </span>
         <span className="app-select-chevron" aria-hidden>
           <IconChevron open={open} />
@@ -211,9 +210,7 @@ const CodexProviderSelect = ({
               >
                 <span className="app-select-option-title">{p.name}</span>
                 <span className="app-select-option-sub">
-                  {isOfficialOauth
-                    ? "官方 OAuth · 启动后登录账号"
-                    : `${typeLabel(p.providerType)} · ${baseUrl}`}
+                  {isOfficialOauth ? "官方 OAuth · 启动后登录账号" : `${typeLabel(p)} · ${baseUrl}`}
                 </span>
               </button>
             );
@@ -471,9 +468,7 @@ export default function CodexEnv() {
       // 加载供应商列表（Codex 环境只展示 OpenAI / 通用供应商）；路由聚合运行时置顶虚拟供应商
       void invokeProviderList()
         .then(async (rows) => {
-          const eligible = rows.filter(
-            (p) => p.providerType === "openai" || p.providerType === "universal",
-          );
+          const eligible = rows.filter((p) => hasApiType(p.providerTypes, "openai_responses"));
           const routeAgg = await fetchRouteAggregationProvider();
           setCloneProviders([
             OFFICIAL_OAUTH_PROVIDER,
@@ -674,9 +669,7 @@ export default function CodexEnv() {
     // 加载供应商列表；路由聚合运行时置顶虚拟供应商
     void invokeProviderList()
       .then(async (rows) => {
-        const eligible = rows.filter(
-          (p) => p.providerType === "openai" || p.providerType === "universal",
-        );
+        const eligible = rows.filter((p) => hasApiType(p.providerTypes, "openai_responses"));
         const routeAgg = await fetchRouteAggregationProvider();
         const all = routeAgg ? [routeAgg, ...eligible] : eligible;
         setEditProviders([OFFICIAL_OAUTH_PROVIDER, ...all]);
@@ -1410,10 +1403,7 @@ export default function CodexEnv() {
                         return;
                       }
                       const baseUrl = openaiProviderBaseUrl(p);
-                      const defaultModel =
-                        p.providerType === "openai"
-                          ? p.defaultModel
-                          : p.openaiDefaultModel || p.defaultModel;
+                      const defaultModel = p.openaiDefaultModel || p.defaultModel;
                       setCloneBaseUrl(baseUrl);
                       setCloneModel(defaultModel);
                       // 自定义模型列表：已配置时直接作为模型下拉选项；未配置时清空（无远端拉取回退）
@@ -1778,10 +1768,7 @@ export default function CodexEnv() {
                         return;
                       }
                       const baseUrl = openaiProviderBaseUrl(p);
-                      const defaultModel =
-                        p.providerType === "openai"
-                          ? p.defaultModel
-                          : p.openaiDefaultModel || p.defaultModel;
+                      const defaultModel = p.openaiDefaultModel || p.defaultModel;
                       setEditBaseUrl(baseUrl);
                       setEditModel(defaultModel);
                       // 自定义模型列表：已配置时直接作为模型下拉选项；未配置时清空（无远端拉取回退）

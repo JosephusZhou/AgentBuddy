@@ -1,6 +1,6 @@
 // TypeScript types for route aggregation — mirrors Rust DTOs.
 
-import type { ProviderType } from "../ai-providers/types";
+import { hasAnyOpenaiType, hasApiType, type ApiType } from "../ai-providers/types";
 
 export type CloakingMode = "auto" | "always" | "never";
 
@@ -101,10 +101,10 @@ export const DEFAULT_CONFIG: RouteAggregationConfig = {
 /** 是否可以参与路由聚合转发。
  *
  * 与 Rust 端 `provider_router::build_pool_from_db` 的协议过滤保持一致：
- * 路由聚合只接受 Anthropic / OpenAI / Universal 三类 backend，其它类型
- * 一律不进入 pool。 */
-export function isRouteableProviderType(providerType: ProviderType | string): boolean {
-  return providerType === "anthropic" || providerType === "openai" || providerType === "universal";
+ * 勾选了 anthropic / openai_chat / openai_responses 任一协议的供应商即可按协议入池；
+ * 没有勾选任何 API 类型的供应商不进入 pool。 */
+export function isRouteableProviderType(types: ApiType[] | undefined | null): boolean {
+  return hasApiType(types, "anthropic") || hasAnyOpenaiType(types);
 }
 
 /** 不支持路由聚合的供应商在 UI 上的提示文案。 */

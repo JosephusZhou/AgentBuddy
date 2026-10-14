@@ -669,6 +669,7 @@ mod tests {
     struct TempHome {
         path: PathBuf,
         prev_home: Option<std::ffi::OsString>,
+        prev_path: Option<std::ffi::OsString>,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
 
@@ -688,9 +689,23 @@ mod tests {
             }
             let prev_home = std::env::var_os("HOME");
             std::env::set_var("HOME", &path);
+            // get_config 会用 sniff::is_agent_installed("pi") 门控视图；
+            // 在沙箱 PATH 里放一个假 pi 二进制，避免依赖开发机真实安装。
+            let bin = path.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("pi"), "#!/bin/sh\nexit 0\n").unwrap();
+            #[cfg(windows)]
+            fs::write(bin.join("pi.exe"), "").unwrap();
+            let prev_path = std::env::var_os("PATH");
+            let new_path = std::env::join_paths(std::iter::once(bin.clone()).chain(
+                std::env::split_paths(&prev_path.clone().unwrap_or_default()),
+            ))
+            .unwrap();
+            std::env::set_var("PATH", &new_path);
             Self {
                 path,
                 prev_home,
+                prev_path,
                 _guard: guard,
             }
         }
@@ -698,10 +713,14 @@ mod tests {
 
     impl Drop for TempHome {
         fn drop(&mut self) {
-            // 恢复原 HOME，避免污染进程内后续测试。
+            // 恢复原 HOME / PATH，避免污染进程内后续测试。
             match self.prev_home.take() {
                 Some(h) => std::env::set_var("HOME", h),
                 None => std::env::remove_var("HOME"),
+            }
+            match self.prev_path.take() {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
             }
             let _ = fs::remove_dir_all(&self.path);
         }

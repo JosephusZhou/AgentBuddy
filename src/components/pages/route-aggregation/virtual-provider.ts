@@ -24,14 +24,15 @@ export function openaiProviderBaseUrl(p: AiProvider): string {
   if (isRouteAggregationProvider(p.id)) {
     return p.openaiBaseUrl || `${p.baseUrl.replace(/\/$/, "")}/v1`;
   }
-  return p.providerType === "universal" ? p.openaiBaseUrl || p.baseUrl : p.baseUrl;
+  // 普通供应商：OpenAI 侧 Base URL 由用户独立填写落库。
+  return p.openaiBaseUrl;
 }
 
 /**
  * 返回路由聚合虚拟供应商。即使服务当前未启动也返回：环境关联关系保存在
  * 数据库中，编辑环境时必须能够回显已有关系；此时仍使用配置中的监听地址，
  * 待服务启动后即可生效。
- * 路由聚合同时支持 Anthropic 与 OpenAI，因此始终标记为 universal；各页面
+ * 路由聚合同时支持 Anthropic 与 OpenAI 各协议，因此标记为三种类型全勾；各页面
  * 根据自身协议使用 baseUrl 或 openaiBaseUrl。
  * `customModels` 为所有已勾选供应商自定义模型的去重并集（同 `GET /v1/models`）：
  * 环境弹窗把它当普通供应商读取模型下拉时，拿到的是真实可路由的模型集合；
@@ -49,7 +50,7 @@ export async function fetchRouteAggregationProvider(): Promise<AiProvider | null
     return {
       id: ROUTE_AGGREGATION_PROVIDER_ID,
       name: "路由聚合",
-      providerType: "universal",
+      providerTypes: ["anthropic", "openai_chat", "openai_responses"],
       baseUrl: base,
       openaiBaseUrl: `${base}/v1`,
       defaultModel: "",

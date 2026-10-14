@@ -28,9 +28,11 @@ import {
 } from "./ai-providers/api";
 import {
   MODEL_TIERS,
-  PROVIDER_TYPE_OPTIONS,
+  API_TYPE_OPTIONS,
+  hasApiType,
+  hasAnyOpenaiType,
   type AiProvider,
-  type ProviderType,
+  type ApiType,
   type CustomModel,
 } from "./ai-providers/types";
 
@@ -50,22 +52,6 @@ const IconEyeOff = () => <EyeOff size={16} strokeWidth={1.8} />;
 const IconGrip = () => <GripVertical size={16} strokeWidth={1.8} />;
 const IconCheckSquare = () => <CheckSquare size={16} strokeWidth={1.8} />;
 const IconSquare = () => <Square size={16} strokeWidth={1.8} />;
-const IconChevron = ({ open }: { open?: boolean }) => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    style={{
-      transform: open ? "rotate(180deg)" : undefined,
-      transition: "transform 0.15s ease",
-    }}
-  >
-    <path d="m6 9 6 6 6-6" />
-  </svg>
-);
 
 /* ModelComboBox 是唯一的模型输入控件；下拉候选直接来自 `formCustomModels`。
    自定义模型列表的录入方式有两种：
@@ -74,105 +60,83 @@ const IconChevron = ({ open }: { open?: boolean }) => (
    两种方式最终都落到 formCustomModels 并由 invokeUpsert 写入 DB。运行时
    （Claude / Codex / 路由聚合）永远只读 customModels，不再向供应商端点发请求。 */
 
-/** 类型徽标：Anthropic / OpenAI / 通用 用不同色调区分。 */
-function TypeBadge({ type }: { type: ProviderType }) {
-  let label: string;
-  if (type === "anthropic") label = "Anthropic";
-  else if (type === "openai") label = "OpenAI";
-  else label = "通用";
-
-  const accentStyle =
-    type === "openai"
-      ? undefined
-      : {
-          background: "color-mix(in srgb, var(--seed-primary) 12%, transparent)",
-          color: "var(--seed-active-fg)",
-          borderColor: "color-mix(in srgb, var(--seed-primary) 25%, transparent)",
-        };
-
+/** 类型徽标集合：按勾选的 API 类型输出小徽标。 */
+function TypeBadges({ types }: { types: ApiType[] }) {
   return (
-    <span className="ai-provider-badge" style={accentStyle}>
-      {label}
-    </span>
+    <>
+      {types.map((t) => (
+        <span
+          key={t}
+          className="ai-provider-badge"
+          style={{
+            background: "color-mix(in srgb, var(--seed-primary) 12%, transparent)",
+            color: "var(--seed-active-fg)",
+            borderColor: "color-mix(in srgb, var(--seed-primary) 25%, transparent)",
+          }}
+        >
+          {API_TYPE_OPTIONS.find((o) => o.value === t)?.label ?? t}
+        </span>
+      ))}
+    </>
   );
 }
 
-/** 类型下拉：选项仅三个（Anthropic / OpenAI / 通用），复用 app-select 既有样式。 */
-function TypeSelect({
+/** API 类型多选 checkbox 组：至少勾选一个。 */
+function TypeCheckboxes({
   value,
   onChange,
   disabled,
 }: {
-  value: ProviderType;
-  onChange: (value: ProviderType) => void;
+  value: Set<ApiType>;
+  onChange: (next: Set<ApiType>) => void;
   disabled?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selected = PROVIDER_TYPE_OPTIONS.find((o) => o.value === value);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [open]);
-
-  // capture：先于页面级 Escape 关闭弹窗，仅收起下拉
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [open]);
-
   return (
-    <div className={`app-select ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={rootRef}>
-      <button
-        type="button"
-        className="app-select-trigger form-input"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-labelledby="ai-provider-type-label"
-        disabled={disabled}
-        onClick={() => {
-          if (!disabled) setOpen((v) => !v);
-        }}
-      >
-        <span className="app-select-value">{selected?.label ?? "请选择"}</span>
-        <span className="app-select-chevron" aria-hidden>
-          <IconChevron open={open} />
-        </span>
-      </button>
-      {open && (
-        <div className="app-select-menu" role="listbox" aria-labelledby="ai-provider-type-label">
-          {PROVIDER_TYPE_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="option"
-              aria-selected={o.value === value}
-              className={`app-select-option ${o.value === value ? "selected" : ""}`}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-            >
-              <span className="app-select-option-title">{o.label}</span>
-              {o.sub ? <span className="app-select-option-sub">{o.sub}</span> : null}
-            </button>
-          ))}
-        </div>
-      )}
+    <div
+      role="group"
+      aria-labelledby="ai-provider-type-label"
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      {API_TYPE_OPTIONS.map((o) => {
+        const checked = value.has(o.value);
+        const toggle = () => {
+          if (disabled) return;
+          const next = new Set(value);
+          if (checked) {
+            // 至少保留一个勾选
+            if (next.size <= 1) return;
+            next.delete(o.value);
+          } else {
+            next.add(o.value);
+          }
+          onChange(next);
+        };
+        return (
+          <div
+            key={o.value}
+            role="checkbox"
+            aria-checked={checked}
+            tabIndex={0}
+            onClick={toggle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggle();
+              }
+            }}
+            className="ai-provider-model-picker-item"
+            style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}
+          >
+            <span className="ai-provider-model-picker-checkbox">
+              {checked ? <IconCheckSquare /> : <IconSquare />}
+            </span>
+            <div>
+              <div>{o.label}</div>
+              <div style={{ fontSize: 12, color: "var(--seed-muted)" }}>{o.sub}</div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -184,7 +148,7 @@ export default function AiProviders() {
   // 搜索（250ms 防抖）与类型筛选，交互与 Skills 管理页一致
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"all" | ProviderType>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "anthropic" | "openai">("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -197,8 +161,9 @@ export default function AiProviders() {
   const deleteDismiss = useOverlayDismiss(() => setDeleteTarget(null), !isDeleting);
 
   const [formName, setFormName] = useState("");
-  const [formType, setFormType] = useState<ProviderType>("anthropic");
+  const [formTypes, setFormTypes] = useState<Set<ApiType>>(new Set(["anthropic"]));
   const [formBaseUrl, setFormBaseUrl] = useState("");
+  const [formOpenaiBaseUrl, setFormOpenaiBaseUrl] = useState("");
   /** 多 API Key 列表（编辑时自动载入）。 */
   const [formApiKeys, setFormApiKeys] = useState<string[]>([""]);
   const [formApiKeyVisibles, setFormApiKeyVisibles] = useState<Record<number, boolean>>({});
@@ -274,23 +239,20 @@ export default function AiProviders() {
   }, [searchInput]);
 
   const anthropicCount = useMemo(
-    () => providers.filter((p) => p.providerType === "anthropic").length,
+    () => providers.filter((p) => hasApiType(p.providerTypes, "anthropic")).length,
     [providers],
   );
   const openaiCount = useMemo(
-    () => providers.filter((p) => p.providerType === "openai").length,
-    [providers],
-  );
-  const universalCount = useMemo(
-    () => providers.filter((p) => p.providerType === "universal").length,
+    () => providers.filter((p) => hasAnyOpenaiType(p.providerTypes)).length,
     [providers],
   );
 
-  // 类型与关键词为「与」筛选；关键词覆盖名称、Base URL、模型与备注
+  // 类型与关键词为「与」筛选；关键词覆盖名称、两侧 Base URL、模型与备注
   const filteredProviders = useMemo(
     () =>
       providers.filter((p) => {
-        if (typeFilter !== "all" && p.providerType !== typeFilter) return false;
+        if (typeFilter === "anthropic" && !hasApiType(p.providerTypes, "anthropic")) return false;
+        if (typeFilter === "openai" && !hasAnyOpenaiType(p.providerTypes)) return false;
         if (!searchQuery) return true;
         return [
           p.name,
@@ -306,11 +268,8 @@ export default function AiProviders() {
   );
   const isFiltering = typeFilter !== "all" || searchQuery !== "";
 
-  // 通用类型：OpenAI Base URL 由 Anthropic Base URL 自动派生（追加 /v1）
-  const derivedOpenaiBaseUrl = (() => {
-    const base = formBaseUrl.trim().replace(/\/+$/, "");
-    return formType === "universal" && base ? `${base}/v1` : "";
-  })();
+  const formHasAnthropic = formTypes.has("anthropic");
+  const formHasOpenai = formTypes.has("openai_chat") || formTypes.has("openai_responses");
 
   useEffect(() => {
     if (showForm) {
@@ -331,8 +290,9 @@ export default function AiProviders() {
 
   const resetForm = useCallback(() => {
     setFormName("");
-    setFormType("anthropic");
+    setFormTypes(new Set(["anthropic"]));
     setFormBaseUrl("");
+    setFormOpenaiBaseUrl("");
     setFormApiKeys([""]);
     setFormApiKeyVisibles({});
     setFormDefaultModel("");
@@ -357,8 +317,9 @@ export default function AiProviders() {
   const openEdit = useCallback((p: AiProvider) => {
     setEditingId(p.id);
     setFormName(p.name);
-    setFormType(p.providerType);
+    setFormTypes(new Set(p.providerTypes));
     setFormBaseUrl(p.baseUrl);
+    setFormOpenaiBaseUrl(p.openaiBaseUrl);
     setFormApiKeys([""]);
     setFormApiKeyVisibles({});
     setFormDefaultModel(p.defaultModel);
@@ -389,8 +350,9 @@ export default function AiProviders() {
   const openClone = useCallback((p: AiProvider) => {
     setEditingId(null);
     setFormName(`${p.name} 副本`);
-    setFormType(p.providerType);
+    setFormTypes(new Set(p.providerTypes));
     setFormBaseUrl(p.baseUrl);
+    setFormOpenaiBaseUrl(p.openaiBaseUrl);
     setFormApiKeys([""]);
     setFormApiKeyVisibles({});
     setFormDefaultModel(p.defaultModel);
@@ -421,7 +383,8 @@ export default function AiProviders() {
   // 结果仅在选择面板里暂存，"应用"按钮才会把它落到 formCustomModels 并由
   // invokeUpsert 写入 DB。保存后再次打开表单依然只显示 customModels。）。
   const fetchModelsForPicker = useCallback(async () => {
-    const baseUrl = formBaseUrl.trim();
+    // 优先 Anthropic 侧 Base URL；仅勾 OpenAI 时用 OpenAI 侧。
+    const baseUrl = (formHasAnthropic ? formBaseUrl : formOpenaiBaseUrl).trim();
     if (!baseUrl) {
       setStatusMsg("请先填写 Base URL");
       return;
@@ -450,7 +413,16 @@ export default function AiProviders() {
     } finally {
       setPickerLoading(false);
     }
-  }, [formBaseUrl, formApiKeys, editingId, editingHasKey, formCustomModels, setStatusMsg]);
+  }, [
+    formHasAnthropic,
+    formBaseUrl,
+    formOpenaiBaseUrl,
+    formApiKeys,
+    editingId,
+    editingHasKey,
+    formCustomModels,
+    setStatusMsg,
+  ]);
 
   // 应用选择面板中的选择到自定义模型列表（保留已有别名）。
   const applyPickerSelection = useCallback(() => {
@@ -502,17 +474,33 @@ export default function AiProviders() {
   const handleSave = useCallback(async () => {
     const name = formName.trim();
     const baseUrl = formBaseUrl.trim();
+    const openaiBaseUrl = formOpenaiBaseUrl.trim();
     // 过滤空 Key
     const apiKeys = formApiKeys.map((k) => k.trim()).filter((k) => k);
-    const defaultModel = formDefaultModel.trim();
 
-    if (!name || !baseUrl) {
-      setFormError("请填写名称和 Base URL");
+    if (!name) {
+      setFormError("请填写名称");
       return;
     }
-    if (!(baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))) {
-      setFormError("Base URL 必须以 http:// 或 https:// 开头");
-      return;
+    if (formHasAnthropic) {
+      if (!baseUrl) {
+        setFormError("勾选 Anthropic 时请填写 Anthropic Base URL");
+        return;
+      }
+      if (!(baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))) {
+        setFormError("Anthropic Base URL 必须以 http:// 或 https:// 开头");
+        return;
+      }
+    }
+    if (formHasOpenai) {
+      if (!openaiBaseUrl) {
+        setFormError("勾选 OpenAI 类型时请填写 OpenAI Base URL");
+        return;
+      }
+      if (!(openaiBaseUrl.startsWith("http://") || openaiBaseUrl.startsWith("https://"))) {
+        setFormError("OpenAI Base URL 必须以 http:// 或 https:// 开头");
+        return;
+      }
     }
     if (!editingId && apiKeys.length === 0) {
       setFormError("新建供应商时 API Key 不能为空");
@@ -523,9 +511,9 @@ export default function AiProviders() {
     setFormError("");
     try {
       const id = editingId ?? nextId();
-      // 仅 Anthropic / 通用类型提交档位模型；OpenAI 不支持档位覆盖
+      // 仅勾选 anthropic 时提交档位模型；OpenAI 协议不支持档位覆盖
       const models: Record<string, string> = {};
-      if (formType !== "openai") {
+      if (formHasAnthropic) {
         for (const tier of MODEL_TIERS) {
           const v = (formTierModels[tier.key] ?? "").trim();
           if (v) models[tier.key] = v;
@@ -535,11 +523,12 @@ export default function AiProviders() {
       const result = await invokeUpsert({
         id,
         name,
-        providerType: formType,
+        providerTypes: Array.from(formTypes),
         baseUrl,
+        ...(formHasOpenai ? { openaiBaseUrl } : {}),
         ...(apiKeys.length > 0 ? { apiKeys } : {}),
-        defaultModel,
-        ...(formType === "universal" ? { openaiDefaultModel: formOpenaiDefaultModel.trim() } : {}),
+        ...(formHasAnthropic ? { defaultModel: formDefaultModel.trim() } : {}),
+        ...(formHasOpenai ? { openaiDefaultModel: formOpenaiDefaultModel.trim() } : {}),
         models,
         customModels: formCustomModels,
         notes: formNotes.trim(),
@@ -563,8 +552,11 @@ export default function AiProviders() {
     }
   }, [
     formName,
-    formType,
+    formTypes,
+    formHasAnthropic,
+    formHasOpenai,
     formBaseUrl,
+    formOpenaiBaseUrl,
     formApiKeys,
     formDefaultModel,
     formOpenaiDefaultModel,
@@ -792,7 +784,6 @@ export default function AiProviders() {
                     inheritFont: false,
                   },
                   { key: "openai", label: "OpenAI", count: openaiCount, inheritFont: false },
-                  { key: "universal", label: "通用", count: universalCount, inheritFont: true },
                 ] as const
               ).map((opt) => {
                 return (
@@ -854,20 +845,24 @@ export default function AiProviders() {
                   )}
                   <div className="ai-provider-info">
                     <div className="ai-provider-name">
-                      <TypeBadge type={p.providerType} />
+                      <TypeBadges types={p.providerTypes} />
                       {p.name}
                     </div>
-                    <div className="ai-provider-detail">
-                      {p.providerType === "universal" ? `Anthropic: ${p.baseUrl}` : p.baseUrl}
-                    </div>
-                    {p.providerType === "universal" && p.openaiBaseUrl ? (
+                    {hasApiType(p.providerTypes, "anthropic") && p.baseUrl ? (
+                      <div className="ai-provider-detail">Anthropic: {p.baseUrl}</div>
+                    ) : null}
+                    {hasAnyOpenaiType(p.providerTypes) && p.openaiBaseUrl ? (
                       <div className="ai-provider-detail">OpenAI: {p.openaiBaseUrl}</div>
                     ) : null}
                     <div className="ai-provider-detail">
-                      {p.providerType === "universal"
-                        ? `OpenAI 默认: ${p.openaiDefaultModel || "未设置"} · Anthropic 默认: ${p.defaultModel || "未设置"}`
-                        : `默认模型: ${p.defaultModel || "未设置"}`}
-                      {p.providerType !== "openai" && tierCount > 0
+                      {hasApiType(p.providerTypes, "anthropic") &&
+                        `Anthropic 默认: ${p.defaultModel || "未设置"}`}
+                      {hasApiType(p.providerTypes, "anthropic") && hasAnyOpenaiType(p.providerTypes)
+                        ? " · "
+                        : ""}
+                      {hasAnyOpenaiType(p.providerTypes) &&
+                        `OpenAI 默认: ${p.openaiDefaultModel || "未设置"}`}
+                      {hasApiType(p.providerTypes, "anthropic") && tierCount > 0
                         ? ` · 档位模型 ${tierCount} 个`
                         : ""}
                       {p.hasApiKey ? " · 已配置 Key" : " · 未配置 Key"}
@@ -936,42 +931,46 @@ export default function AiProviders() {
             </div>
             <div className="form-group">
               <label className="form-label" id="ai-provider-type-label">
-                类型
+                API 类型 <span className="form-label-optional">至少勾选一项</span>
               </label>
-              <TypeSelect value={formType} onChange={setFormType} disabled={isSaving} />
+              <TypeCheckboxes value={formTypes} onChange={setFormTypes} disabled={isSaving} />
             </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="ai-provider-base-url">
-                {formType === "universal" ? "Anthropic Base URL" : "Base URL"}
-              </label>
-              <input
-                type="url"
-                className="form-input"
-                id="ai-provider-base-url"
-                placeholder={
-                  formType === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"
-                }
-                value={formBaseUrl}
-                onChange={(e) => {
-                  setFormBaseUrl(e.target.value);
-                }}
-                disabled={isSaving}
-              />
-              {formType === "universal" && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="ai-provider-tier-label">OpenAI Base URL（自动派生）</div>
-                  <input
-                    type="text"
-                    className="form-input"
-                    aria-label="OpenAI Base URL（自动派生）"
-                    value={derivedOpenaiBaseUrl}
-                    placeholder="填写 Anthropic Base URL 后自动生成"
-                    disabled
-                    readOnly
-                  />
-                </div>
-              )}
-            </div>
+            {formHasAnthropic && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ai-provider-base-url">
+                  Anthropic Base URL
+                </label>
+                <input
+                  type="url"
+                  className="form-input"
+                  id="ai-provider-base-url"
+                  placeholder="https://api.anthropic.com"
+                  value={formBaseUrl}
+                  onChange={(e) => {
+                    setFormBaseUrl(e.target.value);
+                  }}
+                  disabled={isSaving}
+                />
+              </div>
+            )}
+            {formHasOpenai && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ai-provider-openai-base-url">
+                  OpenAI Base URL
+                </label>
+                <input
+                  type="url"
+                  className="form-input"
+                  id="ai-provider-openai-base-url"
+                  placeholder="https://api.openai.com/v1"
+                  value={formOpenaiBaseUrl}
+                  onChange={(e) => {
+                    setFormOpenaiBaseUrl(e.target.value);
+                  }}
+                  disabled={isSaving}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">API Key</label>
               {formApiKeys.map((key, index) => (
@@ -1211,7 +1210,7 @@ export default function AiProviders() {
               </div>
             </div>
             {/* 默认模型选择（从自定义模型列表筛选） */}
-            {formType === "universal" && (
+            {formHasOpenai && (
               <div className="form-group">
                 <label className="form-label" htmlFor="ai-provider-openai-default-model">
                   OpenAI 默认模型 <span className="form-label-optional">可选</span>
@@ -1226,21 +1225,22 @@ export default function AiProviders() {
                 />
               </div>
             )}
-            <div className="form-group">
-              <label className="form-label" htmlFor="ai-provider-default-model">
-                {formType === "universal" ? "Anthropic 默认模型" : "默认模型"}{" "}
-                <span className="form-label-optional">可选</span>
-              </label>
-              <ModelComboBox
-                id="ai-provider-default-model"
-                value={formDefaultModel}
-                onChange={setFormDefaultModel}
-                disabled={isSaving}
-                options={customModelOptions}
-                placeholder={formType === "openai" ? "gpt-5" : "claude-sonnet-4-5"}
-              />
-            </div>
-            {formType !== "openai" ? (
+            {formHasAnthropic && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="ai-provider-default-model">
+                  Anthropic 默认模型 <span className="form-label-optional">可选</span>
+                </label>
+                <ModelComboBox
+                  id="ai-provider-default-model"
+                  value={formDefaultModel}
+                  onChange={setFormDefaultModel}
+                  disabled={isSaving}
+                  options={customModelOptions}
+                  placeholder="claude-sonnet-4-5"
+                />
+              </div>
+            )}
+            {formHasAnthropic && (
               <div className="form-group">
                 <label className="form-label">
                   档位模型 <span className="form-label-optional">可选，从自定义模型列表选择</span>
@@ -1258,7 +1258,7 @@ export default function AiProviders() {
                   </div>
                 ))}
               </div>
-            ) : null}
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="ai-provider-notes">
                 备注 <span className="form-label-optional">可选</span>

@@ -67,34 +67,13 @@ pub fn format_for_group(group: RouteGroup) -> ProviderFormat {
     }
 }
 
-/// 把上游 provider 类型映射为协议格式。
+/// 把上游 provider（在某入站组池中）映射为协议格式。
 ///
-/// `group` 是客户端入口，决定同一 provider_type 在不同入站组下使用哪种 ProviderFormat：
-/// - universal（同时支持 Anthropic + OpenAI 各格式）：ClaudeCode 组走 Anthropic
-///   （`/v1/messages`），Codex 组走 OpenAiResponses（`/v1/responses`），OpenAiChat
-///   组走 OpenAiChatCompletions（`/v1/chat/completions`）。各组下都不需要协议转换，
-///   直接 passthrough。
-/// - openai 类型：Codex 组走 OpenAiResponses，OpenAiChat 组走 OpenAiChatCompletions
-///   （2026-08-13 决策：去掉 Chat 兼容、外部 OpenAI client 走 Responses；2026-09-22
-///   新增：Chat Completions 客户端走 CC→CC 同协议透传）。
-/// - anthropic 类型：固定 Anthropic（ClaudeCode 组的同方言 passthrough）。
-/// - 其它类型：兜底为 OpenAiResponses；正常路径不会命中。
-pub fn format_for_provider_type(provider_type: &str, group: RouteGroup) -> ProviderFormat {
-    match provider_type {
-        crate::ai_provider::TYPE_ANTHROPIC => ProviderFormat::Anthropic,
-        crate::ai_provider::TYPE_UNIVERSAL => match group {
-            RouteGroup::ClaudeCode => ProviderFormat::Anthropic,
-            RouteGroup::Codex => ProviderFormat::OpenAiResponses,
-            RouteGroup::OpenAiChat => ProviderFormat::OpenAiChatCompletions,
-        },
-        crate::ai_provider::TYPE_OPENAI => match group {
-            RouteGroup::Codex => ProviderFormat::OpenAiResponses,
-            RouteGroup::OpenAiChat => ProviderFormat::OpenAiChatCompletions,
-            // openai 类型供应商不会进入 ClaudeCode 池（pool 过滤），兜底分支。
-            RouteGroup::ClaudeCode => ProviderFormat::Anthropic,
-        },
-        _ => ProviderFormat::OpenAiResponses,
-    }
+/// 多类型勾选后，入池过滤已保证供应商支持该组协议（ClaudeCode←anthropic、
+/// Codex←openai_responses、OpenAiChat←openai_chat），因此格式由 group 唯一决定，
+/// 做 A→A / OR→OR / CC→CC 同协议 passthrough；`provider_type` 参数仅用于兼容既有签名。
+pub fn format_for_provider_type(_provider_type: &str, group: RouteGroup) -> ProviderFormat {
+    format_for_group(group)
 }
 
 /// Forward a request through the route group's provider pool with failover.
@@ -713,7 +692,7 @@ mod tests {
         let provider = crate::route_aggregation::RouteProvider {
             id: "test".into(),
             name: "test".into(),
-            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            provider_type: r#"["anthropic"]"#.into(),
             base_url: "https://example.test/v1/".into(),
             api_key: String::new(),
             model_ids: Vec::new(),
@@ -736,7 +715,7 @@ mod tests {
         super::RouteProvider {
             id: "p1".into(),
             name: "p1".into(),
-            provider_type: crate::ai_provider::TYPE_ANTHROPIC.into(),
+            provider_type: r#"["anthropic"]"#.into(),
             base_url: "https://relay.test".into(),
             api_key: "sk-provider-key".into(),
             model_ids: Vec::new(),
@@ -783,7 +762,7 @@ mod tests {
         super::RouteProvider {
             id: "p2".into(),
             name: "p2".into(),
-            provider_type: crate::ai_provider::TYPE_OPENAI.into(),
+            provider_type: r#"["openai_chat","openai_responses"]"#.into(),
             base_url: base_url.into(),
             api_key: "sk-openai-key".into(),
             model_ids: Vec::new(),
@@ -836,32 +815,29 @@ mod tests {
     }
 
     #[test]
-    fn format_maps_openai_chat_group_and_provider_types() {
+    fn format_depends_only_on_group_after_multi_type_pool_filtering() {
         use super::{format_for_group, format_for_provider_type};
         use crate::route_aggregation::RouteGroup;
 
-        assert_eq!(
-            format_for_group(RouteGroup::OpenAiChat),
-            super::ProviderFormat::OpenAiChatCompletions
-        );
-        // openai / universal 供应商在 OpenAiChat 组走 Chat Completions。
-        assert_eq!(
-            format_for_provider_type(crate::ai_provider::TYPE_OPENAI, RouteGroup::OpenAiChat),
-            super::ProviderFormat::OpenAiChatCompletions
-        );
-        assert_eq!(
-            format_for_provider_type(crate::ai_provider::TYPE_UNIVERSAL, RouteGroup::OpenAiChat),
-            super::ProviderFormat::OpenAiChatCompletions
-        );
-        // 既有映射不回退：Codex 组仍是 Responses。
-        assert_eq!(
-            format_for_provider_type(crate::ai_provider::TYPE_OPENAI, RouteGroup::Codex),
-            super::ProviderFormat::OpenAiResponses
-        );
-        // anthropic 类型供应商在 OpenAiChat 组固定走 Anthropic（pool 过滤后不会出现）。
-        assert_eq!(
-            format_for_provider_type(crate::ai_provider::TYPE_ANTHROPIC, RouteGroup::OpenAiChat),
-            super::ProviderFormat::Anthropic
-        );
+        // 入池过滤已保证协议兼容，format_for_provider_type 等价于 format_for_group。
+        for (group, expected) in [
+            (RouteGroup::ClaudeCode, super::ProviderFormat::Anthropic),
+            (RouteGroup::Codex, super::ProviderFormat::OpenAiResponses),
+            (
+                RouteGroup::OpenAiChat,
+                super::ProviderFormat::OpenAiChatCompletions,
+            ),
+        ] {
+            assert_eq!(format_for_group(group), expected);
+            // 任意 provider 类型字符串在同一组下都得到相同格式。
+            assert_eq!(
+                format_for_provider_type(r#"["anthropic"]"#, group),
+                expected
+            );
+            assert_eq!(
+                format_for_provider_type(r#"["openai_chat","openai_responses"]"#, group),
+                expected
+            );
+        }
     }
 }

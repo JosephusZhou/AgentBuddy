@@ -1,6 +1,7 @@
 //! AI provider (上游模型供应商) registry: encrypted API key storage + CRUD.
 //!
-//! 独立的供应商库：类型（anthropic / openai）+ Base URL + API Key + 默认模型；
+//! 独立的供应商库：API 类型集合（anthropic / openai_chat / openai_responses，
+//! 可多选）+ Anthropic 侧 Base URL + OpenAI 侧 Base URL + API Key + 两侧默认模型；
 //! Anthropic 类型额外支持按档位（haiku/sonnet/opus/fable）覆盖模型。
 //! 本期仅做管理，不做下发到 Agent/环境（后续可扩展为一键填充）。
 
@@ -11,11 +12,62 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const TYPE_ANTHROPIC: &str = "anthropic";
-pub const TYPE_OPENAI: &str = "openai";
-/// 通用类型：同时配置 Anthropic 与 OpenAI 两种接入；OpenAI Base URL 由
-/// Anthropic Base URL 自动派生（追加 /v1），并同时持有两套默认模型。
-pub const TYPE_UNIVERSAL: &str = "universal";
+/// API 类型：Anthropic Messages 协议。
+pub const API_TYPE_ANTHROPIC: &str = "anthropic";
+/// API 类型：OpenAI Chat Completions 协议。
+pub const API_TYPE_OPENAI_CHAT: &str = "openai_chat";
+/// API 类型：OpenAI Responses 协议。
+pub const API_TYPE_OPENAI_RESPONSES: &str = "openai_responses";
+
+/// 全部合法 API 类型。
+pub const API_TYPES: [&str; 3] = [
+    API_TYPE_ANTHROPIC,
+    API_TYPE_OPENAI_CHAT,
+    API_TYPE_OPENAI_RESPONSES,
+];
+
+/// 解析 `provider_type` 列（新版为 JSON 数组；兼容旧版单值标量）为规范化、
+/// 去重后的合法 API 类型列表。无法解析出任何合法类型时返回空 Vec。
+pub fn parse_api_types(raw: &str) -> Vec<String> {
+    let raw = raw.trim();
+    // 旧版单值标量（多类型升级前）→ 映射到新类型集合。
+    let mapped: Option<&[&str]> = match raw {
+        "anthropic" => Some(&[API_TYPE_ANTHROPIC][..]),
+        "openai" => Some(&[API_TYPE_OPENAI_CHAT, API_TYPE_OPENAI_RESPONSES][..]),
+        "universal" => Some(
+            &[
+                API_TYPE_ANTHROPIC,
+                API_TYPE_OPENAI_CHAT,
+                API_TYPE_OPENAI_RESPONSES,
+            ][..],
+        ),
+        _ => None,
+    };
+    if let Some(m) = mapped {
+        return m.iter().map(|s| s.to_string()).collect();
+    }
+    let parsed: Vec<String> = serde_json::from_str(raw).unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    for item in parsed {
+        let t = item.trim().to_lowercase();
+        if API_TYPES.contains(&t.as_str()) && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// `provider_type` 列是否包含指定 API 类型。
+pub fn provider_types_contain(raw: &str, target: &str) -> bool {
+    parse_api_types(raw).iter().any(|t| t == target)
+}
+
+/// `provider_type` 列是否包含任一 OpenAI 协议类型（chat 或 responses）。
+pub fn provider_types_have_openai(raw: &str) -> bool {
+    parse_api_types(raw)
+        .iter()
+        .any(|t| t == API_TYPE_OPENAI_CHAT || t == API_TYPE_OPENAI_RESPONSES)
+}
 
 /// Anthropic 档位模型覆盖允许使用的键（与 Claude 环境的
 /// ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL 概念对齐）。
@@ -64,14 +116,17 @@ pub fn effective_custom_model_ids(models: impl IntoIterator<Item = CustomModel>)
 pub struct AiProvider {
     pub id: String,
     pub name: String,
-    pub provider_type: String,
+    /// 已勾选的 API 类型集合（anthropic / openai_chat / openai_responses）。
+    pub provider_types: Vec<String>,
+    /// Anthropic 侧 Base URL（勾选 anthropic 时有值）。
     pub base_url: String,
-    /// 通用类型下由 base_url 派生（追加 /v1）；其他类型恒为空串。
+    /// OpenAI 侧 Base URL（勾选任一 OpenAI 类型时有值），用户独立填写、落库。
     pub openai_base_url: String,
+    /// Anthropic 侧默认模型。
     pub default_model: String,
-    /// 通用类型的 OpenAI 默认模型；其他类型恒为空串。
+    /// OpenAI 侧默认模型。
     pub openai_default_model: String,
-    /// Anthropic 档位模型覆盖；OpenAI 类型恒为空 map。
+    /// Anthropic 档位模型覆盖；未勾选 anthropic 时恒为空 map。
     pub models: HashMap<String, String>,
     pub has_api_key: bool,
     /// 已存储的 API Key 数量（支持多 Key）。
@@ -89,8 +144,13 @@ pub struct AiProvider {
 pub struct AiProviderRow {
     pub id: String,
     pub name: String,
+    /// 新版为 JSON 数组字符串（如 `["anthropic","openai_chat"]`）；
+    /// 旧版单值（anthropic/openai/universal）由 db 启动迁移与 parse_api_types 兼容。
     pub provider_type: String,
+    /// Anthropic 侧 Base URL。
     pub base_url: String,
+    /// OpenAI 侧 Base URL（独立填写、落库）。
+    pub openai_base_url: String,
     pub api_key_salt: String,
     pub api_key_nonce: String,
     pub api_key_cipher: String,
@@ -108,19 +168,11 @@ pub struct AiProviderRow {
     pub custom_models_json: String,
 }
 
-/// 通用类型下由 Anthropic Base URL 派生 OpenAI 形式 Base URL（追加 /v1）。
-pub fn derive_openai_base_url(provider_type: &str, base_url: &str) -> String {
-    if provider_type != TYPE_UNIVERSAL {
-        return String::new();
-    }
-    format!("{}/v1", base_url.trim_end_matches('/'))
-}
-
 impl From<AiProviderRow> for AiProvider {
     fn from(row: AiProviderRow) -> Self {
         let models: HashMap<String, String> =
             serde_json::from_str(&row.models_json).unwrap_or_default();
-        let openai_base_url = derive_openai_base_url(&row.provider_type, &row.base_url);
+        let provider_types = parse_api_types(&row.provider_type);
         // 解析多 Key JSON；为空时回退到旧的单 Key 列。
         let enc_keys: Vec<EncryptedKey> =
             serde_json::from_str(&row.api_keys_json).unwrap_or_default();
@@ -136,9 +188,9 @@ impl From<AiProviderRow> for AiProvider {
         Self {
             id: row.id,
             name: row.name,
-            provider_type: row.provider_type,
+            provider_types,
             base_url: row.base_url,
-            openai_base_url,
+            openai_base_url: row.openai_base_url,
             default_model: row.default_model,
             openai_default_model: row.openai_default_model,
             models,
@@ -158,17 +210,22 @@ impl From<AiProviderRow> for AiProvider {
 pub struct AiProviderUpsertPayload {
     pub id: String,
     pub name: String,
-    pub provider_type: String,
+    /// 勾选的 API 类型集合（anthropic / openai_chat / openai_responses）。
+    pub provider_types: Vec<String>,
+    /// Anthropic 侧 Base URL（勾选 anthropic 时必填）。
     pub base_url: String,
+    /// OpenAI 侧 Base URL（勾选任一 OpenAI 类型时必填）。
+    pub openai_base_url: Option<String>,
     /// Required on create; empty/omitted on edit keeps existing ciphertext.
     /// （旧字段，仅单个 Key；优先使用 `api_keys`。）
     pub api_key: Option<String>,
     /// 多 API Key（明文数组）；Some 时替换全部密钥，None 时保持旧密钥。
     pub api_keys: Option<Vec<String>>,
+    /// Anthropic 侧默认模型。
     pub default_model: Option<String>,
-    /// 通用类型的 OpenAI 默认模型；其他类型忽略并清空。
+    /// OpenAI 侧默认模型。
     pub openai_default_model: Option<String>,
-    /// Anthropic 档位模型覆盖（haiku/sonnet/opus/fable）；anthropic/universal 有效。
+    /// Anthropic 档位模型覆盖（haiku/sonnet/opus/fable）；勾选 anthropic 时有效。
     pub models: Option<HashMap<String, String>>,
     /// 自定义模型列表（含别名 ID）；None 时保持旧列表，Some 时替换。
     pub custom_models: Option<Vec<CustomModel>>,
@@ -197,24 +254,32 @@ fn validate_base_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_provider_type(raw: &str) -> Result<String, String> {
-    let t = raw.trim().to_lowercase();
-    match t.as_str() {
-        TYPE_ANTHROPIC => Ok(TYPE_ANTHROPIC.to_string()),
-        TYPE_OPENAI => Ok(TYPE_OPENAI.to_string()),
-        TYPE_UNIVERSAL => Ok(TYPE_UNIVERSAL.to_string()),
-        _ => Err("供应商类型仅支持 anthropic、openai 或 universal".to_string()),
+/// 规范化前端提交的 API 类型集合：去空白、小写、去重；至少保留一个合法类型。
+fn normalize_api_types(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in raw {
+        let t = item.trim().to_lowercase();
+        if API_TYPES.contains(&t.as_str()) && !out.contains(&t) {
+            out.push(t);
+        }
     }
+    if out.is_empty() {
+        return Err(
+            "请至少勾选一个 API 类型（Anthropic / OpenAI Chat Completions / OpenAI Responses）"
+                .to_string(),
+        );
+    }
+    Ok(out)
 }
 
-/// 过滤档位模型映射：仅保留允许的档位键、去除空值；仅 anthropic/universal 保留。
-/// OpenAI 类型没有 `haiku`/`sonnet`/`opus`/`fable` 这类档位概念，
+/// 过滤档位模型映射：仅保留允许的档位键、去除空值；仅勾选了 anthropic 时保留。
+/// OpenAI 协议没有 `haiku`/`sonnet`/`opus`/`fable` 这类档位概念，
 /// 无论前端是否误传都强制清空，避免在 Claude/Codex 环境回写时混入无效档位。
 fn normalize_models(
-    provider_type: &str,
+    has_anthropic: bool,
     models: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    if provider_type == TYPE_OPENAI {
+    if !has_anthropic {
         return HashMap::new();
     }
     models
@@ -235,12 +300,7 @@ pub fn list_providers() -> Result<Vec<AiProvider>, String> {
     let rows = db::load_ai_provider_rows()?;
     Ok(rows
         .into_iter()
-        .filter(|row| {
-            matches!(
-                row.provider_type.as_str(),
-                TYPE_ANTHROPIC | TYPE_OPENAI | TYPE_UNIVERSAL
-            )
-        })
+        .filter(|row| !parse_api_types(&row.provider_type).is_empty())
         .map(AiProvider::from)
         .collect())
 }
@@ -248,11 +308,34 @@ pub fn list_providers() -> Result<Vec<AiProvider>, String> {
 pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderActionResult, String> {
     let id = payload.id.trim().to_string();
     let name = payload.name.trim().to_string();
-    let provider_type = normalize_provider_type(&payload.provider_type)?;
-    let base_url = payload.base_url.trim().to_string();
-    let default_model = payload.default_model.unwrap_or_default().trim().to_string();
-    // OpenAI 默认模型仅通用类型保留
-    let openai_default_model = if provider_type == TYPE_UNIVERSAL {
+    let types = normalize_api_types(&payload.provider_types)?;
+    let has_anthropic = types.iter().any(|t| t == API_TYPE_ANTHROPIC);
+    let has_openai = types
+        .iter()
+        .any(|t| t == API_TYPE_OPENAI_CHAT || t == API_TYPE_OPENAI_RESPONSES);
+    let provider_type = serde_json::to_string(&types).unwrap_or_else(|_| "[]".into());
+
+    // 勾选了哪侧才接收哪侧的 URL / 默认模型；未勾选侧强制清空，保持库内一致。
+    let base_url = if has_anthropic {
+        payload.base_url.trim().to_string()
+    } else {
+        String::new()
+    };
+    let openai_base_url = if has_openai {
+        payload
+            .openai_base_url
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    } else {
+        String::new()
+    };
+    let default_model = if has_anthropic {
+        payload.default_model.unwrap_or_default().trim().to_string()
+    } else {
+        String::new()
+    };
+    let openai_default_model = if has_openai {
         payload
             .openai_default_model
             .unwrap_or_default()
@@ -272,11 +355,16 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
     if name.is_empty() {
         return Err("名称不能为空".to_string());
     }
-    validate_base_url(&base_url)?;
+    if has_anthropic {
+        validate_base_url(&base_url)?;
+    }
+    if has_openai {
+        validate_base_url(&openai_base_url)?;
+    }
 
     let empty_models = HashMap::new();
     let models = normalize_models(
-        &provider_type,
+        has_anthropic,
         payload.models.as_ref().unwrap_or(&empty_models),
     );
     let models_json = serde_json::to_string(&models).unwrap_or_else(|_| "{}".into());
@@ -367,6 +455,7 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         name,
         provider_type,
         base_url,
+        openai_base_url,
         api_key_salt,
         api_key_nonce,
         api_key_cipher,
@@ -408,32 +497,32 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         let tier_models: std::collections::HashMap<String, String> =
             serde_json::from_str(&row.models_json).unwrap_or_default();
 
-        // 根据 provider_type 决定写入 Claude 环境 / Codex 环境的值。
-        let (claude_base, claude_model, codex_base, codex_model): (String, String, String, String) =
-            match row.provider_type.as_str() {
-                TYPE_UNIVERSAL => {
-                    let openai_base = derive_openai_base_url(&row.provider_type, &row.base_url);
-                    (
-                        row.base_url.clone(),
-                        row.default_model.clone(),
-                        openai_base,
-                        row.openai_default_model.clone(),
-                    )
-                }
-                TYPE_ANTHROPIC => (
-                    row.base_url.clone(),
-                    row.default_model.clone(),
-                    String::new(),
-                    String::new(),
-                ),
-                TYPE_OPENAI => (
-                    String::new(),
-                    String::new(),
-                    row.base_url.clone(),
-                    row.default_model.clone(),
-                ),
-                _ => (String::new(), String::new(), String::new(), String::new()),
-            };
+        // 根据勾选的 API 类型决定写入 Claude 环境 / Codex 环境的值：
+        // 勾了 anthropic → Anthropic 侧 URL/默认模型；勾了任一 openai → OpenAI 侧。
+        let has_anthropic_row = provider_types_contain(&row.provider_type, API_TYPE_ANTHROPIC);
+        let has_openai_row = provider_types_have_openai(&row.provider_type);
+        let (claude_base, claude_model, codex_base, codex_model): (String, String, String, String) = (
+            if has_anthropic_row {
+                row.base_url.clone()
+            } else {
+                String::new()
+            },
+            if has_anthropic_row {
+                row.default_model.clone()
+            } else {
+                String::new()
+            },
+            if has_openai_row {
+                row.openai_base_url.clone()
+            } else {
+                String::new()
+            },
+            if has_openai_row {
+                row.openai_default_model.clone()
+            } else {
+                String::new()
+            },
+        );
 
         let mut sync_parts: Vec<String> = Vec::new();
 
@@ -545,15 +634,14 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
                         Some("openai") => codex_base.clone(),
                         Some("anthropic") => claude_base.clone(),
                         // provider 不存在或 api 字段为空（新建场景）：
-                        //   - anthropic 类型供应商 → 默认走 anthropic 侧
-                        //   - openai 类型供应商 → 默认走 openai 侧
-                        //   - universal 类型 → 默认走 anthropic 侧
-                        None => match row.provider_type.as_str() {
-                            TYPE_ANTHROPIC => claude_base.clone(),
-                            TYPE_OPENAI => codex_base.clone(),
-                            TYPE_UNIVERSAL => claude_base.clone(),
-                            _ => String::new(),
-                        },
+                        // 优先 anthropic 侧，否则走 openai 侧。
+                        None => {
+                            if has_anthropic_row {
+                                claude_base.clone()
+                            } else {
+                                codex_base.clone()
+                            }
+                        }
                         // 其他 api 类型（google/azure 等）：不同步 base_url，只同步 api_key
                         _ => String::new(),
                     };
@@ -725,8 +813,9 @@ mod tests {
         AiProviderUpsertPayload {
             id: id.to_string(),
             name: "测试供应商".to_string(),
-            provider_type: "anthropic".to_string(),
+            provider_types: vec![API_TYPE_ANTHROPIC.to_string()],
             base_url: "https://api.example.com".to_string(),
+            openai_base_url: None,
             api_key: api_key.map(|s| s.to_string()),
             api_keys: None,
             default_model: Some("claude-sonnet-x".to_string()),
@@ -735,6 +824,31 @@ mod tests {
             custom_models: None,
             notes: Some("note".to_string()),
         }
+    }
+
+    #[test]
+    fn parse_api_types_handles_new_and_legacy_values() {
+        assert_eq!(
+            parse_api_types("[\"anthropic\",\"openai_chat\"]"),
+            vec!["anthropic", "openai_chat"]
+        );
+        // 去重 + 忽略非法项
+        assert_eq!(
+            parse_api_types("[\"openai_chat\",\"openai_chat\",\"bogus\"]"),
+            vec!["openai_chat"]
+        );
+        // 旧版标量映射
+        assert_eq!(parse_api_types("anthropic"), vec!["anthropic"]);
+        assert_eq!(
+            parse_api_types("openai"),
+            vec!["openai_chat", "openai_responses"]
+        );
+        assert_eq!(
+            parse_api_types("universal"),
+            vec!["anthropic", "openai_chat", "openai_responses"]
+        );
+        assert!(parse_api_types("").is_empty());
+        assert!(parse_api_types("gemini").is_empty());
     }
 
     #[test]
@@ -747,7 +861,7 @@ mod tests {
         assert!(created.ok);
         let p = created.provider.expect("provider");
         assert!(p.has_api_key);
-        assert_eq!(p.provider_type, "anthropic");
+        assert_eq!(p.provider_types, vec!["anthropic"]);
         assert_eq!(p.default_model, "claude-sonnet-x");
         // 只允许合法档位键、丢弃空值
         assert_eq!(p.models.len(), 1);
@@ -782,43 +896,61 @@ mod tests {
     }
 
     #[test]
-    fn openai_type_clears_tier_models() {
+    fn openai_only_provider_clears_tier_models() {
         let _home_guard = crate::config::lock_home_for_test();
         let id = unique_id("openai");
         let mut pl = payload(&id, Some("sk-openai"));
-        pl.provider_type = "openai".to_string();
+        pl.provider_types = vec!["openai_chat".into(), "openai_responses".into()];
+        pl.base_url = String::new();
+        pl.openai_base_url = Some("https://api.openai.com/v1".into());
+        pl.default_model = None;
+        pl.openai_default_model = Some("gpt-5".into());
         let created = upsert_provider(pl).expect("create");
         let p = created.provider.expect("provider");
-        assert_eq!(p.provider_type, "openai");
+        assert_eq!(p.provider_types, vec!["openai_chat", "openai_responses"]);
         assert!(p.models.is_empty());
+        // 未勾选 anthropic：anthropic 侧字段被清空
+        assert!(p.base_url.is_empty());
+        assert!(p.default_model.is_empty());
+        assert_eq!(p.openai_base_url, "https://api.openai.com/v1");
+        assert_eq!(p.openai_default_model, "gpt-5");
         delete_provider(id).expect("cleanup");
     }
 
     #[test]
-    fn universal_type_derives_openai_url_and_keeps_both_models() {
+    fn multi_type_provider_keeps_both_sides() {
         let _home_guard = crate::config::lock_home_for_test();
-        let id = unique_id("universal");
-        let mut pl = payload(&id, Some("sk-universal"));
-        pl.provider_type = "universal".to_string();
-        pl.base_url = "https://gateway.example.com/".to_string();
+        let id = unique_id("multi");
+        let mut pl = payload(&id, Some("sk-multi"));
+        pl.provider_types = vec![
+            "anthropic".into(),
+            "openai_chat".into(),
+            "openai_responses".into(),
+        ];
+        pl.base_url = "https://gateway.example.com".to_string();
+        pl.openai_base_url = Some("https://gateway.example.com/v1".to_string());
         pl.openai_default_model = Some("gpt-5".to_string());
         let created = upsert_provider(pl).expect("create");
         let p = created.provider.expect("provider");
-        assert_eq!(p.provider_type, "universal");
-        // 尾部斜杠被规范化后追加 /v1
+        assert_eq!(
+            p.provider_types,
+            vec!["anthropic", "openai_chat", "openai_responses"]
+        );
+        assert_eq!(p.base_url, "https://gateway.example.com");
         assert_eq!(p.openai_base_url, "https://gateway.example.com/v1");
         assert_eq!(p.default_model, "claude-sonnet-x");
         assert_eq!(p.openai_default_model, "gpt-5");
-        // 通用类型保留 Anthropic 档位模型
+        // 勾选了 anthropic：保留档位模型
         assert_eq!(
             p.models.get("haiku").map(|s| s.as_str()),
             Some("claude-haiku-x")
         );
         delete_provider(id).expect("cleanup");
 
-        // 非通用类型的 openai_default_model 被清空
-        let id2 = unique_id("universal-clear");
+        // 只勾选 anthropic 的供应商：openai 侧字段被清空
+        let id2 = unique_id("multi-clear");
         let mut pl2 = payload(&id2, Some("sk-x"));
+        pl2.openai_base_url = Some("https://should-be-cleared/v1".to_string());
         pl2.openai_default_model = Some("should-be-cleared".to_string());
         let created2 = upsert_provider(pl2).expect("create2");
         let p2 = created2.provider.expect("provider2");
@@ -837,29 +969,27 @@ mod tests {
         bad_url.base_url = "ftp://nope".to_string();
         assert!(upsert_provider(bad_url).is_err());
 
+        // 空类型集合被拒绝
         let mut bad_type = payload(&id, Some("sk-x"));
-        bad_type.provider_type = "gemini".to_string();
+        bad_type.provider_types = vec![];
         assert!(upsert_provider(bad_type).is_err());
+
+        // 只勾 openai 时，anthropic URL 可空但 openai URL 必须合法
+        let mut openai_only = payload(&id, Some("sk-x"));
+        openai_only.provider_types = vec!["openai_chat".into()];
+        openai_only.base_url = String::new();
+        openai_only.openai_base_url = Some("ftp://nope".into());
+        assert!(upsert_provider(openai_only).is_err());
     }
 
     #[test]
     fn official_oauth_provider_id_is_reserved() {
         let mut pl = payload(crate::codex_env::OFFICIAL_OAUTH_PROVIDER_ID, Some("sk-x"));
-        pl.provider_type = "openai".to_string();
+        pl.provider_types = vec!["openai_chat".into()];
+        pl.base_url = String::new();
+        pl.openai_base_url = Some("https://api.openai.com/v1".into());
         assert!(upsert_provider(pl)
             .unwrap_err()
             .contains("保留给 Codex 官方 OAuth"));
-    }
-
-    #[test]
-    fn unsupported_provider_type_is_rejected() {
-        let _home_guard = crate::config::lock_home_for_test();
-        let id = unique_id("unsupported");
-        let mut pl = payload(&id, Some("goog-key"));
-        pl.provider_type = "unsupported".to_string();
-
-        // Unsupported provider types are rejected and never written.
-        assert!(upsert_provider(pl).is_err());
-        let _ = id;
     }
 }
