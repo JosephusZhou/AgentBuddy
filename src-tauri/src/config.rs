@@ -1,4 +1,4 @@
-//! App configuration under `~/.agentbuddy/config.json`.
+//! App configuration under `~/.octopus/config.json`.
 //! Ensures the config directory and file exist on startup, and manages theme + secretsKey.
 
 use crate::crypto;
@@ -144,11 +144,11 @@ pub struct BackupSettings {
 }
 
 fn default_remote_dir() -> String {
-    "AgentBuddy".to_string()
+    "Octopus".to_string()
 }
 
 /// 跨模块共享的测试锁：凡交换 HOME 环境变量、或依赖 HOME 派生路径
-///（含 `~/.agentbuddy` 应用数据目录与各 agent 配置）的测试都须持锁，
+///（含 `~/.octopus` 应用数据目录与各 agent 配置）的测试都须持锁，
 /// 避免并行测试相互踩踏（dirs::home_dir 受 HOME 环境变量影响）。
 #[cfg(test)]
 pub static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -304,7 +304,7 @@ fn normalize_text_size(value: u32) -> u32 {
     }
 }
 
-/// Ensure `~/.agentbuddy` and `config.json` exist.
+/// Ensure `~/.octopus` and `config.json` exist.
 /// - Missing directory → create
 /// - Missing `skills/` under app dir → create
 /// - Missing config file → create with theme + secretsKey
@@ -319,14 +319,14 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
     let dir = app_dir()?;
     if !dir.exists() {
         fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create .agentbuddy directory: {}", e))?;
+            .map_err(|e| format!("Failed to create .octopus directory: {}", e))?;
     }
 
     // Skills library root used by future skills-manage features.
     let skills_dir = dir.join("skills");
     if !skills_dir.exists() {
         fs::create_dir_all(&skills_dir)
-            .map_err(|e| format!("Failed to create .agentbuddy/skills directory: {}", e))?;
+            .map_err(|e| format!("Failed to create .octopus/skills directory: {}", e))?;
     }
 
     let path = config_path()?;
@@ -756,7 +756,7 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// 启动时的版本升级适配清理。
 ///
-/// 读取 `~/.agentbuddy/config.json` 的 `version` 字段（存量版本），与当前运行
+/// 读取 `~/.octopus/config.json` 的 `version` 字段（存量版本），与当前运行
 /// 版本比较后，**按升序**执行所有高于存量版本、且不高于运行版本的适配步骤
 /// （步骤注册表见 `upgrade::upgrade_steps`，基石版本 `upgrade::BASELINE_VERSION`
 /// 之后开始登记）。任一步骤失败即中止、版本号不推进，下次启动重试；全部成功
@@ -793,10 +793,7 @@ pub fn run_startup_config_upgrade() -> Result<(), String> {
 
     // 按顺序逐个执行；任一失败即中止，版本号不推进，下次启动从存量版本重试。
     for step in &pending {
-        eprintln!(
-            "[agent-buddy] 配置升级：执行版本 {} 的适配清理",
-            step.version
-        );
+        eprintln!("[octopus] 配置升级：执行版本 {} 的适配清理", step.version);
         (step.apply)(&mut root)?;
     }
 
@@ -805,7 +802,7 @@ pub fn run_startup_config_upgrade() -> Result<(), String> {
         .insert("version".to_string(), Value::String(running.to_string()));
     write_raw(&path, &root)?;
     eprintln!(
-        "[agent-buddy] 配置升级完成：config.json 版本 {} -> {}",
+        "[octopus] 配置升级完成：config.json 版本 {} -> {}",
         stored.as_deref().unwrap_or("(无)"),
         running
     );
@@ -901,7 +898,7 @@ mod tests {
             enabled: true,
             mode: "daily".into(),
             daily_time: "09:30".into(),
-            unit_ids: vec!["app:agentbuddy:db".into()],
+            unit_ids: vec!["app:octopus:db".into()],
             webdav_connection_ids: vec!["dav-1".into()],
             passphrase_salt: "cw==".into(),
             passphrase_nonce: "cw==".into(),

@@ -73,7 +73,7 @@ export default function Preferences({
         <div className="pref-section">
           <div className="pref-section-title">文字大小</div>
           <div className="pref-section-desc">
-            放大 AgentBuddy 窗口里的一切；也可用 {shortcut} 快捷调整
+            放大 Octopus 窗口里的一切；也可用 {shortcut} 快捷调整
           </div>
 
           <div className="pref-text-size-row" role="radiogroup" aria-label="文字大小">

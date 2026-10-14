@@ -85,13 +85,7 @@ fn default_codex_version() -> String {
 
 fn default_claude_sensitive_words() -> Vec<String> {
     [
-        "proxy",
-        "relay",
-        "forward",
-        "upstream",
-        "agentbuddy",
-        "route",
-        "aggregat",
+        "proxy", "relay", "forward", "upstream", "octopus", "route", "aggregat",
     ]
     .into_iter()
     .map(str::to_string)

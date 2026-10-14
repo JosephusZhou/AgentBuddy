@@ -14,14 +14,38 @@ pub fn home_dir() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "无法解析用户主目录".to_string())
 }
 
-/// Legacy app data root: `~/.agentbuddy` (works on all platforms, including Windows).
+/// Current app data root: `~/.octopus` (works on all platforms, including Windows).
 pub fn legacy_app_data_dir() -> Result<PathBuf, String> {
+    Ok(home_dir()?.join(".octopus"))
+}
+
+/// Old pre-brand-rename app data root: `~/.agentbuddy`. Only used by the
+/// startup migration to detect and rename an existing install.
+pub fn old_agentbuddy_home_dir() -> Result<PathBuf, String> {
     Ok(home_dir()?.join(".agentbuddy"))
 }
 
-/// Preferred Windows app data root: `%LOCALAPPDATA%\AgentBuddy`.
+/// Preferred Windows app data root: `%LOCALAPPDATA%\Octopus`.
 #[cfg(windows)]
 fn windows_preferred_app_data_dir() -> Result<PathBuf, String> {
+    if let Some(base) = dirs::data_local_dir() {
+        return Ok(base.join("Octopus"));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        if !local.trim().is_empty() {
+            return Ok(PathBuf::from(local).join("Octopus"));
+        }
+    }
+    if let Some(base) = dirs::data_dir() {
+        return Ok(base.join("Octopus"));
+    }
+    legacy_app_data_dir()
+}
+
+/// Old Windows preferred app data root: `%LOCALAPPDATA%\AgentBuddy`.
+/// Only used by the startup migration.
+#[cfg(windows)]
+fn old_windows_preferred_app_data_dir() -> Result<PathBuf, String> {
     if let Some(base) = dirs::data_local_dir() {
         return Ok(base.join("AgentBuddy"));
     }
@@ -33,14 +57,14 @@ fn windows_preferred_app_data_dir() -> Result<PathBuf, String> {
     if let Some(base) = dirs::data_dir() {
         return Ok(base.join("AgentBuddy"));
     }
-    legacy_app_data_dir()
+    old_agentbuddy_home_dir()
 }
 
-/// AgentBuddy application data directory.
+/// Octopus application data directory.
 ///
-/// - Non-Windows: always `~/.agentbuddy`
-/// - Windows: prefer existing `~/.agentbuddy` (legacy continuity); otherwise
-///   `%LOCALAPPDATA%\AgentBuddy`. If the preferred dir does not exist yet but
+/// - Non-Windows: always `~/.octopus`
+/// - Windows: prefer existing `~/.octopus` (legacy continuity); otherwise
+///   `%LOCALAPPDATA%\Octopus`. If the preferred dir does not exist yet but
 ///   legacy already has data, keep using legacy without migrating.
 pub fn app_data_dir() -> Result<PathBuf, String> {
     #[cfg(windows)]
@@ -60,6 +84,135 @@ pub fn app_data_dir() -> Result<PathBuf, String> {
     {
         legacy_app_data_dir()
     }
+}
+
+/// Startup migration: if the old `.agentbuddy` directory exists, move it to
+/// `.octopus`. Called before any config / DB access so every subsequent
+/// `app_data_dir()` call returns the new path.
+///
+/// Handles three cases:
+/// 1. Old dir doesn't exist → nothing to do (fresh install or already migrated).
+/// 2. Old dir exists, new dir doesn't → atomic rename.
+/// 3. Both exist → previous launch created a fresh `.octopus` before migration
+///    ran; recursively merge old contents into new, then remove old.
+pub fn migrate_legacy_data_dir() -> Result<(), String> {
+    let new_dir = app_data_dir()?;
+
+    // On non-Windows the old dir is simply ~/.agentbuddy.
+    #[cfg(not(windows))]
+    {
+        let old = old_agentbuddy_home_dir()?;
+
+        // Case 1: no old directory — nothing to migrate.
+        if !old.exists() {
+            return Ok(());
+        }
+
+        // Case 2: new directory doesn't exist — simple rename.
+        if !new_dir.exists() {
+            fs::rename(&old, &new_dir).map_err(|e| {
+                format!(
+                    "无法将 {} 重命名为 {}: {}。请手动改名后重试。",
+                    old.display(),
+                    new_dir.display(),
+                    e
+                )
+            })?;
+            eprintln!(
+                "[octopus] 配置目录已从 {} 迁移到 {}",
+                old.display(),
+                new_dir.display()
+            );
+            return Ok(());
+        }
+
+        // Case 3: both directories exist — previous launch created a fresh
+        // `.octopus` before migration ran. Merge old contents into new.
+        eprintln!(
+            "[octopus] 检测到旧配置目录 {} 仍存在，正在合并到 {}",
+            old.display(),
+            new_dir.display()
+        );
+        copy_dir_into(&old, &new_dir)?;
+        fs::remove_dir_all(&old).map_err(|e| {
+            format!(
+                "合并后无法删除旧目录 {}: {}。可手动删除。",
+                old.display(),
+                e
+            )
+        })?;
+        eprintln!("[octopus] 旧配置目录合并完成，已删除 {}", old.display());
+        return Ok(());
+    }
+
+    // On Windows, check both possible old locations.
+    #[cfg(windows)]
+    {
+        let old_preferred = old_windows_preferred_app_data_dir()?;
+        let old_home = old_agentbuddy_home_dir()?;
+
+        if old_preferred.exists() {
+            fs::rename(&old_preferred, &new_dir).map_err(|e| {
+                format!(
+                    "无法将 {} 重命名为 {}: {}。请手动改名后重试。",
+                    old_preferred.display(),
+                    new_dir.display(),
+                    e
+                )
+            })?;
+            eprintln!(
+                "[octopus] 配置目录已从 {} 迁移到 {}",
+                old_preferred.display(),
+                new_dir.display()
+            );
+        } else if old_home.exists() {
+            fs::rename(&old_home, &new_dir).map_err(|e| {
+                format!(
+                    "无法将 {} 重命名为 {}: {}。请手动改名后重试。",
+                    old_home.display(),
+                    new_dir.display(),
+                    e
+                )
+            })?;
+            eprintln!(
+                "[octopus] 配置目录已从 {} 迁移到 {}",
+                old_home.display(),
+                new_dir.display()
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Recursively copy all entries from `src_dir` into `dst_dir`.
+/// Files in `dst_dir` are overwritten if they exist in `src_dir`.
+/// Symlinks are skipped (webdav.db, skills symlinks etc. should not be followed).
+fn copy_dir_into(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
+    if !dst_dir.exists() {
+        fs::create_dir_all(dst_dir)
+            .map_err(|e| format!("无法创建目录 {}: {}", dst_dir.display(), e))?;
+    }
+    for entry in
+        fs::read_dir(src_dir).map_err(|e| format!("无法读取目录 {}: {}", src_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("无法获取文件类型 {}: {}", path.display(), e))?;
+        let dst = dst_dir.join(entry.file_name());
+
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            copy_dir_into(&path, &dst)?;
+        } else {
+            fs::copy(&path, &dst)
+                .map_err(|e| format!("无法复制 {} 到 {}: {}", path.display(), dst.display(), e))?;
+        }
+    }
+    Ok(())
 }
 
 /// Expand `~`, `~/…`, and on Windows `~\…` / bare `%VAR%` prefixes into a path.
@@ -839,10 +992,8 @@ mod tests {
 
     #[test]
     fn managed_dirs_include_nvm_and_fnm_version_bins() {
-        let base = std::env::temp_dir().join(format!(
-            "agentbuddy-managed-bin-test-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("octopus-managed-bin-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let nvm_bin = base.join(".nvm/versions/node/v22.1.0/bin");
         let fnm_bin = base.join(".local/share/fnm/node-versions/v22.1.0/installation/bin");
@@ -858,7 +1009,7 @@ mod tests {
     #[test]
     fn find_in_dirs_finds_cli_without_path_environment() {
         let base = std::env::temp_dir().join(format!(
-            "agentbuddy-managed-bin-find-test-{}",
+            "octopus-managed-bin-find-test-{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&base);
@@ -875,7 +1026,7 @@ mod tests {
     #[test]
     fn copy_dir_recursive_roundtrip() {
         let base =
-            std::env::temp_dir().join(format!("agentbuddy-platform-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("octopus-platform-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let src = base.join("src");
         let dst = base.join("dst");

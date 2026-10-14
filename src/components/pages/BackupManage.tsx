@@ -312,10 +312,10 @@ export default function BackupManage() {
   const [settings, setSettings] = useState<BackupSettings>({
     cliproxyapiConfPath: "",
     sub2apiRootPath: "",
-    defaultRemoteDir: "AgentBuddy",
+    defaultRemoteDir: "Octopus",
   });
-  /** 本次备份的上传目录（相对 WebDAV 根）；空则回退 AgentBuddy */
-  const [uploadDir, setUploadDir] = useState("AgentBuddy");
+  /** 本次备份的上传目录（相对 WebDAV 根）；空则回退 Octopus */
+  const [uploadDir, setUploadDir] = useState("Octopus");
   const [passphrase, setPassphrase] = useState("");
   const [passphrase2, setPassphrase2] = useState("");
   const [passphraseVisible, setPassphraseVisible] = useState(false);
@@ -371,7 +371,7 @@ export default function BackupManage() {
       ]);
       setUnits(u);
       setSettings(s);
-      setUploadDir(s.defaultRemoteDir?.trim() || "AgentBuddy");
+      setUploadDir(s.defaultRemoteDir?.trim() || "Octopus");
       setConnections(dav);
       setSelected(collectDefaultIds(u));
       // 自动备份优先用已保存的选择；首次使用时预填默认选中项 + 全部 WebDAV。
@@ -494,9 +494,9 @@ export default function BackupManage() {
         setProgress(ev.payload);
       });
 
-      const remotePrefix = uploadDir.trim() || "AgentBuddy";
-      // 记住用户填写的上传目录（空则存默认 AgentBuddy）
-      if (remotePrefix !== (settings.defaultRemoteDir || "AgentBuddy")) {
+      const remotePrefix = uploadDir.trim() || "Octopus";
+      // 记住用户填写的上传目录（空则存默认 Octopus）
+      if (remotePrefix !== (settings.defaultRemoteDir || "Octopus")) {
         try {
           const saved = await updateBackupSettings({
             ...settings,
@@ -702,7 +702,7 @@ export default function BackupManage() {
       }
       setRemoteLoading(true);
       try {
-        const base = (prefix ?? uploadDir).trim() || "AgentBuddy";
+        const base = (prefix ?? uploadDir).trim() || "Octopus";
         const autoDir = `${base}/auto`;
         // 合并上传目录与其下 auto 子目录（自动备份）；auto 目录尚不存在时视为空。
         const [manual, auto] = await Promise.all([
@@ -765,7 +765,7 @@ export default function BackupManage() {
         setProgress(ev.payload);
       });
       // 自动备份归档在 <上传目录>/auto 下，按条目来源目录下载。
-      const remotePrefix = item?.dir || uploadDir.trim() || "AgentBuddy";
+      const remotePrefix = item?.dir || uploadDir.trim() || "Octopus";
       const res = await restoreRemoteBackup({
         connectionId: restoreConnId,
         fileName: item?.name ?? selectedRemote,
@@ -941,7 +941,7 @@ export default function BackupManage() {
                       className="form-input"
                       value={uploadDir}
                       onChange={(e) => setUploadDir(e.target.value)}
-                      placeholder="留空默认是 AgentBuddy"
+                      placeholder="留空默认是 Octopus"
                       disabled={running}
                       autoComplete="off"
                       spellCheck={false}
@@ -1113,8 +1113,8 @@ export default function BackupManage() {
               <div className="backup-card backup-auto">
                 <p className="backup-upload-dir-hint">
                   应用运行期间按计划自动备份并上传到每个 WebDAV 的{" "}
-                  <code>{uploadDir.trim() || "AgentBuddy"}/auto</code> 子目录，命名前缀为{" "}
-                  <code>agentbuddy-auto-backup-*</code>
+                  <code>{uploadDir.trim() || "Octopus"}/auto</code> 子目录，命名前缀为{" "}
+                  <code>octopus-auto-backup-*</code>
                   ，自动强制口令加密，仅保留最近 3
                   份，不与手动备份挤占保留窗口；应用未运行时不执行。
                 </p>
@@ -1394,7 +1394,7 @@ export default function BackupManage() {
                         className="btn btn-primary backup-restore-refresh"
                         disabled={running || !restoreConnId || remoteLoading}
                         onClick={() =>
-                          void loadRemoteList(restoreConnId, uploadDir.trim() || "AgentBuddy")
+                          void loadRemoteList(restoreConnId, uploadDir.trim() || "Octopus")
                         }
                       >
                         {remoteLoading ? "加载中…" : "刷新列表"}

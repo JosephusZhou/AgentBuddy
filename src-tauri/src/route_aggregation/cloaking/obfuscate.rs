@@ -5,13 +5,7 @@
 //! system text and message content so tool schemas and metadata remain intact.
 
 const DEFAULT_WORDS: &[&str] = &[
-    "proxy",
-    "relay",
-    "forward",
-    "upstream",
-    "agentbuddy",
-    "route",
-    "aggregat",
+    "proxy", "relay", "forward", "upstream", "octopus", "route", "aggregat",
 ];
 
 #[derive(Debug, Clone)]

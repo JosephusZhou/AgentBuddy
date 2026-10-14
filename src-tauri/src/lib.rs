@@ -1656,7 +1656,7 @@ fn setup_tray(app: &tauri::AppHandle) {
         TrayIconBuilder::with_id(TRAY_ID)
             .icon(icon)
             .icon_as_template(true)
-            .tooltip("AgentBuddy")
+            .tooltip("Octopus")
             .menu(&menu)
             .show_menu_on_left_click(true)
             .build(app)?;
@@ -1664,7 +1664,7 @@ fn setup_tray(app: &tauri::AppHandle) {
     })();
 
     if let Err(err) = result {
-        eprintln!("[agent-buddy] failed to create tray icon: {err}");
+        eprintln!("[octopus] failed to create tray icon: {err}");
     }
 }
 
@@ -1837,33 +1837,37 @@ pub fn run() {
         .setup(|_app| {
             // 菜单栏托盘图标：打开窗口 / 退出应用；失败仅告警，不影响启动。
             setup_tray(_app.handle());
-            // Ensure ~/.agentbuddy, skills/, and config.json exist before the UI loads.
+
+            // 品牌升级迁移：若旧 .agentbuddy 目录存在而新 .octopus 不存在，先改名。
+            // 必须在任何 config / DB 访问之前执行。
+            if let Err(err) = platform::migrate_legacy_data_dir() {
+                eprintln!("[octopus] failed to migrate data directory: {}", err);
+            }
+
+            // Ensure ~/.octopus, skills/, and config.json exist before the UI loads.
             if let Err(err) = config::ensure_app_config() {
-                eprintln!("[agent-buddy] failed to ensure app config: {}", err);
+                eprintln!("[octopus] failed to ensure app config: {}", err);
             }
 
             // 版本升级适配清理：读取 config.json 的 version 字段，按升序执行
             // 存量版本与运行版本之间的各版本适配步骤（清理配置与数据库中的
             // 历史下线 agent 残留等），全部成功后把运行版本写回配置。
             if let Err(err) = config::run_startup_config_upgrade() {
-                eprintln!(
-                    "[agent-buddy] failed to run startup config upgrade: {}",
-                    err
-                );
+                eprintln!("[octopus] failed to run startup config upgrade: {}", err);
             }
 
             // Models.dev 目录由后端统一维护：启动时优先使用 7 天内的磁盘缓存，
             // 过期或缺失时后台刷新一次，避免各页面首次打开时重复请求。
             tauri::async_runtime::spawn_blocking(|| {
                 if let Err(err) = opencode_config::fetch_models_dev_catalog(false) {
-                    eprintln!("[agent-buddy] Models.dev catalog refresh failed: {}", err);
+                    eprintln!("[octopus] Models.dev catalog refresh failed: {}", err);
                 }
             });
 
             // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
             // 否则 Agent 管理页会一直展示 kiro / deveco-code 等已下线的 agent）。
             if let Err(err) = db::purge_removed_agents(&["kiro", "deveco-code"]) {
-                eprintln!("[agent-buddy] failed to purge removed agents: {}", err);
+                eprintln!("[octopus] failed to purge removed agents: {}", err);
             }
 
             // 自动备份调度线程：应用运行期间按 backup.auto 配置周期触发备份，

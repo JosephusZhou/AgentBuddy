@@ -1,5 +1,5 @@
-//! Skills library under `~/.agentbuddy/skills` + sniff/apply status across agents.
-//! Spec: AGENT_MCP_SKILLS_MAP.md (dir.SKILL.md dialect).
+//! Skills library under `~/.octopus/skills` + sniff/apply status across agents.
+//! Spec: docs/AGENT_MCP_SKILLS_MAP.md (dir.SKILL.md dialect).
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -36,7 +36,7 @@ impl Default for SkillSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillRecord {
-    /// Directory name under ~/.agentbuddy/skills (stable id)
+    /// Directory name under ~/.octopus/skills (stable id)
     pub id: String,
     /// Display title (frontmatter `name` or dir name)
     pub title: String,
@@ -237,7 +237,7 @@ pub struct CcSwitchPreviewItem {
     pub github_path: String,
     /// Absolute path under ~/.cc-switch/skills
     pub source_path: String,
-    /// Agents enabled in cc-switch (mapped to AgentBuddy sniff names)
+    /// Agents enabled in cc-switch (mapped to Octopus sniff names)
     #[serde(default)]
     pub enabled_agents: Vec<String>,
     /// "import" | "skip_exists" | "missing"
@@ -548,7 +548,7 @@ pub(crate) fn is_visible_skill_dir(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    !name.starts_with('.') && !name.starts_with("__agentbuddy") && is_skill_dir(path)
+    !name.starts_with('.') && !name.starts_with("__octopus") && is_skill_dir(path)
 }
 
 /// Count installed skills in a concrete skills root using the same rules as skills management.
@@ -605,7 +605,7 @@ fn scan_applied_agents() -> HashMap<String, BTreeSet<String>> {
                     continue;
                 }
                 let id = entry.file_name().to_string_lossy().to_string();
-                if id.starts_with('.') || id.starts_with("__agentbuddy") {
+                if id.starts_with('.') || id.starts_with("__octopus") {
                     continue;
                 }
                 map.entry(id).or_default().insert(target.agent.to_string());
@@ -639,7 +639,7 @@ pub(crate) fn count_agent_skills(agent: &str) -> usize {
                 continue;
             }
             let id = entry.file_name().to_string_lossy().to_string();
-            if id.starts_with('.') || id.starts_with("__agentbuddy") {
+            if id.starts_with('.') || id.starts_with("__octopus") {
                 continue;
             }
             names.insert(id);
@@ -686,7 +686,7 @@ pub(crate) fn list_agent_skills(agent: &str) -> Vec<AgentSkillInfo> {
                 continue;
             }
             let id = entry.file_name().to_string_lossy().to_string();
-            if id.starts_with('.') || id.starts_with("__agentbuddy") {
+            if id.starts_with('.') || id.starts_with("__octopus") {
                 continue;
             }
             by_id.entry(id.clone()).or_insert_with(|| {
@@ -1400,8 +1400,8 @@ fn ensure_skill_install(
         return Err("非法的技能路径".into());
     }
     let nonce = format!("{}-{}", std::process::id(), now_secs());
-    let staging = root.join(format!(".agentbuddy-{}-staging-{}", entry_name, nonce));
-    let backup = root.join(format!(".agentbuddy-{}-backup-{}", entry_name, nonce));
+    let staging = root.join(format!(".octopus-{}-staging-{}", entry_name, nonce));
+    let backup = root.join(format!(".octopus-{}-backup-{}", entry_name, nonce));
 
     if fs::symlink_metadata(&staging).is_ok() || fs::symlink_metadata(&backup).is_ok() {
         return Err("技能安装临时路径已存在，请稍后重试".into());
@@ -2373,7 +2373,7 @@ fn git_clone(url: &str, branch: &str, dest: &Path) -> Result<(), String> {
 }
 
 fn temp_clone_dir(owner: &str, repo: &str) -> Result<PathBuf, String> {
-    let base = std::env::temp_dir().join("agentbuddy-skills");
+    let base = std::env::temp_dir().join("octopus-skills");
     fs::create_dir_all(&base).map_err(|e| format!("创建临时目录失败: {}", e))?;
     Ok(base.join(format!("{}-{}-{}", owner, repo, now_secs())))
 }
@@ -2604,7 +2604,7 @@ fn collect_sniff_scan() -> (usize, Vec<SniffScanEntry>) {
                     continue;
                 }
                 let dir_name = entry.file_name().to_string_lossy().to_string();
-                if dir_name.starts_with('.') || dir_name.starts_with("__agentbuddy") {
+                if dir_name.starts_with('.') || dir_name.starts_with("__octopus") {
                     continue;
                 }
                 let doc = read_skill_doc(&path);
@@ -2816,7 +2816,7 @@ pub fn sniff_skills() -> Result<SkillSniffResult, String> {
                     continue;
                 }
                 let id_hint = entry.file_name().to_string_lossy().to_string();
-                if id_hint.starts_with('.') || id_hint.starts_with("__agentbuddy") {
+                if id_hint.starts_with('.') || id_hint.starts_with("__octopus") {
                     continue;
                 }
                 found_entries += 1;
@@ -2968,7 +2968,7 @@ where
 /* ===== Clone cache (content-addressed, shared by check & update) ===== */
 
 fn clone_cache_root() -> PathBuf {
-    std::env::temp_dir().join("agentbuddy-skills")
+    std::env::temp_dir().join("octopus-skills")
 }
 
 fn clone_cache_dir(owner: &str, repo: &str, sha: &str) -> PathBuf {
@@ -3038,7 +3038,7 @@ fn github_default_branch_sha(owner: &str, repo: &str) -> Result<String, String> 
     );
     let client = {
         let builder = reqwest::blocking::Client::builder()
-            .user_agent("AgentBuddy/0.1 (skills-update-check)")
+            .user_agent("Octopus/0.1 (skills-update-check)")
             .timeout(std::time::Duration::from_secs(15));
         crate::http_client::apply_proxy(builder)?
             .build()
@@ -3355,7 +3355,7 @@ fn cc_switch_skills_dir() -> PathBuf {
     cc_switch_root().join("skills")
 }
 
-/// Map cc-switch enabled_* flags to AgentBuddy sniff agent names.
+/// Map cc-switch enabled_* flags to Octopus sniff agent names.
 fn map_cc_enabled_agents(
     enabled_claude: bool,
     enabled_codex: bool,
@@ -3377,7 +3377,7 @@ fn map_cc_enabled_agents(
     if enabled_opencode {
         agents.push("opencode".into());
     }
-    // hermes has no AgentBuddy mapping yet
+    // hermes has no Octopus mapping yet
     let _ = enabled_hermes;
     agents
 }
@@ -4139,7 +4139,7 @@ body
     #[test]
     fn hash_skill_dir_stable_and_ignores_hidden() {
         let base = std::env::temp_dir().join(format!(
-            "agentbuddy_hash_test_{}_{}",
+            "octopus_hash_test_{}_{}",
             now_secs(),
             std::process::id()
         ));
@@ -4417,7 +4417,7 @@ body
     /// A unique scratch dir under the system temp dir for symlink tests.
     fn scratch_dir(tag: &str) -> PathBuf {
         let base =
-            std::env::temp_dir().join(format!("agentbuddy-symlink-test-{}-{}", tag, now_secs()));
+            std::env::temp_dir().join(format!("octopus-symlink-test-{}-{}", tag, now_secs()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).expect("mk scratch");
         base

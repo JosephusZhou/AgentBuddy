@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AgentBuddy 是一个 Tauri 2 桌面应用，用于发现本机 AI coding agent，并管理 MCP、Skills、
+Octopus 是一个 Tauri 2 桌面应用，用于发现本机 AI coding agent，并管理 MCP、Skills、
 多环境、模型配置、供应商、项目配置和备份。
 
 ## 技术栈与命令
@@ -8,10 +8,10 @@ AgentBuddy 是一个 Tauri 2 桌面应用，用于发现本机 AI coding agent�
 - 前端：React 18、TypeScript、Vite 6、Tailwind 3，代码在 `src/`。
 - 后端：Rust、Tauri 2，代码在 `src-tauri/`。
 - 包管理：pnpm。主要平台：macOS、Windows。界面文案为中文。
-- 应用数据：macOS/Linux 使用 `~/.agentbuddy/`；Windows 优先使用
-  `%LOCALAPPDATA%\AgentBuddy`，同时兼容旧的 `~/.agentbuddy/`。
+- 应用数据：macOS/Linux 使用 `~/.octopus/`；Windows 优先使用
+  `%LOCALAPPDATA%\Octopus`，同时兼容旧的 `~/.octopus/`。
 
-版本发布：当前版本为 `0.2.1`。更新版本号时需要同步修改以下 5 个文件：
+版本发布：当前版本为 `0.4.0`。更新版本号时需要同步修改以下 5 个文件：
 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、
 `src-tauri/Cargo.lock` 和 `README.md`。
 
@@ -43,6 +43,7 @@ src/
 
 src-tauri/src/
   lib.rs                          Tauri command 注册、启动初始化
+  main.rs                         Tauri 入口
   agents.rs                       Agent 注册表：身份、路径、MCP 方言、Skills 根
   sniff.rs                        Agent 安装发现和 shim 过滤
   mcp_config.rs                   MCP 多方言读写、扫描和连通性探测
@@ -53,10 +54,13 @@ src-tauri/src/
   agent_model_config.rs           OpenCode / Pi 的统一模型分派
   project_config.rs               项目级 AI 骨架、MCP 和共享 Skills
   ai_provider.rs                  AI 供应商、加密 API Key 和 custom models
+  agent_open.rs                  打开 Agent 配置文件的 command
   db.rs                            SQLite 持久化
   config.rs                        app config.json、主题、代理和 secretsKey
+  upgrade.rs                      启动时版本适配升级（目录迁移、下线 Agent 清理）
   crypto.rs                        AES-256-GCM + HKDF 密钥字段加密
   http_client.rs                   统一代理下的 reqwest client
+  platform.rs                      跨平台路径与工具函数
   webdav.rs                        WebDAV 连接与上传
   backup.rs                        备份打包上传和远端恢复
   backup_schedule.rs               自动备份调度（30s tick、interval/daily、互斥）
@@ -65,7 +69,7 @@ src-tauri/src/
 docs/SYNC_PLAYBOOK.md              CLIProxyAPI 行为同步手册
 docs/cli_proxy_api_sync_state.json CLIProxyAPI 同步状态
 scripts/check_upstream_sync.py     上游漂移检查
-AGENT_MCP_SKILLS_MAP.md            MCP/Skills 路径、方言和字段规范
+docs/AGENT_MCP_SKILLS_MAP.md        MCP/Skills 路径、方言和字段规范
 ```
 
 ## 前后端边界
@@ -100,14 +104,14 @@ workbuddy, pi
 ```
 
 历史上下线的 agent 由启动时的版本适配升级统一清理：`config::run_startup_config_upgrade`
-读取 `~/.agentbuddy/config.json` 的 `version`，按升序执行所有高于存量版本、且不高于
+读取 `~/.octopus/config.json` 的 `version`，按升序执行所有高于存量版本、且不高于
 运行版本的适配步骤（步骤注册表 `upgrade::upgrade_steps`，基石版本
 `upgrade::BASELINE_VERSION` 之后开始登记），清除配置文件与 `agents.db` 中已下线
 agent 的残留（见 `upgrade.rs`）。
 新增 Agent 或修改路径时，先改 `agents.rs`，必要时
 扩展 `McpPath` 和 `mcp_config.rs`，再同步前端项目配置列表。
 
-`AGENT_MCP_SKILLS_MAP.md` 是跨 Agent 的详细规范来源，记录 5 种 MCP 方言、全局/项目路径、
+`docs/AGENT_MCP_SKILLS_MAP.md` 是跨 Agent 的详细规范来源，记录 5 种 MCP 方言、全局/项目路径、
 字段映射、Skills 根、原子写策略和已知限制。它不是运行时代码，但不能在没有迁移这些规范
 并更新 `mcp_config.rs` / `skills.rs` 引用前删除。
 
@@ -122,12 +126,12 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
 - Codex 使用 `CODEX_HOME`；默认 MCP 在 `~/.codex/config.toml` 的 `[mcp_servers]`，自定义
   环境同步时只替换该表并保留其它配置。
 - 项目级配置由 `project_config.rs` 的 8 个 `AGENT_SPECS` 决定；全局 MCP 应用不会默认写项目。
-- Skills 库位于 `~/.agentbuddy/skills/<id>/SKILL.md`，项目级统一安装到 `.agents/skills`，
+- Skills 库位于 `~/.octopus/skills/<id>/SKILL.md`，项目级统一安装到 `.agents/skills`，
   再按 Full/Symlink 模式供选中的 Agent 使用。Claude Desktop 当前不支持本地 Skills。
 
 ## 数据与模型规则
 
-- SQLite 数据库：`~/.agentbuddy/agents.db`，包含 agents、MCP、Skills、WebDAV、Claude/Codex
+- SQLite 数据库：`~/.octopus/agents.db`，包含 agents、MCP、Skills、WebDAV、Claude/Codex
   environments、AI providers 和 `provider_route_toggle`。
 - `config.json` 保存主题、备份、网络代理和私有 `secretsKey`；外部 HTTP（Skills、WebDAV、
   MCP probe、Models.dev、OpenCode catalog 等）统一经过代理配置。
@@ -147,8 +151,8 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
   `last_run_at`（首跑前用启用锚点 `enabled_at`）现算、不持久化；interval 模式错过调度点后
   唤醒即补跑一次；重新启用（false→true）视为新调度周期并重置锚点与运行状态。
 - 自动备份强制口令加密（无明文旁路），上传到 `{remote_dir}/auto`，文件名前缀
-  `agentbuddy-auto-backup-*`，与手动备份（`agentbuddy-backup-*`）隔离保留窗口（各目录各保留
-  最新 3 份，`BACKUP_REMOTE_KEEP`）。
+  `octopus-auto-backup-*`，与手动备份（`octopus-backup-*`）隔离保留窗口（各目录各保留
+  最新 3 份，`BACKUP_REMOTE_KEEP`）。旧版 `agentbuddy-*` 前缀的备份仍可识别和清理。
 - 自动备份口令经 `secretsKey` 加密为三段密文存于 `backup.auto.passphrase_*`；任何 command 不得
   回传明文或密文，DTO 只回传 `hasPassphrase` 存在性标志。
 - `config::update_backup_settings_atomic` 是 backup 段的唯一写入口：全程持有 `CONFIG_FILE_LOCK`
@@ -204,7 +208,7 @@ CLIProxyAPI 只提供行为同步参考，不是运行时依赖。上游变更�
 
 1. 先读相关模块、测试和对应规范文档；不要只按文件名猜接口。
 2. 跨 Rust/TypeScript 的字段改动必须同时更新 DTO、API helper 和页面类型。
-3. 修改 Agent/MCP/Skills 路径时，遵循 `agents.rs` → 写入器/项目配置 → `AGENT_MCP_SKILLS_MAP.md`
+3. 修改 Agent/MCP/Skills 路径时，遵循 `agents.rs` → 写入器/项目配置 → `docs/AGENT_MCP_SKILLS_MAP.md`
    → 前端镜像的顺序。
 4. 修改路由聚合或 cloaking 时，至少运行 `cargo test --manifest-path src-tauri/Cargo.toml --lib route_aggregation`。
 5. 修改备份 / 自动备份 / config 读写时，保持 `update_backup_settings_atomic` 原子写不变量与
@@ -217,7 +221,7 @@ CLIProxyAPI 只提供行为同步参考，不是运行时依赖。上游变更�
 
 1. `src-tauri/src/lib.rs`：command 注册和启动初始化
 2. `src-tauri/src/agents.rs`：Agent 注册表
-3. `src-tauri/src/mcp_config.rs` + `AGENT_MCP_SKILLS_MAP.md`：MCP 方言和路径
+3. `src-tauri/src/mcp_config.rs` + `docs/AGENT_MCP_SKILLS_MAP.md`：MCP 方言和路径
 4. `src-tauri/src/project_config.rs`：项目级骨架、MCP 和 Skills
 5. `src-tauri/src/ai_provider.rs` + `agent_model_config.rs`：供应商和模型
 6. `src-tauri/src/claude_env.rs` + `codex_env.rs`：多环境及同步

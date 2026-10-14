@@ -13,13 +13,13 @@ export async function invokePickProjectFolder(): Promise<string | null> {
   return invoke<string | null>("pick_project_folder");
 }
 
-/** MCP servers configured in AgentBuddy (SQLite list), used to populate the picker. */
+/** MCP servers configured in Octopus (SQLite list), used to populate the picker. */
 export async function invokeListMcpServers(): Promise<McpServerDraft[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<McpServerDraft[]>("get_mcp_servers");
 }
 
-/** Skills in the AgentBuddy library, used to populate the picker. */
+/** Skills in the Octopus library, used to populate the picker. */
 export async function invokeListSkillOptions(): Promise<SkillOption[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const res = await invoke<{ skills: SkillOption[] }>("list_skills");

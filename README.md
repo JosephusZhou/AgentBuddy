@@ -1,10 +1,10 @@
-# AgentBuddy
+# Octopus
 
 ![License](https://img.shields.io/badge/license-PolyForm_Noncommercial-blue)
 ![Platform](https://img.shields.io/badge/platform-desktop-lightgrey)
-![Version](https://img.shields.io/badge/version-0.2.1-green)
+![Version](https://img.shields.io/badge/version-0.4.0-green)
 
-AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统一管理常见 AI Agent 生态配置。
+Octopus 是一个面向本地桌面场景的 Tauri + React 工具，用来统一管理常见 AI Agent 生态配置。
 
 ## 主要功能
 
@@ -30,7 +30,7 @@ AgentBuddy 是一个面向本地桌面场景的 Tauri + React 工具，用来统
 |------|------|
 | 前端 | React 18 + TypeScript + Vite 6 + Tailwind 3 |
 | 后端 | Tauri 2 + Rust |
-| 存储 | SQLite（`~/.agentbuddy/agents.db`） |
+| 存储 | SQLite（`~/.octopus/agents.db`） |
 | 包管理 | pnpm |
 
 ## 开发
@@ -69,17 +69,17 @@ cd src-tauri && cargo test encrypt_decrypt
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/JosephusZhou/AgentBuddy/releases) 下载对应平台安装包：
+从 [GitHub Releases](https://github.com/JosephusZhou/Octopus/releases) 下载对应平台安装包：
 
 | 平台 | 文件名示例 |
 |------|------------|
-| macOS Apple Silicon（M 系列） | `AgentBuddy_x.y.z_aarch64.dmg` |
-| macOS Intel | `AgentBuddy_x.y.z_x86_64.dmg` |
-| Windows x64 | `AgentBuddy_x.y.z_x64-setup.exe` |
+| macOS Apple Silicon（M 系列） | `Octopus_x.y.z_aarch64.dmg` |
+| macOS Intel | `Octopus_x.y.z_x86_64.dmg` |
+| Windows x64 | `Octopus_x.y.z_x64-setup.exe` |
 
 ### macOS
 
-1. 打开 DMG，将 **AgentBuddy** 拖入「应用程序」文件夹
+1. 打开 DMG，将 **Octopus** 拖入「应用程序」文件夹
 2. 从「启动台」或 `/Applications` 启动
 
 #### 首次打开被拦截时
@@ -90,10 +90,10 @@ cd src-tauri && cargo test encrypt_decrypt
 
 ```bash
 # 移除隔离属性
-xattr -cr /Applications/AgentBuddy.app
+xattr -cr /Applications/Octopus.app
 
 # 可选：本地自签名（ad-hoc），降低 Gatekeeper 再次拦截的概率
-codesign --force --deep --sign - /Applications/AgentBuddy.app
+codesign --force --deep --sign - /Applications/Octopus.app
 ```
 
 然后再次双击打开。若仍被拦截：
@@ -106,14 +106,14 @@ codesign --force --deep --sign - /Applications/AgentBuddy.app
 
 ### Windows
 
-1. 运行 `AgentBuddy_x.y.z_x64-setup.exe`，按向导完成安装
-2. 从「开始」菜单启动 **AgentBuddy**
+1. 运行 `Octopus_x.y.z_x64-setup.exe`，按向导完成安装
+2. 从「开始」菜单启动 **Octopus**
 
 当前 Windows 安装包**未**配置代码签名。首次运行可能被 SmartScreen 拦截：选择「更多信息」→「仍要运行」即可。安装与运行需要 WebView2 Runtime（Windows 10/11 通常已预装；缺失时 NSIS 安装器会引导安装）。
 
 ## 数据存储
 
-应用数据默认存放在 `~/.agentbuddy/`（macOS / Linux）：
+应用数据默认存放在 `~/.octopus/`（macOS / Linux）：
 
 | 文件/目录 | 用途 |
 |-----------|------|
@@ -121,7 +121,7 @@ codesign --force --deep --sign - /Applications/AgentBuddy.app
 | `agents.db` | SQLite 数据库（Agent、MCP 服务器、Skills、环境、供应商等） |
 | `skills/` | Skills 库文件 |
 
-MCP 配置写入各 Agent 的原生配置文件（由 `agents.rs` 注册表定义路径和方言），不写入 AgentBuddy 本地。
+MCP 配置写入各 Agent 的原生配置文件（由 `agents.rs` 注册表定义路径和方言），不写入 Octopus 本地。
 
 ## 项目结构
 
@@ -131,6 +131,7 @@ src/                          React 前端
   components/
     Sidebar.tsx               侧边栏导航
     ui.tsx                    通用 UI 原语
+    agent-icons.tsx           Agent 彩色图标组件（SVG，来自 Magpie）
     agent-filter.tsx          Agent 过滤组件（共享）
     ModelComboBox.tsx         模型下拉选择组件
     pages/
@@ -149,8 +150,14 @@ src/                          React 前端
       NetworkSettings.tsx     网络设置
       WebDAV.tsx              WebDAV 连接管理
 
+public/
+  octopus-icon.png            App 图标（favicon）
+  octopus-sidebar.png         侧边栏品牌图标
+  agent-icons/                7 个 Agent 彩色 SVG 图标
+
 src-tauri/src/                Rust 后端
   lib.rs                      Tauri 命令注册与 setup
+  main.rs                     Tauri 入口
   agents.rs                   Agent 注册表（唯一真实来源）
   sniff.rs                    Agent 发现逻辑
   mcp_config.rs               MCP 多方言读写
@@ -161,16 +168,18 @@ src-tauri/src/                Rust 后端
   pi_model_config.rs          Pi 模型与认证配置
   agent_model_config.rs       OpenCode / Pi 统一模型分派
   ai_provider.rs              AI 供应商注册与加密存储
+  agent_open.rs               打开 Agent 配置文件
   project_config.rs           项目级 AI 配置初始化
   db.rs                       SQLite 持久化
   config.rs                   应用配置读写
+  upgrade.rs                  启动时版本适配升级（目录迁移、下线清理）
   crypto.rs                   AES-256-GCM 加密
   http_client.rs              统一代理下的 HTTP 客户端
+  platform.rs                 跨平台路径与工具函数
   webdav.rs                   WebDAV 连接与上传
   backup.rs                   备份打包与多 WebDAV 上传、远端恢复
   backup_schedule.rs          自动备份调度（定时触发，与手动备份互斥）
   route_aggregation/          本地路由聚合、故障转移与 cloaking
-  platform.rs                 跨平台路径与工具函数
 ```
 
 ## 维护者：发布新版本
@@ -180,10 +189,11 @@ src-tauri/src/                Rust 后端
 - macOS：Intel + Apple Silicon 两个 DMG
 - Windows：x64 NSIS 安装包（`*-setup.exe`）
 
-打 tag 前请保证 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本号一致：
+打 tag 前请保证 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、
+`src-tauri/Cargo.lock` 和 `README.md` 版本号一致：
 
 ```bash
-git tag v0.2.1
+git tag v0.4.0
 git push origin main --tags
 ```
 

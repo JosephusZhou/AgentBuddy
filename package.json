@@ -1,7 +1,7 @@
 {
-  "name": "agent-buddy",
+  "name": "octopus",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

@@ -301,7 +301,7 @@ mod tests {
 
     fn temp_log_dir() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "agentbuddy-route-log-test-{}-{}",
+            "octopus-route-log-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

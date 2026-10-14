@@ -1,19 +1,19 @@
 [package]
-name = "agent-buddy"
-version = "0.2.1"
+name = "octopus"
+version = "0.4.0"
 description = "AI Agents Configuration Manager"
 authors = ["senfeng"]
 edition = "2021"
 # Dock / process display name in `tauri dev` comes from the binary filename.
-# Keep the Cargo package name kebab-case; only the runnable target is AgentBuddy.
-default-run = "AgentBuddy"
+# Keep the Cargo package name kebab-case; only the runnable target is Octopus.
+default-run = "Octopus"
 
 [[bin]]
-name = "AgentBuddy"
+name = "Octopus"
 path = "src/main.rs"
 
 [lib]
-name = "agent_buddy_lib"
+name = "octopus_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

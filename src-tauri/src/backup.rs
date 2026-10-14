@@ -259,8 +259,8 @@ fn build_app_unit() -> BackupUnitNode {
         Ok(d) => d,
         Err(e) => {
             return BackupUnitNode {
-                id: "app:agentbuddy".into(),
-                label: "AgentBuddy 应用数据".into(),
+                id: "app:octopus".into(),
+                label: "Octopus 应用数据".into(),
                 kind: "app".into(),
                 available: false,
                 selected_by_default: false,
@@ -279,7 +279,7 @@ fn build_app_unit() -> BackupUnitNode {
 
     let mut children = vec![
         leaf_unit(
-            "app:agentbuddy:config",
+            "app:octopus:config",
             "config.json（含 secretsKey）",
             "app",
             config_p.exists(),
@@ -294,7 +294,7 @@ fn build_app_unit() -> BackupUnitNode {
             },
         ),
         leaf_unit(
-            "app:agentbuddy:db",
+            "app:octopus:db",
             "agents.db（MCP / 环境 / WebDAV 元数据）",
             "app",
             db_p.exists(),
@@ -305,7 +305,7 @@ fn build_app_unit() -> BackupUnitNode {
             vec![],
         ),
         leaf_unit(
-            "app:agentbuddy:skills",
+            "app:octopus:skills",
             "Skills 库",
             "app",
             skills_p.is_dir(),
@@ -328,8 +328,8 @@ fn build_app_unit() -> BackupUnitNode {
     }
 
     BackupUnitNode {
-        id: "app:agentbuddy".into(),
-        label: "AgentBuddy 应用数据".into(),
+        id: "app:octopus".into(),
+        label: "Octopus 应用数据".into(),
         kind: "app".into(),
         available,
         selected_by_default: available,
@@ -940,7 +940,10 @@ fn is_excluded(path: &Path) -> bool {
     if lower.contains("/ipc/") || lower.ends_with("/ipc") {
         return true;
     }
-    if lower.contains("/.tmp/") || lower.contains("/tmp/") && lower.contains("agentbuddy-backup") {
+    if lower.contains("/.tmp/")
+        || lower.contains("/tmp/")
+            && (lower.contains("octopus-backup") || lower.contains("agentbuddy-backup"))
+    {
         // don't exclude our own staging via generic tmp
     }
     if lower.ends_with(".sqlite")
@@ -952,17 +955,18 @@ fn is_excluded(path: &Path) -> bool {
         // agents.db under app is explicit include — only exclude when path has sessions etc.
         // For agent trees we exclude sqlite; app db is added as a single file not via walk.
         // App SQLite is added as a single explicit file, not via agent-tree walk.
-        // Match both legacy ~/.agentbuddy and platform app-data locations.
-        let is_app_db = s.contains(".agentbuddy/agents.db")
-            || s.contains(".agentbuddy\\agents.db")
-            || s.ends_with("AgentBuddy/agents.db")
-            || s.ends_with("AgentBuddy\\agents.db")
+        // Match both legacy ~/.octopus and platform app-data locations.
+        let is_app_db = s.contains(".octopus/agents.db")
+            || s.contains(".octopus\\agents.db")
+            || s.ends_with("Octopus/agents.db")
+            || s.ends_with("Octopus\\agents.db")
             || path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n == "agents.db")
                 .unwrap_or(false)
-                && s.to_ascii_lowercase().contains("agentbuddy");
+                && (s.to_ascii_lowercase().contains("octopus")
+                    || s.to_ascii_lowercase().contains("agentbuddy"));
         if !is_app_db {
             // walking agent dirs: exclude
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1036,7 +1040,7 @@ fn path_allowed_for_custom(path: &Path) -> bool {
             return true;
         }
     }
-    // AgentBuddy app data (may sit outside home on Windows LOCALAPPDATA)
+    // Octopus app data (may sit outside home on Windows LOCALAPPDATA)
     if let Ok(app) = crate::config::app_dir() {
         if canon.starts_with(&app) {
             return true;
@@ -1158,7 +1162,7 @@ pub(crate) fn execute_backup(
 
     let contains_secrets = entries.iter().any(|e| e.secrets)
         || unit_ids.iter().any(|id| {
-            id.starts_with("app:agentbuddy") || id.starts_with("tool:") || id.starts_with("agent:")
+            id.starts_with("app:octopus") || id.starts_with("tool:") || id.starts_with("agent:")
         });
 
     let passphrase = passphrase_preview;
@@ -1171,13 +1175,13 @@ pub(crate) fn execute_backup(
     }
 
     // 文件名时间戳：yyyyMMddHHmmss（无分隔符，便于排序与去重）。
-    // 自动备份用独立前缀 agentbuddy-auto-backup-*，落在远端 auto/ 子目录，
+    // 自动备份用独立前缀 octopus-auto-backup-*，落在远端 auto/ 子目录，
     // 与手动备份互不影响保留窗口。
     let stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
     let base_name = if trigger.as_deref() == Some(TRIGGER_AUTO) {
-        format!("agentbuddy-auto-backup-{}", stamp)
+        format!("octopus-auto-backup-{}", stamp)
     } else {
-        format!("agentbuddy-backup-{}", stamp)
+        format!("octopus-backup-{}", stamp)
     };
     let encrypted = passphrase.is_some();
     let archive_file_name = if encrypted {
@@ -1195,7 +1199,7 @@ pub(crate) fn execute_backup(
 
     // staging
     let staging = std::env::temp_dir().join(format!(
-        "agentbuddy-backup-{}",
+        "octopus-backup-{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -1239,7 +1243,7 @@ pub(crate) fn execute_backup(
 
     let archive_bytes = file_size(&final_path);
 
-    // remote dir: 用户指定的上传目录（默认 AgentBuddy）；不存在时由 WebDAV MKCOL 逐级创建。
+    // remote dir: 用户指定的上传目录（默认 Octopus）；不存在时由 WebDAV MKCOL 逐级创建。
     // 备份文件直接落在该目录下，不再分子目录。
     let prefix = payload
         .remote_prefix
@@ -1258,7 +1262,7 @@ pub(crate) fn execute_backup(
                 Some(s)
             }
         })
-        .unwrap_or_else(|| "AgentBuddy".to_string());
+        .unwrap_or_else(|| "Octopus".to_string());
     // 拒绝路径穿越
     if prefix.split('/').any(|p| p == "..") {
         return Err("上传目录不允许包含 ..".to_string());
@@ -1485,7 +1489,7 @@ fn resolve_remote_prefix(
                 Some(s)
             }
         })
-        .unwrap_or_else(|| "AgentBuddy".to_string());
+        .unwrap_or_else(|| "Octopus".to_string());
     if prefix.split('/').any(|p| p == "..") {
         return Err("上传目录不允许包含 ..".to_string());
     }
@@ -1504,7 +1508,7 @@ pub fn list_remote_backups(
     let entries = webdav::list_remote_dir_for_connection(cid, &rel_dir)?;
     let mut items: Vec<RemoteBackupItem> = entries
         .into_iter()
-        .filter(|e| !e.is_collection && webdav::is_agentbuddy_backup_name(&e.name))
+        .filter(|e| !e.is_collection && webdav::is_backup_archive_name(&e.name))
         .map(|e| RemoteBackupItem {
             encrypted: e.name.ends_with(".abenc"),
             name: e.name,
@@ -1580,8 +1584,8 @@ pub fn restore_remote_backup(
         return Err("请选择 WebDAV 连接".to_string());
     }
     let file_name = payload.file_name.trim().to_string();
-    if !webdav::is_agentbuddy_backup_name(&file_name) {
-        return Err("不是有效的 AgentBuddy 备份文件名".to_string());
+    if !webdav::is_backup_archive_name(&file_name) {
+        return Err("不是有效的 Octopus 备份文件名".to_string());
     }
     let is_enc = file_name.ends_with(".abenc");
     let passphrase = payload
@@ -1614,7 +1618,7 @@ pub fn restore_remote_backup(
     advance("download", format!("正在下载 {}…", file_name));
 
     let staging = std::env::temp_dir().join(format!(
-        "agentbuddy-restore-{}",
+        "octopus-restore-{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -1825,9 +1829,8 @@ fn collect_entries(
 
     for id in &expanded {
         match id.as_str() {
-            "app:agentbuddy:config" | "app:agentbuddy"
-                if unit_ids.contains("app:agentbuddy")
-                    || unit_ids.contains("app:agentbuddy:config") =>
+            "app:octopus:config" | "app:octopus"
+                if unit_ids.contains("app:octopus") || unit_ids.contains("app:octopus:config") =>
             {
                 // handled below via flags
             }
@@ -1836,40 +1839,36 @@ fn collect_entries(
     }
 
     // App
-    if expanded.iter().any(|id| id.starts_with("app:agentbuddy")) {
+    if expanded.iter().any(|id| id.starts_with("app:octopus")) {
         let dir = config::app_dir()?;
-        if unit_selected(&expanded, "app:agentbuddy")
-            || unit_selected(&expanded, "app:agentbuddy:config")
+        if unit_selected(&expanded, "app:octopus") || unit_selected(&expanded, "app:octopus:config")
         {
             push_file(
                 &mut out,
                 &dir.join("config.json"),
-                "files/app/agentbuddy/config.json",
-                "app:agentbuddy:config",
+                "files/app/octopus/config.json",
+                "app:octopus:config",
                 true,
                 warnings,
             );
         }
-        if unit_selected(&expanded, "app:agentbuddy")
-            || unit_selected(&expanded, "app:agentbuddy:db")
-        {
+        if unit_selected(&expanded, "app:octopus") || unit_selected(&expanded, "app:octopus:db") {
             push_file(
                 &mut out,
                 &dir.join("agents.db"),
-                "files/app/agentbuddy/agents.db",
-                "app:agentbuddy:db",
+                "files/app/octopus/agents.db",
+                "app:octopus:db",
                 true,
                 warnings,
             );
         }
-        if unit_selected(&expanded, "app:agentbuddy")
-            || unit_selected(&expanded, "app:agentbuddy:skills")
+        if unit_selected(&expanded, "app:octopus") || unit_selected(&expanded, "app:octopus:skills")
         {
             push_dir(
                 &mut out,
                 &dir.join("skills"),
-                "files/app/agentbuddy/skills",
-                "app:agentbuddy:skills",
+                "files/app/octopus/skills",
+                "app:octopus:skills",
                 false,
                 warnings,
             );
@@ -1968,10 +1967,10 @@ fn unit_selected(expanded: &HashSet<String>, id: &str) -> bool {
 fn expand_unit_ids(unit_ids: &HashSet<String>) -> HashSet<String> {
     let mut out = unit_ids.clone();
     // Parent selects all children semantics for collection
-    if unit_ids.contains("app:agentbuddy") {
-        out.insert("app:agentbuddy:config".into());
-        out.insert("app:agentbuddy:db".into());
-        out.insert("app:agentbuddy:skills".into());
+    if unit_ids.contains("app:octopus") {
+        out.insert("app:octopus:config".into());
+        out.insert("app:octopus:db".into());
+        out.insert("app:octopus:skills".into());
     }
     if unit_ids.contains("agent:claude-code") {
         // mark all env ids that exist — collect will also check agent:claude-code:env:*
@@ -2424,11 +2423,11 @@ mod tests {
     #[test]
     fn expand_parent_app() {
         let mut s = HashSet::new();
-        s.insert("app:agentbuddy".into());
+        s.insert("app:octopus".into());
         let e = expand_unit_ids(&s);
-        assert!(e.contains("app:agentbuddy:config"));
-        assert!(e.contains("app:agentbuddy:db"));
-        assert!(e.contains("app:agentbuddy:skills"));
+        assert!(e.contains("app:octopus:config"));
+        assert!(e.contains("app:octopus:db"));
+        assert!(e.contains("app:octopus:skills"));
     }
 
     #[test]

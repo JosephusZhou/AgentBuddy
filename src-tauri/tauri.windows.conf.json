@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "AgentBuddy",
+        "title": "Octopus",
         "width": 1140,
         "height": 770,
         "minWidth": 880,

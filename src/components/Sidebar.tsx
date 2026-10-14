@@ -8,7 +8,6 @@ import {
   Braces,
   Cloud,
   CloudCog,
-  Code,
   FolderCog,
   Globe,
   Layers,
@@ -96,9 +95,9 @@ export default function Sidebar({
           <div className="sidebar-header" data-tauri-drag-region>
             <div className="sidebar-brand" data-tauri-drag-region>
               <div className="sidebar-brand-icon">
-                <Code size={16} strokeWidth={2.5} />
+                <img src="/octopus-sidebar.png" alt="Octopus" />
               </div>
-              <span className="sidebar-brand-name">AgentBuddy</span>
+              <span className="sidebar-brand-name">Octopus</span>
             </div>
           </div>
           <nav className="sidebar-nav">

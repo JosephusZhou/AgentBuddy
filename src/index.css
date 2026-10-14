@@ -306,16 +306,26 @@ label,
 .sidebar-brand-icon {
   width: 28px;
   height: 28px;
-  background: var(--seed-primary);
-  border-radius: var(--seed-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.25s ease;
 }
-.sidebar-brand-icon svg {
-  color: var(--seed-primary-fg);
+.sidebar-brand-icon img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: invert(0);
+  transition: filter 0.25s ease;
+}
+/* 深色模式：黑色模板图标反色为白色 */
+:root[data-theme="dark"] .sidebar-brand-icon img {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sidebar-brand-icon img {
+    filter: invert(1);
+  }
 }
 .sidebar-brand-name {
   font-size: var(--text-base);
@@ -1862,8 +1872,6 @@ a[href]:focus-visible {
   width: 32px;
   height: 32px;
   border-radius: var(--seed-radius-md);
-  background: var(--seed-surface-alt);
-  border: 1px solid var(--seed-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1871,19 +1879,26 @@ a[href]:focus-visible {
   font-size: var(--text-base);
   font-weight: 600;
   color: var(--seed-muted);
-  transition:
-    background 0.25s ease,
-    border-color 0.25s ease;
+  transition: background 0.25s ease;
+}
+/* Fallback initials (no brand icon): keep a neutral rounded tile */
+.agent-icon:not(:has(img)) {
+  background: var(--seed-surface-alt);
+  border: 1px solid var(--seed-border);
 }
 .agent-icon.found {
-  background: var(--seed-active-bg);
-  border-color: color-mix(in srgb, var(--seed-primary) 30%, transparent);
   color: var(--seed-active-fg);
 }
-/* Brand SVG inside the avatar keeps one consistent size across agents */
-.agent-icon svg {
-  width: 18px;
-  height: 18px;
+.agent-icon.found:not(:has(img)) {
+  background: var(--seed-active-bg);
+  border-color: color-mix(in srgb, var(--seed-primary) 30%, transparent);
+}
+/* Color PNG icon fills the avatar container directly (no outer frame) */
+.agent-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--seed-radius-md);
   display: block;
 }
 .agent-name {
@@ -2655,13 +2670,16 @@ a[href]:focus-visible {
   width: 24px;
   height: 24px;
   border-radius: calc(var(--seed-radius) + 1px);
-  background: var(--seed-active-bg);
-  border: 1px solid color-mix(in srgb, var(--seed-primary) 30%, transparent);
   color: var(--seed-active-fg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+/* Fallback initials (no brand icon): keep a neutral rounded tile */
+.agent-badge:not(:has(img)) {
+  background: var(--seed-active-bg);
+  border: 1px solid color-mix(in srgb, var(--seed-primary) 30%, transparent);
 }
 .agent-badge[data-tooltip]::after {
   content: attr(data-tooltip);
@@ -2688,9 +2706,11 @@ a[href]:focus-visible {
 .agent-badge[data-tooltip]:hover::after {
   opacity: 1;
 }
-.agent-badge svg {
-  width: 15px;
-  height: 15px;
+.agent-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: calc(var(--seed-radius) + 1px);
   display: block;
 }
 .agent-badge-initials {
@@ -3256,9 +3276,11 @@ a[href]:focus-visible {
   font-weight: 700;
   line-height: 1;
 }
-.skill-source-chip-agent-icon svg {
-  width: 14px;
-  height: 14px;
+.skill-source-chip-agent-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 3px;
   display: block;
 }
 .skill-card-desc {

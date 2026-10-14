@@ -365,7 +365,7 @@ fn validate_auto_config(
 fn unit_ids_contain_secrets(unit_ids: &[String]) -> bool {
     unit_ids.iter().any(|id| {
         let id = id.trim();
-        id.starts_with("app:agentbuddy") || id.starts_with("tool:") || id.starts_with("agent:")
+        id.starts_with("app:octopus") || id.starts_with("tool:") || id.starts_with("agent:")
     })
 }
 
@@ -401,7 +401,7 @@ fn build_auto_payload(settings: &BackupSettings) -> Result<backup::BackupRunPayl
     }
     let passphrase = decrypt_auto_passphrase(auto)?;
     let base = settings.default_remote_dir.trim().trim_matches('/');
-    let base = if base.is_empty() { "AgentBuddy" } else { base };
+    let base = if base.is_empty() { "Octopus" } else { base };
     Ok(backup::BackupRunPayload {
         unit_ids: auto.unit_ids.clone(),
         webdav_connection_ids: auto.webdav_connection_ids.clone(),
@@ -470,7 +470,7 @@ mod tests {
     use chrono::FixedOffset;
     use std::fs;
 
-    /// 与 opencode_config 同款：临时 HOME + 测试锁，隔离真实 ~/.agentbuddy。
+    /// 与 opencode_config 同款：临时 HOME + 测试锁，隔离真实 ~/.octopus。
     /// Drop 时恢复原 HOME，避免污染进程内后续测试。
     struct TempHome {
         path: std::path::PathBuf,
@@ -482,7 +482,7 @@ mod tests {
         fn new() -> Self {
             let guard = crate::config::lock_home_for_test();
             let path = std::env::temp_dir().join(format!(
-                "agentbuddy-sched-test-{}-{}",
+                "octopus-sched-test-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn secrets_detection_matches_backup_kernel_rule() {
-        assert!(unit_ids_contain_secrets(&["app:agentbuddy:db".into()]));
+        assert!(unit_ids_contain_secrets(&["app:octopus:db".into()]));
         assert!(unit_ids_contain_secrets(&["tool:cliproxyapi".into()]));
         assert!(unit_ids_contain_secrets(&["agent:codex".into()]));
         assert!(!unit_ids_contain_secrets(&[]));

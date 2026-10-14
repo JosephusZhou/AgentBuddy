@@ -1,7 +1,7 @@
 //! Stable Claude identity generation for non-native callers.
 //!
 //! The upstream implementation optionally persists this identity in home KV.
-//! AgentBuddy uses a scoped in-process cache so retries within one route scope
+//! Octopus uses a scoped in-process cache so retries within one route scope
 //! remain correlated without writing credentials or identity data to disk.
 
 use rand::RngCore;

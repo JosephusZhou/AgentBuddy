@@ -1,7 +1,7 @@
 //! Claude Code device profile parsing, validation, and stabilization.
 //!
 //! Reference: CLIProxyAPI `helps/claude_device_profile.go`.
-//! AgentBuddy keeps the same observable profile rules while using an in-process
+//! Octopus keeps the same observable profile rules while using an in-process
 //! scoped cache instead of the upstream home KV store.
 
 use std::collections::HashMap;

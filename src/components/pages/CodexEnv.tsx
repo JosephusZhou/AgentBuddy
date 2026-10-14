@@ -2120,7 +2120,7 @@ export default function CodexEnv() {
               <code>
                 {shell ? displayPath(shell.shellConfigPath || shell.zshrcPath) : "shell 配置"}
               </code>{" "}
-              的 AgentBuddy Codex 标记块。请在终端执行{" "}
+              的 Octopus Codex 标记块。请在终端执行{" "}
               <code>
                 source{" "}
                 {shell ? displayPath(shell.shellConfigPath || shell.zshrcPath) : "对应 rc 文件"}

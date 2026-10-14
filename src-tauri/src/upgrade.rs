@@ -74,7 +74,7 @@ pub fn clean_legacy_agent_data() -> Result<(), String> {
     let total = purged + scrubbed + removed_bindings;
     if total > 0 {
         eprintln!(
-            "[agent-buddy] 配置升级：清理 {} 条 agent 缓存、{} 条 MCP 关联、{} 条供应商绑定",
+            "[octopus] 配置升级：清理 {} 条 agent 缓存、{} 条 MCP 关联、{} 条供应商绑定",
             purged, scrubbed, removed_bindings
         );
     }
@@ -98,7 +98,7 @@ pub fn scrub_legacy_skills_meta() -> Result<(), String> {
         .map_err(|e| format!("序列化 skills-meta.json 失败: {e}"))?;
     fs::write(&path, format!("{text}\n"))
         .map_err(|e| format!("写入 skills-meta.json 失败: {e}"))?;
-    eprintln!("[agent-buddy] 配置升级：清理 skills-meta.json 中 {removed} 个相关键");
+    eprintln!("[octopus] 配置升级：清理 skills-meta.json 中 {removed} 个相关键");
     Ok(())
 }
 
@@ -110,19 +110,68 @@ fn migrate_v_0_3_0(root: &mut Value) -> Result<(), String> {
     scrub_legacy_skills_meta()?;
     let removed = scrub_legacy_agent_keys(root);
     if removed > 0 {
-        eprintln!("[agent-buddy] 配置升级：清理 config.json 中 {removed} 个相关键");
+        eprintln!("[octopus] 配置升级：清理 config.json 中 {removed} 个相关键");
     }
     Ok(())
 }
 
+/// 0.4.0：品牌升级 AgentBuddy → Octopus。
+///
+/// - 将 `backup.auto.unit_ids` 中的 `app:agentbuddy*` 替换为 `app:octopus*`
+/// - 将 `backup.defaultRemoteDir` 仍为旧默认值 `"AgentBuddy"` 时改为 `"Octopus"`
+///
+/// 注意：配置目录本身的改名（.agentbuddy → .octopus）在 platform::migrate_legacy_data_dir
+/// 中、读取 config.json 之前已完成。本步骤只处理 config.json 内部的品牌字段。
+fn migrate_v_0_4_0(root: &mut Value) -> Result<(), String> {
+    // 1. 迁移自动备份的 unit_ids
+    if let Some(auto) = root
+        .get_mut("backup")
+        .and_then(|b| b.get_mut("auto"))
+        .and_then(|a| a.get_mut("unitIds"))
+        .and_then(|u| u.as_array_mut())
+    {
+        let mut changed = 0usize;
+        for id in auto.iter_mut() {
+            if let Some(s) = id.as_str() {
+                if let Some(rest) = s.strip_prefix("app:agentbuddy") {
+                    *id = Value::String(format!("app:octopus{rest}"));
+                    changed += 1;
+                }
+            }
+        }
+        if changed > 0 {
+            eprintln!("[octopus] 配置升级：迁移 {changed} 个备份单元 ID (agentbuddy → octopus)");
+        }
+    }
+
+    // 2. 迁移默认远端目录名（仅当仍是旧默认值时）
+    if let Some(dir) = root
+        .get_mut("backup")
+        .and_then(|b| b.get_mut("defaultRemoteDir"))
+    {
+        if dir.as_str() == Some("AgentBuddy") {
+            *dir = Value::String("Octopus".to_string());
+            eprintln!("[octopus] 配置升级：远端备份目录 AgentBuddy → Octopus");
+        }
+    }
+
+    Ok(())
+}
+
 /// 适配步骤注册表：**必须按版本升序排列**。
-/// 当前登记的适配版本为 0.3.0；新增适配版本时，在末尾追加 `UpgradeStep`
+/// 当前登记的适配版本为 0.3.0、0.4.0；新增适配版本时，在末尾追加 `UpgradeStep`
 /// 并实现对应的 `migrate_v_*` 函数（版本号必须是真实发布的版本）。
 pub fn upgrade_steps() -> &'static [UpgradeStep] {
-    let steps: &'static [UpgradeStep] = &[UpgradeStep {
-        version: "0.3.0",
-        apply: migrate_v_0_3_0,
-    }];
+    let steps: &'static [UpgradeStep] = &[
+        UpgradeStep {
+            version: "0.3.0",
+            apply: migrate_v_0_3_0,
+        },
+        UpgradeStep {
+            version: "0.4.0",
+            apply: migrate_v_0_4_0,
+        },
+    ];
     // 适配步骤必须登记在基石版本（BASELINE_VERSION）之后；
     // 严格升序由 `steps_start_after_baseline_and_are_ascending` 测试保证。
     debug_assert!(
@@ -202,9 +251,10 @@ mod tests {
     fn steps_start_after_baseline_and_are_ascending() {
         use std::cmp::Ordering;
         let steps = upgrade_steps();
-        // 当前仅登记 0.3.0 一个真实发布的适配版本
-        assert_eq!(steps.len(), 1);
+        // 当前登记 0.3.0 和 0.4.0 两个适配版本
+        assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].version, "0.3.0");
+        assert_eq!(steps[1].version, "0.4.0");
         // 首个步骤版本必须高于基石版本（0.2.1 之后才引入适配机制）
         assert_eq!(
             crate::config::compare_versions(steps[0].version, BASELINE_VERSION),
@@ -243,7 +293,15 @@ mod tests {
         assert!(pending_steps(Some("0.4.0"), "0.3.0", steps).is_empty());
         // 运行版本低于登记的适配版本（如当前开发版本 0.2.1 本体）：不执行
         assert!(pending_steps(Some("0.2.1"), "0.2.1", steps).is_empty());
-        // 存量已越过登记版本（0.3.0 → 0.4.0）：无中间登记版本，不执行
-        assert!(pending_steps(Some("0.3.0"), "0.4.0", steps).is_empty());
+        // 存量 0.3.0 → 运行 0.4.0：执行 0.4.0 的品牌升级适配
+        assert_eq!(
+            versions(pending_steps(Some("0.3.0"), "0.4.0", steps)),
+            vec!["0.4.0"]
+        );
+        // 存量 0.2.1 → 运行 0.4.0：按序执行 0.3.0 和 0.4.0
+        assert_eq!(
+            versions(pending_steps(Some("0.2.1"), "0.4.0", steps)),
+            vec!["0.3.0", "0.4.0"]
+        );
     }
 }

@@ -22,7 +22,7 @@ export async function getBackupSettings(): Promise<BackupSettings> {
   return {
     cliproxyapiConfPath: r.cliproxyapiConfPath ?? "",
     sub2apiRootPath: r.sub2apiRootPath ?? "",
-    defaultRemoteDir: r.defaultRemoteDir?.trim() || "AgentBuddy",
+    defaultRemoteDir: r.defaultRemoteDir?.trim() || "Octopus",
   };
 }
 

@@ -18,7 +18,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
-/// Max AgentBuddy backup archives retained per remote directory after a successful upload.
+/// Max Octopus backup archives retained per remote directory after a successful upload.
 pub const BACKUP_REMOTE_KEEP: usize = 3;
 const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:">
@@ -288,7 +288,7 @@ fn build_client() -> Result<Client, String> {
         .timeout(PROBE_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent("AgentBuddy/0.1 (WebDAV probe)");
+        .user_agent("Octopus/0.1 (WebDAV probe)");
     crate::http_client::apply_proxy(builder)?
         .build()
         .map_err(|e| format!("无法创建 HTTP 客户端: {}", e))
@@ -310,7 +310,7 @@ fn send_propfind(
     headers.insert(AUTHORIZATION, auth_header(username, password)?);
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static("AgentBuddy/0.1 (WebDAV probe)"),
+        HeaderValue::from_static("Octopus/0.1 (WebDAV probe)"),
     );
     headers.insert("Depth", HeaderValue::from_static("0"));
     headers.insert(
@@ -441,7 +441,7 @@ fn build_upload_client() -> Result<Client, String> {
         .timeout(UPLOAD_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent("AgentBuddy/0.1 (WebDAV upload)");
+        .user_agent("Octopus/0.1 (WebDAV upload)");
     crate::http_client::apply_proxy(builder)?
         .build()
         .map_err(|e| format!("无法创建 HTTP 客户端: {}", e))
@@ -652,7 +652,7 @@ fn build_transfer_client(timeout: Duration) -> Result<Client, String> {
         .timeout(timeout)
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent("AgentBuddy/0.1 (WebDAV transfer)");
+        .user_agent("Octopus/0.1 (WebDAV transfer)");
     crate::http_client::apply_proxy(builder)?
         .build()
         .map_err(|e| format!("无法创建 HTTP 客户端: {}", e))
@@ -890,7 +890,7 @@ fn is_self_href(href: &str, dir_url: &str) -> bool {
     if a.eq_ignore_ascii_case(b) {
         return true;
     }
-    // Relative href like /remote.php/dav/files/u/AgentBuddy
+    // Relative href like /remote.php/dav/files/u/Octopus
     if let Some(path) = b
         .split("://")
         .nth(1)
@@ -1001,10 +1001,16 @@ fn fs_create_dir_all(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| format!("创建目录失败: {}", e))
 }
 
-/// Whether `name` looks like an AgentBuddy backup archive (manual or auto prefix).
-pub fn is_agentbuddy_backup_name(name: &str) -> bool {
+/// Whether `name` looks like an Octopus backup archive (manual or auto prefix).
+/// Recognizes both the new `octopus-*` prefix and the legacy `agentbuddy-*`
+/// prefix so old backups can still be listed and restored.
+pub fn is_backup_archive_name(name: &str) -> bool {
     let n = name.trim();
-    if !(n.starts_with("agentbuddy-backup-") || n.starts_with("agentbuddy-auto-backup-")) {
+    if !(n.starts_with("octopus-backup-")
+        || n.starts_with("octopus-auto-backup-")
+        || n.starts_with("agentbuddy-backup-")
+        || n.starts_with("agentbuddy-auto-backup-"))
+    {
         return false;
     }
     n.ends_with(".zip") || n.ends_with(".abenc")
@@ -1030,7 +1036,7 @@ pub fn prune_old_backups(
 
     let mut backups: Vec<WebDavRemoteEntry> = entries
         .into_iter()
-        .filter(|e| !e.is_collection && is_agentbuddy_backup_name(&e.name))
+        .filter(|e| !e.is_collection && is_backup_archive_name(&e.name))
         .collect();
 
     // Filename embeds yyyyMMddHHmmss — sort descending (newest first).
@@ -1105,11 +1111,11 @@ mod tests {
     fn join_url_encodes_and_trims() {
         let u = join_webdav_url(
             "https://dav.example.com/remote.php/dav/files/u/",
-            &["AgentBuddy/backups", "2026", "07", "a b.zip"],
+            &["Octopus/backups", "2026", "07", "a b.zip"],
         )
         .unwrap();
         assert!(u.starts_with(
-            "https://dav.example.com/remote.php/dav/files/u/AgentBuddy/backups/2026/07/"
+            "https://dav.example.com/remote.php/dav/files/u/Octopus/backups/2026/07/"
         ));
         assert!(u.contains("a%20b.zip"));
     }
@@ -1121,21 +1127,35 @@ mod tests {
 
     #[test]
     fn backup_name_filter() {
-        assert!(is_agentbuddy_backup_name(
+        // New octopus-* prefixes
+        assert!(is_backup_archive_name("octopus-backup-20260721120000.zip"));
+        assert!(is_backup_archive_name(
+            "octopus-backup-20260721120000.abenc"
+        ));
+        assert!(is_backup_archive_name(
+            "octopus-auto-backup-20260721120000.zip"
+        ));
+        assert!(is_backup_archive_name(
+            "octopus-auto-backup-20260721120000.abenc"
+        ));
+        // Legacy agentbuddy-* prefixes (backward compat)
+        assert!(is_backup_archive_name(
             "agentbuddy-backup-20260721120000.zip"
         ));
-        assert!(is_agentbuddy_backup_name(
+        assert!(is_backup_archive_name(
             "agentbuddy-backup-20260721120000.abenc"
         ));
-        assert!(is_agentbuddy_backup_name(
+        assert!(is_backup_archive_name(
             "agentbuddy-auto-backup-20260721120000.zip"
         ));
-        assert!(is_agentbuddy_backup_name(
+        assert!(is_backup_archive_name(
             "agentbuddy-auto-backup-20260721120000.abenc"
         ));
-        assert!(!is_agentbuddy_backup_name("other.zip"));
-        assert!(!is_agentbuddy_backup_name("agentbuddy-backup-foo.txt"));
-        assert!(!is_agentbuddy_backup_name("agentbuddy-auto-backup-foo.txt"));
+        assert!(!is_backup_archive_name("other.zip"));
+        assert!(!is_backup_archive_name("octopus-backup-foo.txt"));
+        assert!(!is_backup_archive_name("octopus-auto-backup-foo.txt"));
+        assert!(!is_backup_archive_name("agentbuddy-backup-foo.txt"));
+        assert!(!is_backup_archive_name("agentbuddy-auto-backup-foo.txt"));
     }
 
     #[test]
@@ -1143,25 +1163,25 @@ mod tests {
         let xml = r#"<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:">
   <d:response>
-    <d:href>/remote.php/dav/files/u/AgentBuddy/</d:href>
+    <d:href>/remote.php/dav/files/u/Octopus/</d:href>
     <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
   </d:response>
   <d:response>
-    <d:href>/remote.php/dav/files/u/AgentBuddy/agentbuddy-backup-20260721120000.zip</d:href>
+    <d:href>/remote.php/dav/files/u/Octopus/octopus-backup-20260721120000.zip</d:href>
     <d:propstat><d:prop>
       <d:resourcetype/>
       <d:getcontentlength>1234</d:getcontentlength>
       <d:getlastmodified>Mon, 21 Jul 2026 12:00:00 GMT</d:getlastmodified>
-      <d:displayname>agentbuddy-backup-20260721120000.zip</d:displayname>
+      <d:displayname>octopus-backup-20260721120000.zip</d:displayname>
     </d:prop></d:propstat>
   </d:response>
 </d:multistatus>"#;
         let entries = parse_propfind_list(
             xml,
-            "https://dav.example.com/remote.php/dav/files/u/AgentBuddy/",
+            "https://dav.example.com/remote.php/dav/files/u/Octopus/",
         );
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "agentbuddy-backup-20260721120000.zip");
+        assert_eq!(entries[0].name, "octopus-backup-20260721120000.zip");
         assert_eq!(entries[0].bytes, 1234);
         assert!(!entries[0].is_collection);
     }
@@ -1171,23 +1191,23 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:lp1="DAV:">
   <D:response id="directory">
-    <D:href>/dav/AgentBuddy/</D:href>
+    <D:href>/dav/Octopus/</D:href>
     <D:propstat><D:prop><D:resourcetype><D:collection /></D:resourcetype></D:prop></D:propstat>
   </D:response>
   <D:response id="backup">
-    <D:href>/dav/AgentBuddy/agentbuddy-backup-20260819102722.abenc</D:href>
+    <D:href>/dav/Octopus/octopus-backup-20260819102722.abenc</D:href>
     <D:propstat><D:prop>
       <lp1:getcontentlength unit="bytes">25794969</lp1:getcontentlength>
       <lp1:getlastmodified>Wed, 19 Aug 2026 02:27:22 GMT</lp1:getlastmodified>
-      <lp1:displayname>agentbuddy-backup-20260819102722.abenc</lp1:displayname>
+      <lp1:displayname>octopus-backup-20260819102722.abenc</lp1:displayname>
     </D:prop></D:propstat>
   </D:response>
 </D:multistatus>"#;
 
-        let entries = parse_propfind_list(xml, "https://dav.example.com/dav/AgentBuddy/");
+        let entries = parse_propfind_list(xml, "https://dav.example.com/dav/Octopus/");
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "agentbuddy-backup-20260819102722.abenc");
+        assert_eq!(entries[0].name, "octopus-backup-20260819102722.abenc");
         assert_eq!(entries[0].bytes, 25_794_969);
         assert_eq!(entries[0].last_modified, "Wed, 19 Aug 2026 02:27:22 GMT");
     }

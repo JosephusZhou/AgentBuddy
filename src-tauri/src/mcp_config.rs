@@ -1,5 +1,5 @@
 //! Apply / remove MCP server entries in each agent's config file.
-//! Spec: AGENT_MCP_SKILLS_MAP.md
+//! Spec: docs/AGENT_MCP_SKILLS_MAP.md
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/tauri/schema.json",
   "identifier": "default",
-  "description": "Default capabilities for AgentBuddy",
+  "description": "Default capabilities for Octopus",
   "windows": ["main"],
   "permissions": [
     "core:default",
