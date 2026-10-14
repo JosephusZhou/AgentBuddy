@@ -3,7 +3,6 @@
 use crate::config::{load_network_settings, ProxyMode, ProxyProtocol, ProxySettings};
 use reqwest::blocking::ClientBuilder;
 use reqwest::Proxy;
-use std::process::Command;
 
 /// Apply `~/.agentbuddy` network proxy settings onto a reqwest builder.
 /// Call this on every outbound HTTP client so WebDAV / Skills / MCP / OpenCode share one policy.

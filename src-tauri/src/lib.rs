@@ -1572,8 +1572,8 @@ fn set_windows_titlebar_appearance(app: &tauri::AppHandle, mode: Option<bool>) {
         };
         unsafe {
             let _ = DwmSetWindowAttribute(
-                win32.hwnd.get() as isize,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                win32.hwnd.get() as *mut std::ffi::c_void,
+                DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
                 &value as *const i32 as *const std::ffi::c_void,
                 std::mem::size_of::<i32>() as u32,
             );
