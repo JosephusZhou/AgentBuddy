@@ -8,10 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-/// 后端兜底默认主题。精确的“是否属于主题注册表”判断由前端 `lib/theme.ts`
-/// 唯一维护（启动时检测遗留/非法值并回写还原）；后端此常量仅需是一个合法注册 id，
-/// 用于配置文件损坏、theme 字段缺失/形状非法时的安全兜底。
-const DEFAULT_THEME: &str = "qoder-light";
+/// 后端兜底默认主题（三模式之一）。主题合法值由 `is_valid_theme` 精确维护：
+/// 仅接受 `system`（跟随系统）、`light`、`dark`；启动时若读到其它值（含旧的
+/// 多主题 id，如 qoder-light / qoder-dark / claude 等）一律改写为 `system`。
+const DEFAULT_THEME: &str = "system";
 
 /// 串行化进程内对 config.json 的所有读改写操作。
 ///
@@ -30,6 +30,9 @@ fn lock_config_file() -> Result<MutexGuard<'static, ()>, String> {
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub theme: String,
+    /// 文字大小（%）：magpie 同款档位 100/110/125/150，默认 110。
+    #[serde(default = "default_text_size")]
+    pub text_size: u32,
     #[serde(default)]
     pub backup: BackupSettings,
     #[serde(default)]
@@ -249,6 +252,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             theme: DEFAULT_THEME.to_string(),
+            text_size: default_text_size(),
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
             route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
@@ -266,27 +270,38 @@ fn config_path() -> Result<PathBuf, String> {
 }
 
 fn normalize_theme(value: &str) -> String {
-    if is_valid_theme_slug(value) {
+    if is_valid_theme(value) {
         value.to_string()
     } else {
         DEFAULT_THEME.to_string()
     }
 }
 
-/// 主题 id 由前端 THEMES 注册表统一维护；后端不复制该列表（避免双源漂移，
-/// 否则新增主题时忘同步后端会导致合法主题被误判非法而重置）。
-/// 后端仅校验其形状为安全 slug：非空、仅小写字母/数字/连字符、长度受限——
-/// 挡住会破坏 `data-theme` 的注入值。“是否属于注册表”的精确判定与遗留值还原在前端完成。
-fn is_valid_theme_slug(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+/// 主题合法值白名单：仅 `system`（跟随系统）、`light`、`dark` 三个。
+/// 旧的 23 套主题 id 与任何其它字符串都视为非法，启动时归一化为 `system`。
+fn is_valid_theme(value: &str) -> bool {
+    matches!(value, "system" | "light" | "dark")
 }
 
 fn is_valid_secrets_key(value: &str) -> bool {
     crypto::decode_master_key(value).is_ok()
+}
+
+fn default_text_size() -> u32 {
+    110
+}
+
+/// 文字大小合法档位：100/110/125/150（%），与 magpie 一致。
+fn is_valid_text_size(value: u32) -> bool {
+    matches!(value, 100 | 110 | 125 | 150)
+}
+
+fn normalize_text_size(value: u32) -> u32 {
+    if is_valid_text_size(value) {
+        value
+    } else {
+        default_text_size()
+    }
 }
 
 /// Ensure `~/.agentbuddy` and `config.json` exist.
@@ -321,6 +336,7 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
         write_full_config(&path, &theme, &secrets_key)?;
         return Ok(AppConfig {
             theme,
+            text_size: default_text_size(),
             backup: BackupSettings::default(),
             network: NetworkSettings::default(),
             route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
@@ -345,6 +361,7 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
             write_full_config(&path, &theme, &secrets_key)?;
             return Ok(AppConfig {
                 theme,
+                text_size: default_text_size(),
                 backup: BackupSettings::default(),
                 network: NetworkSettings::default(),
                 route_aggregation: crate::route_aggregation::RouteAggregationConfig::default(),
@@ -356,8 +373,9 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
     let mut needs_write = false;
 
     match obj.get("theme").and_then(|v| v.as_str()) {
-        Some(theme) if is_valid_theme_slug(theme) => {}
+        Some(theme) if is_valid_theme(theme) => {}
         Some(_) | None => {
+            // 缺失、损坏或旧的非法主题 id（qoder-light 等）一律改写为 system。
             obj.insert(
                 "theme".to_string(),
                 Value::String(DEFAULT_THEME.to_string()),
@@ -377,6 +395,15 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
         }
     }
 
+    // 文字大小：缺失或非法档位（非 100/110/125/150）一律改写为 110。
+    match obj.get("textSize").and_then(|v| v.as_u64()) {
+        Some(n) if matches!(n, 100 | 110 | 125 | 150) => {}
+        Some(_) | None => {
+            obj.insert("textSize".to_string(), Value::from(default_text_size()));
+            needs_write = true;
+        }
+    }
+
     if needs_write {
         write_raw(&path, &Value::Object(obj.clone()))?;
     }
@@ -386,6 +413,9 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
             obj.get("theme")
                 .and_then(|v| v.as_str())
                 .unwrap_or(DEFAULT_THEME),
+        ),
+        text_size: normalize_text_size(
+            obj.get("textSize").and_then(|v| v.as_u64()).unwrap_or(100) as u32
         ),
         backup: parse_backup_settings(obj.get("backup")),
         network: parse_network_settings(obj.get("network")),
@@ -624,6 +654,48 @@ pub fn set_theme(theme: String) -> Result<AppConfig, String> {
 
     Ok(AppConfig {
         theme,
+        text_size: normalize_text_size(
+            root.get("textSize").and_then(|v| v.as_u64()).unwrap_or(100) as u32,
+        ),
+        backup: parse_backup_settings(root.get("backup")),
+        network: parse_network_settings(root.get("network")),
+        route_aggregation: parse_route_aggregation(root.get("routeAggregation")),
+        models_dev_cached_at: parse_models_dev_cached_at(root.get("modelsDevCachedAt")),
+    })
+}
+
+/// 设置文字大小（%）。仅接受 100/110/125/150，非法值归一化为 110 后写入，
+/// 返回写入后的完整配置（其它字段原样保留）。
+pub fn set_text_size(percent: u32) -> Result<AppConfig, String> {
+    let percent = normalize_text_size(percent);
+    let _config_guard = lock_config_file()?;
+    let path = config_path()?;
+
+    // Make sure dir + file baseline (incl. secretsKey) exist first.
+    let _ = ensure_app_config_locked()?;
+
+    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    let mut root: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+
+    if let Some(obj) = root.as_object_mut() {
+        obj.insert("textSize".to_string(), Value::from(percent));
+    } else {
+        root = json!({
+            "theme": DEFAULT_THEME,
+            "textSize": percent,
+            "secretsKey": crypto::generate_secrets_key(),
+        });
+    }
+
+    write_raw(&path, &root)?;
+
+    Ok(AppConfig {
+        theme: normalize_theme(
+            root.get("theme")
+                .and_then(|v| v.as_str())
+                .unwrap_or(DEFAULT_THEME),
+        ),
+        text_size: percent,
         backup: parse_backup_settings(root.get("backup")),
         network: parse_network_settings(root.get("network")),
         route_aggregation: parse_route_aggregation(root.get("routeAggregation")),
@@ -745,26 +817,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_known_and_new_theme_slugs() {
-        for id in [
-            "qoder-light",
-            "qoder-dark",
-            "claude",
-            "catppuccin-mocha",
-            "synthwave-84",
-        ] {
-            assert!(is_valid_theme_slug(id), "should accept {id}");
+    fn accepts_system_light_dark() {
+        for id in ["system", "light", "dark"] {
+            assert!(is_valid_theme(id), "should accept {id}");
             assert_eq!(normalize_theme(id), id);
         }
     }
 
     #[test]
-    fn legacy_ids_pass_shape_check_and_are_restored_by_frontend() {
-        // 旧遗留 id（light/dark）形状合法，故后端原样透传、不重置——
-        // 精确的“不在注册表→还原成默认”判定由前端 lib/theme.ts 负责。
-        for legacy in ["light", "dark"] {
-            assert!(is_valid_theme_slug(legacy));
-            assert_eq!(normalize_theme(legacy), legacy);
+    fn legacy_theme_ids_are_invalid_and_normalized_to_system() {
+        // 旧的 23 套主题 id 均视为非法，启动时统一回退 system；
+        // 旧遗留值 light/dark 恰好等于新合法值，按浅色/深色解读，不在此列。
+        for legacy in [
+            "qoder-light",
+            "qoder-dark",
+            "claude",
+            "one-light",
+            "catppuccin-mocha",
+            "synthwave-84",
+        ] {
+            assert!(!is_valid_theme(legacy), "should reject {legacy}");
+            assert_eq!(normalize_theme(legacy), "system");
         }
     }
 
@@ -781,15 +854,32 @@ mod tests {
             "with space",
             &"x".repeat(65),
         ] {
-            assert!(!is_valid_theme_slug(bad), "should reject {bad:?}");
+            assert!(!is_valid_theme(bad), "should reject {bad:?}");
             assert_eq!(normalize_theme(bad), DEFAULT_THEME);
         }
     }
 
     #[test]
-    fn slug_length_boundary() {
-        assert!(is_valid_theme_slug(&"a".repeat(64)));
-        assert!(!is_valid_theme_slug(&"a".repeat(65)));
+    fn default_theme_is_system() {
+        assert_eq!(DEFAULT_THEME, "system");
+        assert!(is_valid_theme(DEFAULT_THEME));
+    }
+
+    #[test]
+    fn text_size_accepts_magpie_tiers_only() {
+        for size in [100, 110, 125, 150] {
+            assert!(is_valid_text_size(size), "should accept {size}");
+            assert_eq!(normalize_text_size(size), size);
+        }
+        for bad in [0, 90, 105, 120, 200, 99, 151] {
+            assert!(!is_valid_text_size(bad), "should reject {bad}");
+            assert_eq!(normalize_text_size(bad), 110);
+        }
+    }
+
+    #[test]
+    fn text_size_defaults_to_110() {
+        assert_eq!(default_text_size(), 110);
     }
 
     #[test]

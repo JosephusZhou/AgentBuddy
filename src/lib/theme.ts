@@ -1,221 +1,120 @@
-// 主题注册表：全应用主题的唯一事实源。
-// 新增/删减主题只需改这里 + index.css 中对应的 [data-theme] 令牌块。
-// 每个 id 必须在 index.css 里有一组完整的 --seed-* 令牌，且是合法 slug（^[a-z0-9-]+$），
-// 因为它会被直接写入 <html data-theme> 与后端 config.json。
+// 主题三模式：全应用主题的唯一事实源。
+// 合法值仅 system（跟随系统）/ light / dark，写入 <html data-theme> 与后端 config.json。
+// 样式上参照 magpie：system 不设置 data-theme，由 CSS `prefers-color-scheme` 接管；
+// light / dark 显式设置 data-theme 强制对应模式。
 
-export type ThemeCategory = "light" | "dark";
+export type Theme = "system" | "light" | "dark";
 
-export interface ThemeDef {
-  /** 稳定标识：写入 data-theme 与 config.json，切勿随意改动（会使已保存配置失效）。 */
-  id: string;
-  /** UI 显示名。 */
-  label: string;
-  /** UI 描述文案。 */
-  description: string;
-  /** 明/暗归类，仅用于偏好设置里的分组展示。 */
-  category: ThemeCategory;
-}
+/** 偏好设置中的展示顺序。 */
+export const THEMES: readonly Theme[] = ["system", "light", "dark"];
 
-// 顺序即偏好设置中的展示顺序。Qoder 两套置顶作为默认主题。
-export const THEMES = [
-  // —— 品牌 / 默认 ——
-  {
-    id: "qoder-light",
-    label: "Qoder Light",
-    description: "明亮清爽的界面风格，适合日间使用",
-    category: "light",
-  },
-  {
-    id: "qoder-dark",
-    label: "Qoder Dark",
-    description: "沉稳专注的界面风格，适合夜间使用",
-    category: "dark",
-  },
-  {
-    id: "claude",
-    label: "Claude",
-    description: "温暖米色搭配珊瑚色强调，还原 claude.ai 质感",
-    category: "light",
-  },
-  // —— 浅色 ——
-  {
-    id: "one-light",
-    label: "Atom One Light",
-    description: "Atom 经典浅色，柔和克制",
-    category: "light",
-  },
-  {
-    id: "github-light",
-    label: "GitHub Light",
-    description: "GitHub 官方浅色，干净通用",
-    category: "light",
-  },
-  {
-    id: "solarized-light",
-    label: "Solarized Light",
-    description: "低对比暖调，久看不累",
-    category: "light",
-  },
-  {
-    id: "gruvbox-light",
-    label: "Gruvbox Light",
-    description: "复古暖棕，颗粒质感",
-    category: "light",
-  },
-  {
-    id: "ayu-light",
-    label: "Ayu Light",
-    description: "清爽明快，橙色点缀",
-    category: "light",
-  },
-  {
-    id: "catppuccin-latte",
-    label: "Catppuccin Latte",
-    description: "柔和粉彩浅色，温润细腻",
-    category: "light",
-  },
-  // —— 深色 ——
-  {
-    id: "dracula",
-    label: "Dracula",
-    description: "标志性紫粉配色，辨识度极高",
-    category: "dark",
-  },
-  {
-    id: "one-dark",
-    label: "Atom One Dark",
-    description: "最流行的深色主题之一，均衡耐看",
-    category: "dark",
-  },
-  {
-    id: "monokai",
-    label: "Monokai",
-    description: "经典高饱和深色，鲜明活泼",
-    category: "dark",
-  },
-  {
-    id: "solarized-dark",
-    label: "Solarized Dark",
-    description: "低对比冷青，护眼沉稳",
-    category: "dark",
-  },
-  {
-    id: "nord",
-    label: "Nord",
-    description: "北欧冷蓝灰，安静克制",
-    category: "dark",
-  },
-  {
-    id: "gruvbox-dark",
-    label: "Gruvbox Dark",
-    description: "复古暖色深色，温厚扎实",
-    category: "dark",
-  },
-  {
-    id: "tokyo-night",
-    label: "Tokyo Night",
-    description: "深夜霓虹蓝紫，现代感强",
-    category: "dark",
-  },
-  {
-    id: "night-owl",
-    label: "Night Owl",
-    description: "为夜间编码调校的深蓝配色",
-    category: "dark",
-  },
-  {
-    id: "github-dark",
-    label: "GitHub Dark",
-    description: "GitHub 官方深色，干净通用",
-    category: "dark",
-  },
-  {
-    id: "palenight",
-    label: "Material Palenight",
-    description: "Material 柔紫深色，优雅耐看",
-    category: "dark",
-  },
-  {
-    id: "cobalt2",
-    label: "Cobalt2",
-    description: "深蓝底黄橙点缀，对比鲜明",
-    category: "dark",
-  },
-  {
-    id: "ayu-dark",
-    label: "Ayu Dark",
-    description: "近黑深色，暖橙强调",
-    category: "dark",
-  },
-  {
-    id: "synthwave-84",
-    label: "SynthWave '84",
-    description: "蒸汽波霓虹紫粉，复古赛博",
-    category: "dark",
-  },
-  {
-    id: "catppuccin-mocha",
-    label: "Catppuccin Mocha",
-    description: "柔和粉彩深色，温润细腻",
-    category: "dark",
-  },
-] as const satisfies readonly ThemeDef[];
+export const DEFAULT_THEME: Theme = "system";
 
-export type Theme = (typeof THEMES)[number]["id"];
+/** 文字大小档位（%），与 magpie 一致：100 / 110 / 125 / 150。 */
+export const TEXT_SIZES: readonly number[] = [100, 110, 125, 150];
 
-export const DEFAULT_THEME: Theme = "qoder-light";
+/** 默认档位：110%（用户要求）。非法值与缺失配置均回退到这一档。 */
+export const DEFAULT_TEXT_SIZE = 110;
 
-const THEME_IDS: ReadonlySet<string> = new Set(THEMES.map((t) => t.id));
+export const THEME_META: Record<Theme, { label: string; description: string }> = {
+  system: { label: "跟随系统", description: "自动跟随操作系统的浅色 / 深色外观" },
+  light: { label: "浅色", description: "始终保持浅色外观" },
+  dark: { label: "深色", description: "始终保持深色外观" },
+};
+
+const THEME_SET: ReadonlySet<string> = new Set(THEMES);
 
 export interface AppConfig {
   theme: Theme;
+  textSize: number;
 }
 
-/** 未知/非法值一律回退默认主题，保证 data-theme 永远有效。 */
+/** 未知/非法值一律回退默认（system），保证 data-theme 永远有效。 */
 function normalizeTheme(value: unknown): Theme {
-  return typeof value === "string" && THEME_IDS.has(value) ? (value as Theme) : DEFAULT_THEME;
+  return typeof value === "string" && THEME_SET.has(value) ? (value as Theme) : DEFAULT_THEME;
 }
 
-/** 存储值是否已是合法注册主题（用于判断启动时是否需要还原回写）。 */
+/** 存储值是否已是合法主题（用于判断启动时是否需要还原回写）。 */
 function isKnownTheme(value: unknown): value is Theme {
-  return typeof value === "string" && THEME_IDS.has(value);
+  return typeof value === "string" && THEME_SET.has(value);
 }
 
+/** 非法文字大小一律回退默认（110）。 */
+function normalizeTextSize(value: unknown): number {
+  return typeof value === "number" && TEXT_SIZES.includes(value) ? value : DEFAULT_TEXT_SIZE;
+}
+
+/** 应用主题：system 移除 data-theme（CSS 媒体查询接管），light/dark 显式设置。 */
 export function applyTheme(theme: Theme): void {
-  document.documentElement.setAttribute("data-theme", theme);
+  const root = document.documentElement;
+  if (theme === "system") {
+    root.removeAttribute("data-theme");
+  } else {
+    root.setAttribute("data-theme", theme);
+  }
 }
 
-/** Look up the category (light/dark) for a theme id. */
-export function getThemeCategory(theme: Theme): ThemeCategory {
-  return THEMES.find((t) => t.id === theme)?.category ?? "light";
+/**
+ * 系统外观变化监听：system 模式下 CSS 会自动重绘（窗口 appearance 已为
+ * 跟随系统，prefers-color-scheme 反映真实系统），这里只负责通知上层
+ * 重新同步原生窗口外观（macOS traffic lights / Windows 标题栏）。
+ * 返回取消订阅函数。
+ */
+export function subscribeSystemTheme(onChange: () => void): () => void {
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  if (typeof mql.addEventListener === "function") {
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }
+  mql.addListener(onChange);
+  return () => mql.removeListener(onChange);
 }
 
-/** Tell the Rust backend to set NSWindow appearance (light → Aqua, dark → DarkAqua)
- *  so inactive traffic lights render in the correct shade. */
-async function syncWindowAppearance(theme: Theme): Promise<void> {
+/**
+ * 将当前主题同步到原生窗口外观（macOS traffic lights / Windows 标题栏）。
+ * 直接透传 system/light/dark：system 时后端把窗口恢复为跟随系统
+ * （macOS setAppearance:nil / Windows DWM -1）。注意不能在这里用
+ * matchMedia 把 system 解析成 light/dark——macOS 上 WKWebView 的
+ * prefers-color-scheme 跟随窗口 NSAppearance，若窗口还停留在深色，
+ * 解析结果会是错误的 dark，导致窗口永远无法恢复跟随系统。
+ */
+export async function syncWindowAppearance(theme: Theme): Promise<void> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("set_window_appearance", { category: getThemeCategory(theme) });
+    await invoke("set_window_appearance", { category: theme });
   } catch {
     // Non-tauri environment — no-op.
   }
 }
 
+/**
+ * 应用文字大小（webview 层页面缩放）：写入 CSS `--zoom` 变量，供与原生元素
+ * （macOS traffic lights 等）对齐的尺寸反算使用（见 index.css 的
+ * `calc(px / var(--zoom, 1))`）。真正的页面缩放由后端 set_text_size 完成。
+ */
+export function applyTextSize(percent: number): void {
+  const next = normalizeTextSize(percent);
+  document.documentElement.style.setProperty("--zoom", String(next / 100));
+}
+
 export async function loadAppConfig(): Promise<AppConfig> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const config = await (invoke("get_app_config") as Promise<{ theme?: string }>);
+    const config = await (invoke("get_app_config") as Promise<{
+      theme?: string;
+      textSize?: number;
+    }>);
     if (isKnownTheme(config?.theme)) {
-      await syncWindowAppearance(config.theme as Theme);
-      return { theme: config.theme };
+      await syncWindowAppearance(config.theme);
+      return { theme: config.theme, textSize: normalizeTextSize(config?.textSize) };
     }
-    // 配置文件里是未知/遗留主题（如旧的 light/dark 或人工乱改）：
-    // 还原成默认主题并持久化回写，避免每次启动都残留非法值。
+    // 配置文件里是旧的多主题 id 或非法值（后端启动时已改写为 system，
+    // 这里再兜底一次，保证 data-theme 与 config 一致）。
     const fallback = await saveTheme(DEFAULT_THEME);
-    return { theme: fallback };
+    return { theme: fallback, textSize: normalizeTextSize(config?.textSize) };
   } catch {
     // Browser / non-tauri preview: fall back to default.
-    return { theme: DEFAULT_THEME };
+    return { theme: DEFAULT_THEME, textSize: DEFAULT_TEXT_SIZE };
   }
 }
 
@@ -227,6 +126,20 @@ export async function saveTheme(theme: Theme): Promise<Theme> {
     const saved = normalizeTheme(config?.theme);
     await syncWindowAppearance(saved);
     return saved;
+  } catch {
+    return next;
+  }
+}
+
+/** 保存文字大小（后端校验档位并应用 webview 缩放），返回实际落盘值。 */
+export async function saveTextSize(percent: number): Promise<number> {
+  const next = normalizeTextSize(percent);
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const config = await (invoke("set_text_size", { percent: next }) as Promise<{
+      textSize?: number;
+    }>);
+    return normalizeTextSize(config?.textSize);
   } catch {
     return next;
   }

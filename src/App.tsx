@@ -13,7 +13,19 @@ import Preferences from "./components/pages/Preferences";
 import NetworkSettings from "./components/pages/NetworkSettings";
 import WebDAV from "./components/pages/WebDAV";
 import RouteAggregation from "./components/pages/RouteAggregation";
-import { applyTheme, loadAppConfig, saveTheme, DEFAULT_THEME, type Theme } from "./lib/theme";
+import {
+  applyTheme,
+  applyTextSize,
+  loadAppConfig,
+  saveTheme,
+  saveTextSize,
+  subscribeSystemTheme,
+  syncWindowAppearance,
+  DEFAULT_THEME,
+  DEFAULT_TEXT_SIZE,
+  TEXT_SIZES,
+  type Theme,
+} from "./lib/theme";
 import { useStatusMessage } from "./lib/useStatusMessage";
 import { useGlobalModalA11y } from "./components/ui";
 import { Toast } from "./components/Toast";
@@ -78,6 +90,7 @@ export default function App() {
   const [mainView, setMainView] = useState<MainView>("agent-sniff");
   const [settingsView, setSettingsView] = useState<SettingsView>("preferences");
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
+  const [textSize, setTextSize] = useState<number>(DEFAULT_TEXT_SIZE);
   const [themeReady, setThemeReady] = useState(false);
 
   useEffect(() => {
@@ -94,7 +107,9 @@ export default function App() {
       const config = await loadAppConfig();
       if (cancelled) return;
       applyTheme(config.theme);
+      applyTextSize(config.textSize);
       setTheme(config.theme);
+      setTextSize(config.textSize);
       setThemeReady(true);
     })();
 
@@ -112,6 +127,50 @@ export default function App() {
       setTheme(saved);
     }
   };
+
+  const handleTextSizeChange = async (next: number) => {
+    applyTextSize(next);
+    setTextSize(next);
+    const saved = await saveTextSize(next);
+    if (saved !== next) {
+      applyTextSize(saved);
+      setTextSize(saved);
+    }
+  };
+
+  // ⌘/Ctrl + + / − / 0：按档位循环文字大小（与 magpie 一致）。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      const idx = TEXT_SIZES.indexOf(textSize);
+      if (key === "=" || key === "+") {
+        e.preventDefault();
+        const next = TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, idx + 1)];
+        if (next !== textSize) void handleTextSizeChange(next);
+      } else if (key === "-") {
+        e.preventDefault();
+        const next = TEXT_SIZES[Math.max(0, idx - 1)];
+        if (next !== textSize) void handleTextSizeChange(next);
+      } else if (key === "0") {
+        e.preventDefault();
+        if (textSize !== DEFAULT_TEXT_SIZE) void handleTextSizeChange(DEFAULT_TEXT_SIZE);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textSize]);
+
+  // system 模式下跟随系统外观：CSS 由 prefers-color-scheme 自动重绘，
+  // 这里只负责在系统明暗变化时同步原生窗口外观（macOS traffic lights / Windows 标题栏）。
+  useEffect(() => {
+    if (theme !== "system") return;
+    const unsubscribe = subscribeSystemTheme(() => {
+      void syncWindowAppearance(theme);
+    });
+    return unsubscribe;
+  }, [theme]);
 
   // Avoid a light→dark flash when saved theme is dark.
   if (!themeReady) {
@@ -144,7 +203,12 @@ export default function App() {
         {activeView === "codex-env" && <CodexEnv />}
         {activeView === "route-aggregation" && <RouteAggregation />}
         {activeView === "preferences" && (
-          <Preferences theme={theme} onThemeChange={handleThemeChange} />
+          <Preferences
+            theme={theme}
+            onThemeChange={handleThemeChange}
+            textSize={textSize}
+            onTextSizeChange={handleTextSizeChange}
+          />
         )}
         {activeView === "network" && <NetworkSettings />}
         {activeView === "webdav" && <WebDAV />}

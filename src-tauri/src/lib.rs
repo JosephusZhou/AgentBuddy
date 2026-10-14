@@ -35,18 +35,50 @@ async fn set_theme(theme: String) -> Result<config::AppConfig, String> {
     config::set_theme(theme)
 }
 
-/// Set the NSWindow appearance to light or dark so that inactive traffic lights
-/// render in the correct shade (gray for dark, light-gray for light).
-/// Called by the frontend after loading or switching themes.
+/// Set the native window appearance so OS-drawn chrome matches the page theme:
+/// macOS inactive traffic lights (gray for dark, light-gray for light) and
+/// Windows immersive dark title bar.
+/// category: "system" 恢复跟随系统（macOS setAppearance:nil / Windows DWM -1），
+/// "light" / "dark" 显式指定。
+///
+/// 重要：macOS 上 WKWebView 的 prefers-color-scheme 跟随窗口 NSAppearance 而非系统，
+/// 因此从 light/dark 切回 system 时**必须**把 appearance 重置为 nil，否则 CSS 的
+/// 深色媒体查询会一直命中（表现为「跟随系统」仍停留在深色）。
 #[tauri::command]
 async fn set_window_appearance(category: String, app: tauri::AppHandle) -> Result<(), String> {
+    let mode = match category.as_str() {
+        "system" => None,
+        "dark" => Some(true),
+        _ => Some(false),
+    };
     #[cfg(target_os = "macos")]
     {
-        let dark = category == "dark";
-        set_ns_window_appearance(&app, dark);
+        set_ns_window_appearance(&app, mode);
     }
-    let _ = category;
+    #[cfg(target_os = "windows")]
+    {
+        set_windows_titlebar_appearance(&app, mode);
+    }
+    let _ = mode;
     Ok(())
+}
+
+#[tauri::command]
+async fn set_text_size(percent: u32, app: tauri::AppHandle) -> Result<config::AppConfig, String> {
+    let cfg = config::set_text_size(percent)?;
+    apply_zoom(&app, cfg.text_size);
+    Ok(cfg)
+}
+
+/// 将文字大小应用到主窗口的 webview 页面缩放（magpie 同款：100/110/125/150 %）。
+/// 页面整体（文字、布局、控件、间距）等比缩放；CSS 里的 `--zoom` 变量另行
+/// 反算修正 macOS traffic lights 等原生元素的对齐（见 index.css）。
+fn apply_zoom(app: &tauri::AppHandle, percent: u32) {
+    let zoom = f64::from(percent) / 100.0;
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_zoom(zoom);
+    }
 }
 
 #[tauri::command]
@@ -1513,28 +1545,45 @@ async fn init_project_config(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-// ── macOS traffic-light helpers ──────────────────────────────────────────
+// ── 原生窗口外观 helper（macOS traffic lights / Windows 标题栏） ──────────
 
-/// Heuristic: classify a theme id as dark or light without duplicating the
-/// frontend theme registry. The frontend calls `set_window_appearance` on
-/// load/change, so any misclassification here is corrected within milliseconds.
-#[cfg(target_os = "macos")]
-fn theme_is_dark(theme_id: &str) -> bool {
-    const DARK_HINTS: &[&str] = &[
-        "dark",
-        "night",
-        "dracula",
-        "monokai",
-        "nord",
-        "palenight",
-        "cobalt",
-        "synthwave",
-        "mocha",
-    ];
-    DARK_HINTS.iter().any(|h| theme_id.contains(h))
+/// Set the Windows title bar immersive dark mode via DWM:
+/// Some(true) → 深色标题栏；Some(false) → 浅色；None → -1 跟随系统
+/// （DWM 随系统主题切换自动更新）。页面 CSS 由 WebView2 跟随系统渲染，
+/// 不受此调用影响。
+#[cfg(target_os = "windows")]
+fn set_windows_titlebar_appearance(app: &tauri::AppHandle, mode: Option<bool>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use tauri::Manager;
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
+    if let Some(window) = app.get_webview_window("main") {
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+            return;
+        };
+        // 0 = 浅色标题栏，1 = 深色标题栏，-1 = 跟随系统。
+        let value: i32 = match mode {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        };
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                win32.hwnd.get() as isize,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                &value as *const i32 as *const std::ffi::c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
 }
 
-/// Set the NSWindow's appearance to Aqua (light) or DarkAqua (dark).
+/// Set the NSWindow's appearance: Some(true) → DarkAqua，Some(false) → Aqua，
+/// None → setAppearance:nil（跟随系统，WKWebView 的 prefers-color-scheme
+/// 随之恢复跟随系统）。
 /// This controls how macOS renders inactive traffic lights:
 /// – DarkAqua → medium gray circles when window loses focus
 /// – Aqua     → light gray circles when window loses focus
@@ -1542,7 +1591,7 @@ fn theme_is_dark(theme_id: &str) -> bool {
 /// All objc calls are dispatched to the main thread via run_on_main_thread,
 /// because macOS UI APIs are not safe to call from a tokio worker thread.
 #[cfg(target_os = "macos")]
-fn set_ns_window_appearance(app: &tauri::AppHandle, dark: bool) {
+fn set_ns_window_appearance(app: &tauri::AppHandle, mode: Option<bool>) {
     use tauri::Manager;
     let app = app.clone();
     // run_on_main_thread borrows `app` (&self), so the closure must capture
@@ -1554,20 +1603,28 @@ fn set_ns_window_appearance(app: &tauri::AppHandle, dark: bool) {
             if let Ok(ns_window_ptr) = window.ns_window() {
                 unsafe {
                     let ns_window = ns_window_ptr as *mut objc::runtime::Object;
-                    let name: &[u8] = if dark {
-                        b"NSAppearanceNameDarkAqua\0"
-                    } else {
-                        b"NSAppearanceNameAqua\0"
+                    let _: () = match mode {
+                        Some(dark) => {
+                            let name: &[u8] = if dark {
+                                b"NSAppearanceNameDarkAqua\0"
+                            } else {
+                                b"NSAppearanceNameAqua\0"
+                            };
+                            let ns_name: *mut objc::runtime::Object = msg_send![
+                                class!(NSString),
+                                stringWithUTF8String: name.as_ptr() as *const i8
+                            ];
+                            let appearance: *mut objc::runtime::Object = msg_send![
+                                class!(NSAppearance),
+                                appearanceNamed: ns_name
+                            ];
+                            msg_send![ns_window, setAppearance: appearance]
+                        }
+                        None => {
+                            let nil_appearance: *mut objc::runtime::Object = std::ptr::null_mut();
+                            msg_send![ns_window, setAppearance: nil_appearance]
+                        }
                     };
-                    let ns_name: *mut objc::runtime::Object = msg_send![
-                        class!(NSString),
-                        stringWithUTF8String: name.as_ptr() as *const i8
-                    ];
-                    let appearance: *mut objc::runtime::Object = msg_send![
-                        class!(NSAppearance),
-                        appearanceNamed: ns_name
-                    ];
-                    let _: () = msg_send![ns_window, setAppearance: appearance];
                 }
             }
         }
@@ -1643,6 +1700,7 @@ pub fn run() {
             get_app_config,
             set_theme,
             set_window_appearance,
+            set_text_size,
             get_network_settings,
             update_network_settings,
             get_webdav_connections,
@@ -1907,13 +1965,37 @@ pub fn run() {
                         }
                     }
 
-                    // 3. setAppearance based on saved theme (dispatched to main thread)
+                    // 3. setAppearance based on saved theme (dispatched to main thread).
+                    //    system 模式不强制：NSWindow 默认跟随系统外观；仅 light/dark 显式指定。
                     let theme = config::load_app_config()
                         .map(|c| c.theme)
-                        .unwrap_or_else(|_| "qoder-light".to_string());
-                    let app_handle = _app.handle().clone();
-                    set_ns_window_appearance(&app_handle, theme_is_dark(&theme));
+                        .unwrap_or_else(|_| "system".to_string());
+                    if theme == "dark" || theme == "light" {
+                        let app_handle = _app.handle().clone();
+                        set_ns_window_appearance(&app_handle, Some(theme == "dark"));
+                    }
                 }
+            }
+
+            // Windows：按已保存主题设置标题栏沉浸式深色；system 不强制（DWM 跟随系统）。
+            #[cfg(target_os = "windows")]
+            {
+                let theme = config::load_app_config()
+                    .map(|c| c.theme)
+                    .unwrap_or_else(|_| "system".to_string());
+                if theme == "dark" || theme == "light" {
+                    set_windows_titlebar_appearance(_app.handle(), Some(theme == "dark"));
+                }
+            }
+
+            // 文字大小：启动时按已保存的 textSize 应用 webview 页面缩放。
+            // 兜底默认与 config.rs 的 default_text_size()（110）保持一致，
+            // 避免 load 失败时前端按 110 反算而窗口仍停在 100%。
+            let text_size = config::load_app_config()
+                .map(|c| c.text_size)
+                .unwrap_or(110);
+            if text_size != 100 {
+                apply_zoom(_app.handle(), text_size);
             }
 
             // DevTools only in debug builds; Manager is only needed here.

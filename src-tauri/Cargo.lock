@@ -61,6 +61,7 @@ dependencies = [
  "objc",
  "quick-xml",
  "rand 0.8.7",
+ "raw-window-handle",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -74,6 +75,7 @@ dependencies = [
  "tower-http",
  "uuid",
  "walkdir",
+ "windows-sys 0.59.0",
  "xxhash-rust",
  "zip",
 ]
