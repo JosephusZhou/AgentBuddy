@@ -132,7 +132,7 @@ function TypeCheckboxes({
             </span>
             <div>
               <div>{o.label}</div>
-              <div style={{ fontSize: 12, color: "var(--seed-muted)" }}>{o.sub}</div>
+              <div style={{ fontSize: "var(--text-md)", color: "var(--seed-muted)" }}>{o.sub}</div>
             </div>
           </div>
         );
@@ -1162,7 +1162,7 @@ export default function AiProviders() {
                             setFormCustomModels(next);
                           }}
                           disabled={isSaving}
-                          style={{ width: 120, fontSize: 12 }}
+                          style={{ width: 120, fontSize: "var(--text-md)" }}
                         />
                         <button
                           type="button"

@@ -31,8 +31,11 @@ module.exports = {
         },
       },
       fontSize: {
+        "seed-3xs": "var(--text-3xs)",
+        "seed-2xs": "var(--text-2xs)",
         "seed-xs": "var(--text-xs)",
         "seed-sm": "var(--text-sm)",
+        "seed-md": "var(--text-md)",
         "seed-base": "var(--text-base)",
         "seed-lg": "var(--text-lg)",
         "seed-xl": "var(--text-xl)",

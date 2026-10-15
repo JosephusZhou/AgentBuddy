@@ -56,15 +56,20 @@
   --seed-fill-active: rgba(0, 0, 0, 0.06);
   --seed-border-subtle: rgba(0, 0, 0, 0.05);
 
-  /* Typography Scale（对齐 magpie 的紧凑工具密度：正文 13px/1.4，主力 11.5px，
-     标题 14–15px，页面主标题用 2xl）
-     仅定义于 :root，对全部主题全局生效（与 --seed-* 的分模式策略不同，有意为之）。 */
-  --text-xs: 10.5px;
-  --text-sm: 11.5px;
-  --text-base: 13px;
-  --text-lg: 14px;
-  --text-xl: 15px;
-  --text-2xl: 15px;
+  /* Typography Scale（统一在此调整全局字号：正文 14px/1.4，主力 12.5px，
+     标题 15–16px，页面主标题用 2xl；2026-10 累计上调 1px）
+     仅定义于 :root，对全部主题全局生效（与 --seed-* 的分模式策略不同，有意为之）。
+     3xs/2xs/md 三个档位由原硬编码字号归一而来（9px→10、10px→11、12px→13），
+     后续调大/调小全局字号只需改本块。 */
+  --text-3xs: 10px;
+  --text-2xs: 11px;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
+  --text-2xl: 16px;
 
   /* Spacing rhythm（4px 基网，供布局/卡片/页面留白统一取用） */
   --space-1: 4px;
@@ -3272,7 +3277,7 @@ a[href]:focus-visible {
   flex-shrink: 0;
   width: 15px;
   height: 15px;
-  font-size: 9px;
+  font-size: var(--text-3xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -4073,7 +4078,7 @@ a[href]:focus-visible {
   border: none;
   background: transparent;
   color: var(--seed-muted);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: 600;
   line-height: 1;
   padding: 6px 12px;
@@ -4469,7 +4474,7 @@ a[href]:focus-visible {
   border-radius: 999px;
   background: rgba(99, 102, 241, 0.14);
   color: var(--seed-primary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   line-height: 1.6;
   letter-spacing: 0.02em;
@@ -4483,7 +4488,7 @@ a[href]:focus-visible {
   white-space: nowrap;
 }
 .oc-catalog-hit-meta {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--seed-muted);
   opacity: 0.75;
   font-style: italic;
