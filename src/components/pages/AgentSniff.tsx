@@ -62,8 +62,11 @@ function basename(path: string | null | undefined): string {
 
 function displayHomePath(path: string | null | undefined): string {
   if (!path) return "";
-  // Backend already returns absolute paths; keep tooltip readable if it starts with home-like prefix is unknown on FE.
-  return path;
+  // 仅做展示替换：数据仍是绝对路径，供打开/定位等操作使用（与 Claude/Codex 环境页的 displayPath 一致）。
+  return path
+    .replace(/^\/Users\/[^/]+/, "~")
+    .replace(/^\/home\/[^/]+/, "~")
+    .replace(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+/, "~");
 }
 
 /* ===== Component ===== */
@@ -446,13 +449,13 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
                             <span className="agent-path-label">
                               {path.endsWith(".app") ? "App路径" : "CLI 路径"}
                             </span>
-                            <span className="agent-path-value">{path}</span>
+                            <span className="agent-path-value">{displayHomePath(path)}</span>
                           </div>
                         ))}
                         {agent.config_dirs.map((dir, i) => (
                           <div key={`config-${i}`} className="agent-path-row">
                             <span className="agent-path-label">配置目录</span>
-                            <span className="agent-path-value">{dir}</span>
+                            <span className="agent-path-value">{displayHomePath(dir)}</span>
                           </div>
                         ))}
                         {stats && (
