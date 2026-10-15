@@ -1870,9 +1870,10 @@ export default function SkillsManage() {
                 以下技能在技能库中已存在，请选择要覆盖的技能。覆盖将替换已有技能的全部文件，未选择的将跳过。
               </p>
               <div className="skill-dup-toolbar">
-                <label className="skill-dup-select-all">
+                <label className="ui-check skill-dup-select-all">
                   <input
                     type="checkbox"
+                    className="ui-check-input"
                     checked={
                       dupConflicts.length > 0 && dupSelectedOverwrite.size === dupConflicts.length
                     }
@@ -1885,7 +1886,8 @@ export default function SkillsManage() {
                     }}
                     disabled={isAdding}
                   />
-                  <span>全选</span>
+                  <CheckGlyph />
+                  <span className="ui-check-label">全选</span>
                 </label>
                 <span className="skill-dup-count">
                   已选 {dupSelectedOverwrite.size} / {dupConflicts.length}
@@ -1899,9 +1901,10 @@ export default function SkillsManage() {
                       key={c.existingId}
                       className={`skill-dup-item ${checked ? "checked" : ""}`}
                     >
-                      <label className="skill-dup-check">
+                      <label className="ui-check skill-dup-check">
                         <input
                           type="checkbox"
+                          className="ui-check-input"
                           checked={checked}
                           onChange={() => {
                             setDupSelectedOverwrite((prev) => {
@@ -1913,6 +1916,7 @@ export default function SkillsManage() {
                           }}
                           disabled={isAdding}
                         />
+                        <CheckGlyph />
                       </label>
                       <div className="skill-dup-info">
                         <div className="skill-dup-name">{c.name}</div>
@@ -2006,9 +2010,10 @@ export default function SkillsManage() {
                 以下技能在目标目录中已存在，请选择要覆盖的技能。覆盖将替换目标目录中的同名项，未选择的将跳过。
               </p>
               <div className="skill-dup-toolbar">
-                <label className="skill-dup-select-all">
+                <label className="ui-check skill-dup-select-all">
                   <input
                     type="checkbox"
+                    className="ui-check-input"
                     checked={
                       exportConflicts.length > 0 &&
                       exportSelectedOverwrite.size === exportConflicts.length
@@ -2022,7 +2027,8 @@ export default function SkillsManage() {
                     }}
                     disabled={Boolean(exportingId) || isBatchRunning}
                   />
-                  <span>全选</span>
+                  <CheckGlyph />
+                  <span className="ui-check-label">全选</span>
                 </label>
                 <span className="skill-dup-count">
                   已选 {exportSelectedOverwrite.size} / {exportConflicts.length}
@@ -2033,9 +2039,10 @@ export default function SkillsManage() {
                   const checked = exportSelectedOverwrite.has(c.skillId);
                   return (
                     <div key={c.skillId} className={`skill-dup-item ${checked ? "checked" : ""}`}>
-                      <label className="skill-dup-check">
+                      <label className="ui-check skill-dup-check">
                         <input
                           type="checkbox"
+                          className="ui-check-input"
                           checked={checked}
                           onChange={() => {
                             setExportSelectedOverwrite((prev) => {
@@ -2047,6 +2054,7 @@ export default function SkillsManage() {
                           }}
                           disabled={Boolean(exportingId) || isBatchRunning}
                         />
+                        <CheckGlyph />
                       </label>
                       <div className="skill-dup-info">
                         <div className="skill-dup-name">{c.title}</div>
@@ -2211,11 +2219,12 @@ export default function SkillsManage() {
                           >
                             <input
                               type="checkbox"
-                              className="skill-migrate-check"
+                              className="ui-check-input"
                               checked={checked}
                               disabled={!selectable || isMigrating}
                               onChange={() => toggleMigrateId(item.ccId, selectable)}
                             />
+                            <CheckGlyph />
                             <div className="skill-migrate-item-main">
                               <div className="skill-migrate-item-title-row">
                                 <span className="skill-migrate-item-title">{item.title}</span>
@@ -2353,11 +2362,12 @@ export default function SkillsManage() {
                           >
                             <input
                               type="checkbox"
-                              className="skill-migrate-check"
+                              className="ui-check-input"
                               checked={checked}
                               disabled={!selectable || isImportingSniff}
                               onChange={() => toggleSniffKey(item.key, selectable)}
                             />
+                            <CheckGlyph />
                             <div className="skill-migrate-item-main">
                               <div className="skill-migrate-item-title-row">
                                 <span className="skill-migrate-item-title">{item.title}</span>

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
 import { ModelComboBox } from "../ModelComboBox";
-import { useOverlayDismiss } from "../ui";
+import { useOverlayDismiss, CheckGlyph } from "../ui";
 import {
   Copy,
   Pencil,
@@ -15,8 +15,6 @@ import {
   EyeOff,
   Search,
   GripVertical,
-  CheckSquare,
-  Square,
 } from "lucide-react";
 import {
   invokeList,
@@ -50,8 +48,6 @@ const IconSearch = () => <Search size={16} strokeWidth={1.8} />;
 const IconEye = () => <Eye size={16} strokeWidth={1.8} />;
 const IconEyeOff = () => <EyeOff size={16} strokeWidth={1.8} />;
 const IconGrip = () => <GripVertical size={16} strokeWidth={1.8} />;
-const IconCheckSquare = () => <CheckSquare size={16} strokeWidth={1.8} />;
-const IconSquare = () => <Square size={16} strokeWidth={1.8} />;
 
 /* ModelComboBox 是唯一的模型输入控件；下拉候选直接来自 `formCustomModels`。
    自定义模型列表的录入方式有两种：
@@ -112,29 +108,20 @@ function TypeCheckboxes({
           onChange(next);
         };
         return (
-          <div
-            key={o.value}
-            role="checkbox"
-            aria-checked={checked}
-            tabIndex={0}
-            onClick={toggle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                toggle();
-              }
-            }}
-            className="ai-provider-model-picker-item"
-            style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}
-          >
-            <span className="ai-provider-model-picker-checkbox">
-              {checked ? <IconCheckSquare /> : <IconSquare />}
-            </span>
-            <div>
+          <label key={o.value} className="ui-check ai-provider-model-picker-item">
+            <input
+              type="checkbox"
+              className="ui-check-input"
+              checked={checked}
+              disabled={disabled}
+              onChange={toggle}
+            />
+            <CheckGlyph />
+            <span className="ui-check-label">
               <div>{o.label}</div>
               <div style={{ fontSize: "var(--text-md)", color: "var(--seed-muted)" }}>{o.sub}</div>
-            </div>
-          </div>
+            </span>
+          </label>
         );
       })}
     </div>
@@ -1087,25 +1074,16 @@ export default function AiProviders() {
                         });
                       };
                       return (
-                        <div
-                          key={model}
-                          className="ai-provider-model-picker-item"
-                          role="checkbox"
-                          aria-checked={checked}
-                          tabIndex={0}
-                          onClick={toggle}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              toggle();
-                            }
-                          }}
-                        >
-                          <span className="ai-provider-model-picker-checkbox">
-                            {checked ? <IconCheckSquare /> : <IconSquare />}
-                          </span>
-                          <span>{model}</span>
-                        </div>
+                        <label key={model} className="ui-check ai-provider-model-picker-item">
+                          <input
+                            type="checkbox"
+                            className="ui-check-input"
+                            checked={checked}
+                            onChange={toggle}
+                          />
+                          <CheckGlyph />
+                          <span className="ui-check-label">{model}</span>
+                        </label>
                       );
                     })}
                   </div>

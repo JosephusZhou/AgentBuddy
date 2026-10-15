@@ -495,7 +495,7 @@ export default function RouteAggregation() {
               disabled={actionLoading}
             />
             <span className="ui-check-box">
-              <Check size={12} />
+              <Check size={10} />
             </span>
             <span className="ui-check-label">自动故障转移</span>
           </label>
@@ -945,7 +945,7 @@ function ProviderSelectRow({
             disabled={actionLoading || !isRouteable}
           />
           <span className="ui-check-box">
-            <Check size={12} />
+            <Check size={10} />
           </span>
         </label>
 

@@ -1650,16 +1650,15 @@ export default function McpManage() {
                 ? "将从本应用列表移除，并同步删除已应用 Agent 配置文件中的对应 MCP 条目。"
                 : "默认仅从本应用列表移除，不会改写各 Agent 配置文件。"}
             </div>
-            <label className="mcp-delete-option">
+            <label className="ui-check mcp-delete-option">
               <input
                 type="checkbox"
-                className="mcp-delete-checkbox"
+                className="ui-check-input"
                 checked={removeFromAgentConfigs}
                 onChange={(e) => setRemoveFromAgentConfigs(e.target.checked)}
               />
-              <span className="mcp-delete-option-text">
-                同时删除已应用 Agent 配置文件中的对应 MCP
-              </span>
+              <CheckGlyph />
+              <span className="ui-check-label">同时删除已应用 Agent 配置文件中的对应 MCP</span>
             </label>
           </div>
           <div className="modal-footer">
@@ -1699,17 +1698,16 @@ export default function McpManage() {
                 ? "将从本应用列表移除，并同步删除各 Agent 配置文件中的对应 MCP 条目。"
                 : "默认仅从本应用列表移除，不会改写各 Agent 配置文件。"}
             </div>
-            <label className="mcp-delete-option">
+            <label className="ui-check mcp-delete-option">
               <input
                 type="checkbox"
-                className="mcp-delete-checkbox"
+                className="ui-check-input"
                 checked={batchDeleteAgentConfigs}
                 onChange={(e) => setBatchDeleteAgentConfigs(e.target.checked)}
                 disabled={isBatchRunning}
               />
-              <span className="mcp-delete-option-text">
-                同时删除已应用 Agent 配置文件中的对应 MCP
-              </span>
+              <CheckGlyph />
+              <span className="ui-check-label">同时删除已应用 Agent 配置文件中的对应 MCP</span>
             </label>
           </div>
           <div className="modal-footer">

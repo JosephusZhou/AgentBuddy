@@ -1127,12 +1127,8 @@ label,
 .ai-provider-model-picker-item:hover {
   background: var(--seed-surface);
 }
-.ai-provider-model-picker-checkbox {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--seed-primary);
+.ai-provider-model-picker-item.ui-check {
+  margin-top: 0;
 }
 .ai-provider-model-picker-footer {
   display: flex;
@@ -1621,19 +1617,6 @@ a[href]:focus-visible {
 }
 .mcp-delete-option:hover {
   border-color: color-mix(in srgb, var(--seed-border), var(--seed-fg) 12%);
-}
-.mcp-delete-checkbox {
-  width: 15px;
-  height: 15px;
-  margin-top: 2px;
-  flex-shrink: 0;
-  accent-color: var(--seed-primary);
-  cursor: pointer;
-}
-.mcp-delete-option-text {
-  font-size: var(--text-sm);
-  color: var(--seed-fg);
-  line-height: 1.45;
 }
 
 /* ===== PLACEHOLDER CONTENT ===== */
@@ -2991,10 +2974,10 @@ a[href]:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 1.5px solid var(--seed-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--seed-surface);
   color: var(--seed-primary-fg);
   transition:
@@ -3002,8 +2985,8 @@ a[href]:focus-visible {
     border-color 0.15s ease;
 }
 .ui-check-box svg {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   opacity: 0;
   transform: scale(0.6);
   transition:
@@ -3427,10 +3410,9 @@ a[href]:focus-visible {
   color: var(--seed-fg);
   user-select: none;
 }
-.skill-dup-select-all input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
+.skill-dup-select-all.ui-check,
+.skill-dup-check.ui-check {
+  margin-top: 0;
 }
 .skill-dup-count {
   font-size: var(--text-xs);
@@ -3460,12 +3442,6 @@ a[href]:focus-visible {
 }
 .skill-dup-check {
   flex-shrink: 0;
-  margin-top: 2px;
-  cursor: pointer;
-}
-.skill-dup-check input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
   cursor: pointer;
 }
 .skill-dup-info {
@@ -3576,10 +3552,9 @@ a[href]:focus-visible {
   cursor: default;
   opacity: 0.78;
 }
-.skill-migrate-check {
+.skill-migrate-item .ui-check-box {
   margin-top: 3px;
   flex-shrink: 0;
-  accent-color: var(--seed-primary);
 }
 .skill-migrate-item-main {
   flex: 1;
