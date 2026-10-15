@@ -1,15 +1,13 @@
-import type { AppMode, MainView, SettingsView } from "../App";
+import { useState } from "react";
+import type { SettingsView, View } from "../App";
 /* ===== 图标：统一使用 lucide-react（16~18px / strokeWidth 1.8），替换原手写内联 SVG ===== */
 import {
   Archive,
-  ArrowLeft,
   Blocks,
   Bot,
   Braces,
-  Cloud,
   CloudCog,
   FolderCog,
-  Globe,
   Layers,
   Network,
   Settings,
@@ -23,17 +21,12 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 interface SidebarProps {
-  mode: AppMode;
-  mainView: MainView;
-  settingsView: SettingsView;
-  onNavigateMain: (view: MainView) => void;
-  onNavigateSettings: (view: SettingsView) => void;
-  onEnterSettings: () => void;
-  onExitSettings: () => void;
+  view: View;
+  onNavigate: (view: View) => void;
 }
 
 interface MenuChild {
-  view: MainView;
+  view: View;
   label: string;
   icon: LucideIcon;
 }
@@ -78,108 +71,100 @@ const MENU_GROUPS: MenuGroupDef[] = [
   },
 ];
 
-export default function Sidebar({
-  mode,
-  mainView,
-  settingsView,
-  onNavigateMain,
-  onNavigateSettings,
-  onEnterSettings,
-  onExitSettings,
-}: SidebarProps) {
+const SETTINGS_MENU: { view: SettingsView; label: string; icon: LucideIcon }[] = [
+  { view: "preferences", label: "常规", icon: SlidersHorizontal },
+  { view: "backup", label: "备份", icon: Archive },
+];
+
+function isSettingsView(view: View): view is SettingsView {
+  return view === "preferences" || view === "backup";
+}
+
+export default function Sidebar({ view, onNavigate }: SidebarProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const handleMainNavigate = (next: View) => {
+    setSettingsOpen(false);
+    onNavigate(next);
+  };
+
+  const handleSettingsButtonClick = () => {
+    const nextOpen = !settingsOpen;
+    setSettingsOpen(nextOpen);
+    // 打开浮层时若当前不在设置区，默认落到「常规」
+    if (nextOpen && !isSettingsView(view)) {
+      onNavigate("preferences");
+    }
+  };
+
+  const settingsActive = settingsOpen || isSettingsView(view);
+
   return (
     <aside className="sidebar">
-      {mode === "main" ? (
-        /* ===== Main Sidebar ===== */
-        <>
-          <div className="sidebar-header" data-tauri-drag-region>
-            <div className="sidebar-brand" data-tauri-drag-region>
-              <div className="sidebar-brand-icon">
-                <img src="/octopus-sidebar.png" alt="Octopus" />
-              </div>
-              <span className="sidebar-brand-name">Octopus</span>
-            </div>
+      <div className="sidebar-header" data-tauri-drag-region>
+        <div className="sidebar-brand" data-tauri-drag-region>
+          <div className="sidebar-brand-icon">
+            <img src="/octopus-sidebar.png" alt="Octopus" />
           </div>
-          <nav className="sidebar-nav">
-            {MENU_GROUPS.map((group) => {
-              const GroupIcon = group.icon;
+          <span className="sidebar-brand-name">Octopus</span>
+        </div>
+      </div>
+      <nav className="sidebar-nav">
+        {MENU_GROUPS.map((group) => {
+          const GroupIcon = group.icon;
+          return (
+            <div className="menu-group" key={group.id}>
+              <div className="menu-group-header">
+                <GroupIcon size={15} strokeWidth={1.8} />
+                <span>{group.label}</span>
+              </div>
+              <div className="menu-group-items">
+                {group.items.map((item) => {
+                  const ItemIcon = item.icon;
+                  return (
+                    <button
+                      key={item.view}
+                      className={`menu-item ${view === item.view ? "active" : ""}`}
+                      onClick={() => handleMainNavigate(item.view)}
+                    >
+                      <ItemIcon size={18} strokeWidth={1.8} />
+                      <span className="menu-label">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+      <div className="sidebar-bottom">
+        {settingsOpen && (
+          <div className="settings-popover" role="menu">
+            {SETTINGS_MENU.map((item) => {
+              const ItemIcon = item.icon;
               return (
-                <div className="menu-group" key={group.id}>
-                  <div className="menu-group-header">
-                    <GroupIcon size={15} strokeWidth={1.8} />
-                    <span>{group.label}</span>
-                  </div>
-                  <div className="menu-group-items">
-                    {group.items.map((item) => {
-                      const ItemIcon = item.icon;
-                      return (
-                        <button
-                          key={item.view}
-                          className={`menu-item ${mainView === item.view ? "active" : ""}`}
-                          onClick={() => onNavigateMain(item.view)}
-                        >
-                          <ItemIcon size={18} strokeWidth={1.8} />
-                          <span className="menu-label">{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <button
+                  key={item.view}
+                  role="menuitem"
+                  className={`settings-popover-item ${view === item.view ? "active" : ""}`}
+                  onClick={() => onNavigate(item.view)}
+                >
+                  <ItemIcon size={16} strokeWidth={1.8} />
+                  <span className="menu-label">{item.label}</span>
+                </button>
               );
             })}
-          </nav>
-          <div className="sidebar-bottom">
-            <button className="menu-item" onClick={onEnterSettings}>
-              <Settings size={18} strokeWidth={1.8} />
-              <span className="menu-label">设置</span>
-            </button>
           </div>
-        </>
-      ) : (
-        /* ===== Settings Sidebar ===== */
-        <>
-          <div className="sidebar-header" style={{ borderBottom: "none", paddingBottom: 4 }}>
-            <button
-              className="menu-item"
-              onClick={onExitSettings}
-              style={{ color: "var(--seed-muted)", padding: "8px 12px" }}
-            >
-              <ArrowLeft size={18} strokeWidth={1.8} />
-              <span className="menu-label">返回应用</span>
-            </button>
-          </div>
-          <nav className="sidebar-nav">
-            <button
-              className={`menu-item ${settingsView === "preferences" ? "active" : ""}`}
-              onClick={() => onNavigateSettings("preferences")}
-            >
-              <SlidersHorizontal size={18} strokeWidth={1.8} />
-              <span className="menu-label">偏好设置</span>
-            </button>
-            <button
-              className={`menu-item ${settingsView === "network" ? "active" : ""}`}
-              onClick={() => onNavigateSettings("network")}
-            >
-              <Globe size={18} strokeWidth={1.8} />
-              <span className="menu-label">网络设置</span>
-            </button>
-            <button
-              className={`menu-item ${settingsView === "webdav" ? "active" : ""}`}
-              onClick={() => onNavigateSettings("webdav")}
-            >
-              <Cloud size={18} strokeWidth={1.8} />
-              <span className="menu-label">WebDAV</span>
-            </button>
-            <button
-              className={`menu-item ${settingsView === "backup" ? "active" : ""}`}
-              onClick={() => onNavigateSettings("backup")}
-            >
-              <Archive size={18} strokeWidth={1.8} />
-              <span className="menu-label">备份</span>
-            </button>
-          </nav>
-        </>
-      )}
+        )}
+        <button
+          className={`menu-item ${settingsActive ? "active" : ""}`}
+          onClick={handleSettingsButtonClick}
+          aria-expanded={settingsOpen}
+        >
+          <Settings size={18} strokeWidth={1.8} />
+          <span className="menu-label">设置</span>
+        </button>
+      </div>
     </aside>
   );
 }

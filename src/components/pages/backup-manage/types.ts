@@ -12,8 +12,6 @@ export interface BackupUnitNode {
 }
 
 export interface BackupSettings {
-  cliproxyapiConfPath: string;
-  sub2apiRootPath: string;
   defaultRemoteDir: string;
 }
 

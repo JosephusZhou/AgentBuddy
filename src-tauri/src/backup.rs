@@ -243,12 +243,9 @@ pub fn update_backup_settings(settings: BackupSettings) -> Result<BackupSettings
 // ===== List units =====
 
 pub fn list_backup_units() -> Result<Vec<BackupUnitNode>, String> {
-    let settings = config::load_backup_settings()?;
     let mut roots = Vec::new();
 
     roots.push(build_app_unit());
-    roots.push(build_cliproxy_unit(&settings));
-    roots.push(build_sub2api_unit(&settings));
     roots.push(build_agents_group());
 
     Ok(roots)
@@ -342,90 +339,6 @@ fn build_app_unit() -> BackupUnitNode {
             vec![]
         },
         children,
-    }
-}
-
-fn build_cliproxy_unit(settings: &BackupSettings) -> BackupUnitNode {
-    let conf = resolve_cliproxy_conf(settings);
-    let auth_dir = conf
-        .as_ref()
-        .and_then(|p| read_auth_dir_from_conf(p))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".cli-proxy-api")));
-
-    let conf_exists = conf.as_ref().map(|p| p.is_file()).unwrap_or(false);
-    let auth_exists = auth_dir.as_ref().map(|p| p.is_dir()).unwrap_or(false);
-    let available = conf_exists || auth_exists;
-
-    let mut warnings = Vec::new();
-    let mut bytes = 0u64;
-    let mut summary_parts = Vec::new();
-
-    if let Some(ref p) = conf {
-        summary_parts.push(format!("conf: {}", display_path(p)));
-        if conf_exists {
-            bytes = bytes.saturating_add(file_size(p));
-        } else {
-            warnings.push(format!("配置文件不存在: {}", display_path(p)));
-        }
-    } else {
-        warnings.push("未找到 cliproxyapi 配置文件".into());
-    }
-    if let Some(ref p) = auth_dir {
-        summary_parts.push(format!("auth-dir: {}", display_path(p)));
-        if auth_exists {
-            bytes = bytes.saturating_add(dir_size_capped(p));
-        }
-    }
-
-    BackupUnitNode {
-        id: "tool:cliproxyapi".into(),
-        label: "CLIProxyAPI (cliproxyapi)".into(),
-        kind: "tool".into(),
-        available,
-        selected_by_default: available,
-        contains_secrets: true,
-        estimated_bytes: bytes,
-        path_summary: summary_parts.join(" · "),
-        warnings,
-        children: vec![],
-    }
-}
-
-fn build_sub2api_unit(settings: &BackupSettings) -> BackupUnitNode {
-    let root = resolve_sub2api_root(settings);
-    let available = root.as_ref().map(|p| p.exists()).unwrap_or(false);
-    let mut warnings = Vec::new();
-    let mut bytes = 0u64;
-    let summary = if let Some(ref p) = root {
-        let conf = p.join("config.yaml");
-        if conf.is_file() {
-            bytes = bytes.saturating_add(file_size(&conf));
-        } else if p.join("config.yml").is_file() {
-            bytes = bytes.saturating_add(file_size(&p.join("config.yml")));
-        } else {
-            warnings.push("根目录下未找到 config.yaml".into());
-        }
-        let data = p.join("data");
-        if data.is_dir() {
-            bytes = bytes.saturating_add(dir_size_capped(&data));
-        }
-        display_path(p)
-    } else {
-        warnings.push("未检测到 sub2api 安装目录（可在下方自定义路径）".into());
-        String::new()
-    };
-
-    BackupUnitNode {
-        id: "tool:sub2api".into(),
-        label: "sub2api".into(),
-        kind: "tool".into(),
-        available,
-        selected_by_default: available,
-        contains_secrets: true,
-        estimated_bytes: bytes,
-        path_summary: summary,
-        warnings,
-        children: vec![],
     }
 }
 
@@ -769,68 +682,6 @@ fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn resolve_cliproxy_conf(settings: &BackupSettings) -> Option<PathBuf> {
-    if !settings.cliproxyapi_conf_path.trim().is_empty() {
-        return Some(PathBuf::from(settings.cliproxyapi_conf_path.trim()));
-    }
-    let candidates = [
-        "/usr/local/etc/cliproxyapi.conf",
-        "/opt/homebrew/etc/cliproxyapi.conf",
-        "/etc/cliproxyapi.conf",
-    ];
-    for c in candidates {
-        let p = PathBuf::from(c);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    // still return first default for display even if missing
-    Some(PathBuf::from(candidates[0]))
-}
-
-fn read_auth_dir_from_conf(conf: &Path) -> Option<PathBuf> {
-    let raw = fs::read_to_string(conf).ok()?;
-    for line in raw.lines() {
-        let t = line.trim();
-        if t.starts_with('#') {
-            continue;
-        }
-        // auth-dir: "..."
-        if let Some(rest) = t.strip_prefix("auth-dir:") {
-            let v = rest.trim().trim_matches('"').trim_matches('\'');
-            if !v.is_empty() {
-                return expand_home(v);
-            }
-        }
-    }
-    None
-}
-
-fn resolve_sub2api_root(settings: &BackupSettings) -> Option<PathBuf> {
-    if !settings.sub2api_root_path.trim().is_empty() {
-        let p = PathBuf::from(settings.sub2api_root_path.trim());
-        return Some(p);
-    }
-    let home = dirs::home_dir()?;
-    let candidates = [
-        home.join("Downloads/sub2api"),
-        PathBuf::from("/opt/sub2api"),
-        PathBuf::from("/etc/sub2api"),
-        home.join(".config/sub2api"),
-        home.join(".sub2api"),
-    ];
-    for c in &candidates {
-        if c.join("config.yaml").is_file()
-            || c.join("config.yml").is_file()
-            || c.join("sub2api").is_file()
-            || c.is_dir() && c.join("data").exists()
-        {
-            return Some(c.clone());
-        }
-    }
-    None
-}
-
 /// 配置目录之外的 auth.json：OpenCode 存于 `~/.local/share/opencode`；
 /// Pi 的 auth 在 agent 目录内，但仍统一登记以便清单与打包。
 fn agent_auth_path(agent_name: &str) -> Option<PathBuf> {
@@ -1110,7 +961,7 @@ pub(crate) fn execute_backup(
         .collect();
 
     if unit_ids.is_empty() {
-        return Err("请至少选择一个备份内容".to_string());
+        return Err("请先选择备份范围".to_string());
     }
     if payload.webdav_connection_ids.is_empty() {
         return Err("请至少选择一个 WebDAV 目标".to_string());
@@ -1155,7 +1006,7 @@ pub(crate) fn execute_backup(
     advance(&app, "collect", "正在收集备份文件…".into(), None);
 
     let mut warnings = Vec::new();
-    let entries = collect_entries(&unit_ids, &settings, &mut warnings)?;
+    let entries = collect_entries(&unit_ids, &mut warnings)?;
     if entries.is_empty() {
         return Err("所选范围内没有可备份的文件".to_string());
     }
@@ -1821,7 +1672,6 @@ fn extract_backup_zip(zip_path: &Path) -> Result<(u32, u32, Vec<String>), String
 
 fn collect_entries(
     unit_ids: &HashSet<String>,
-    settings: &BackupSettings,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<FileEntry>, String> {
     let mut out = Vec::new();
@@ -1872,82 +1722,6 @@ fn collect_entries(
                 false,
                 warnings,
             );
-        }
-    }
-
-    // cliproxy
-    if unit_selected(&expanded, "tool:cliproxyapi") {
-        if let Some(conf) = resolve_cliproxy_conf(settings) {
-            if !path_allowed_for_custom(&conf) && conf.exists() {
-                warnings.push(format!(
-                    "cliproxy 配置路径不在允许范围内，已跳过: {}",
-                    display_path(&conf)
-                ));
-            } else {
-                push_file(
-                    &mut out,
-                    &conf,
-                    "files/tool/cliproxyapi/cliproxyapi.conf",
-                    "tool:cliproxyapi",
-                    true,
-                    warnings,
-                );
-                let auth = read_auth_dir_from_conf(&conf)
-                    .or_else(|| dirs::home_dir().map(|h| h.join(".cli-proxy-api")));
-                if let Some(auth_dir) = auth {
-                    if auth_dir.is_dir() {
-                        push_dir(
-                            &mut out,
-                            &auth_dir,
-                            "files/tool/cliproxyapi/auth-dir",
-                            "tool:cliproxyapi",
-                            true,
-                            warnings,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // sub2api
-    if unit_selected(&expanded, "tool:sub2api") {
-        if let Some(root) = resolve_sub2api_root(settings) {
-            if !path_allowed_for_custom(&root) && root.exists() {
-                warnings.push(format!(
-                    "sub2api 路径不在允许范围内，已跳过: {}",
-                    display_path(&root)
-                ));
-            } else {
-                let conf = if root.join("config.yaml").is_file() {
-                    root.join("config.yaml")
-                } else if root.join("config.yml").is_file() {
-                    root.join("config.yml")
-                } else {
-                    root.join("config.yaml")
-                };
-                push_file(
-                    &mut out,
-                    &conf,
-                    "files/tool/sub2api/config.yaml",
-                    "tool:sub2api",
-                    true,
-                    warnings,
-                );
-                let data = root.join("data");
-                if data.is_dir() {
-                    push_dir(
-                        &mut out,
-                        &data,
-                        "files/tool/sub2api/data",
-                        "tool:sub2api",
-                        false,
-                        warnings,
-                    );
-                }
-            }
-        } else {
-            warnings.push("sub2api 未找到可备份路径".into());
         }
     }
 

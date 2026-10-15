@@ -1993,11 +1993,11 @@ pub fn run() {
             }
 
             // 文字大小：启动时按已保存的 textSize 应用 webview 页面缩放。
-            // 兜底默认与 config.rs 的 default_text_size()（110）保持一致，
-            // 避免 load 失败时前端按 110 反算而窗口仍停在 100%。
+            // 兜底默认与 config.rs 的 default_text_size()（100）保持一致，
+            // 避免 load 失败时前端按 100 反算而窗口仍停在 100%。
             let text_size = config::load_app_config()
                 .map(|c| c.text_size)
-                .unwrap_or(110);
+                .unwrap_or(100);
             if text_size != 100 {
                 apply_zoom(_app.handle(), text_size);
             }

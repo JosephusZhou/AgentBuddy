@@ -20,8 +20,6 @@ export async function getBackupSettings(): Promise<BackupSettings> {
   const { invoke } = await import("@tauri-apps/api/core");
   const r = await (invoke("get_backup_settings") as Promise<Partial<BackupSettings>>);
   return {
-    cliproxyapiConfPath: r.cliproxyapiConfPath ?? "",
-    sub2apiRootPath: r.sub2apiRootPath ?? "",
     defaultRemoteDir: r.defaultRemoteDir?.trim() || "Octopus",
   };
 }

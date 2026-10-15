@@ -5,7 +5,7 @@
 
 export type Theme = "system" | "light" | "dark";
 
-/** 偏好设置中的展示顺序。 */
+/** 常规设置中的展示顺序。 */
 export const THEMES: readonly Theme[] = ["system", "light", "dark"];
 
 export const DEFAULT_THEME: Theme = "system";
@@ -13,8 +13,8 @@ export const DEFAULT_THEME: Theme = "system";
 /** 文字大小档位（%），与 magpie 一致：100 / 110 / 125 / 150。 */
 export const TEXT_SIZES: readonly number[] = [100, 110, 125, 150];
 
-/** 默认档位：110%（用户要求）。非法值与缺失配置均回退到这一档。 */
-export const DEFAULT_TEXT_SIZE = 110;
+/** 默认档位：100%（用户要求）。非法值与缺失配置均回退到这一档。 */
+export const DEFAULT_TEXT_SIZE = 100;
 
 export const THEME_META: Record<Theme, { label: string; description: string }> = {
   system: { label: "跟随系统", description: "自动跟随操作系统的浅色 / 深色外观" },
@@ -39,7 +39,7 @@ function isKnownTheme(value: unknown): value is Theme {
   return typeof value === "string" && THEME_SET.has(value);
 }
 
-/** 非法文字大小一律回退默认（110）。 */
+/** 非法文字大小一律回退默认（100）。 */
 function normalizeTextSize(value: unknown): number {
   return typeof value === "number" && TEXT_SIZES.includes(value) ? value : DEFAULT_TEXT_SIZE;
 }

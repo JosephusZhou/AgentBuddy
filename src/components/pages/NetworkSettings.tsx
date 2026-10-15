@@ -305,19 +305,16 @@ export default function NetworkSettings() {
 
   return (
     <>
-      <div className="content-header">
-        <h1 className="content-title">网络设置</h1>
-      </div>
-      <div className="content-body">
-        <Toast message={statusMsg} />
+      <Toast message={statusMsg} />
 
-        {!loaded ? (
-          <div className="empty-state">
-            <div className="empty-state-text">加载中…</div>
-          </div>
-        ) : (
-          <div className="pref-section">
-            <div className="pref-section-title">网络代理</div>
+      {!loaded ? (
+        <div className="empty-state">
+          <div className="empty-state-text">加载中…</div>
+        </div>
+      ) : (
+        <div className="pref-section">
+          <div className="pref-section-title">网络代理</div>
+          <div className="pref-card">
             <div className="pref-section-desc">
               控制应用内出站请求（WebDAV、Skills 更新、OpenCode 模型目录、MCP
               连通性测试等）使用的代理。更改后立即生效。
@@ -331,9 +328,6 @@ export default function NetworkSettings() {
                   className={`pref-option ${mode === opt.value ? "selected" : ""}`}
                   onClick={() => selectMode(opt.value)}
                 >
-                  <div className="pref-radio">
-                    <div className="pref-radio-dot" />
-                  </div>
                   <div className="pref-option-content">
                     <div className="pref-option-label">{opt.label}</div>
                     <div className="pref-option-desc">{opt.desc}</div>
@@ -459,8 +453,8 @@ export default function NetworkSettings() {
 
             {formError && <div className="mcp-form-error">{formError}</div>}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }

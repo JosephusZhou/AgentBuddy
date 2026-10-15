@@ -670,7 +670,6 @@ mod tests {
     #[test]
     fn secrets_detection_matches_backup_kernel_rule() {
         assert!(unit_ids_contain_secrets(&["app:octopus:db".into()]));
-        assert!(unit_ids_contain_secrets(&["tool:cliproxyapi".into()]));
         assert!(unit_ids_contain_secrets(&["agent:codex".into()]));
         assert!(!unit_ids_contain_secrets(&[]));
     }

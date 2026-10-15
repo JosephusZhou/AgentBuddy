@@ -10,8 +10,6 @@ import McpManage from "./components/pages/McpManage";
 import ClaudeEnv from "./components/pages/ClaudeEnv";
 import CodexEnv from "./components/pages/CodexEnv";
 import Preferences from "./components/pages/Preferences";
-import NetworkSettings from "./components/pages/NetworkSettings";
-import WebDAV from "./components/pages/WebDAV";
 import RouteAggregation from "./components/pages/RouteAggregation";
 import {
   applyTheme,
@@ -40,8 +38,9 @@ export type MainView =
   | "claude-env"
   | "codex-env"
   | "route-aggregation";
-export type SettingsView = "preferences" | "network" | "webdav" | "backup";
-export type AppMode = "main" | "settings";
+export type SettingsView = "preferences" | "backup";
+/** 主视图与设置子视图统一为单一视图状态 */
+export type View = MainView | SettingsView;
 
 /**
  * 自动备份后台失败时弹出全局 Toast（trigger=auto 的 finalize 汇总事件）。
@@ -86,9 +85,7 @@ function AutoBackupNotifier() {
 export default function App() {
   // 全局弹窗可访问性：打开自动聚焦主输入框 + Tab 焦点圈定（见 ui.tsx）
   useGlobalModalA11y();
-  const [mode, setMode] = useState<AppMode>("main");
-  const [mainView, setMainView] = useState<MainView>("agent-sniff");
-  const [settingsView, setSettingsView] = useState<SettingsView>("preferences");
+  const [view, setView] = useState<View>("agent-sniff");
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
   const [textSize, setTextSize] = useState<number>(DEFAULT_TEXT_SIZE);
   const [themeReady, setThemeReady] = useState(false);
@@ -177,32 +174,22 @@ export default function App() {
     return <div className="app" aria-hidden />;
   }
 
-  const activeView = mode === "main" ? mainView : settingsView;
-
   return (
     <div className="app">
       {/* Overlay 标题栏下的顶部拖拽区：鼠标按住顶部可拖动窗口 */}
       <div className="window-drag-region" data-tauri-drag-region aria-hidden />
-      <Sidebar
-        mode={mode}
-        mainView={mainView}
-        settingsView={settingsView}
-        onNavigateMain={setMainView}
-        onNavigateSettings={setSettingsView}
-        onEnterSettings={() => setMode("settings")}
-        onExitSettings={() => setMode("main")}
-      />
+      <Sidebar view={view} onNavigate={setView} />
       <main className="main-content">
-        {activeView === "agent-sniff" && <AgentSniff onNavigate={setMainView} />}
-        {activeView === "ai-providers" && <AiProviders />}
-        {activeView === "model-config" && <ModelConfig />}
-        {activeView === "project-config" && <ProjectConfig />}
-        {activeView === "skills-manage" && <SkillsManage />}
-        {activeView === "mcp-manage" && <McpManage />}
-        {activeView === "claude-env" && <ClaudeEnv />}
-        {activeView === "codex-env" && <CodexEnv />}
-        {activeView === "route-aggregation" && <RouteAggregation />}
-        {activeView === "preferences" && (
+        {view === "agent-sniff" && <AgentSniff onNavigate={setView} />}
+        {view === "ai-providers" && <AiProviders />}
+        {view === "model-config" && <ModelConfig />}
+        {view === "project-config" && <ProjectConfig />}
+        {view === "skills-manage" && <SkillsManage />}
+        {view === "mcp-manage" && <McpManage />}
+        {view === "claude-env" && <ClaudeEnv />}
+        {view === "codex-env" && <CodexEnv />}
+        {view === "route-aggregation" && <RouteAggregation />}
+        {view === "preferences" && (
           <Preferences
             theme={theme}
             onThemeChange={handleThemeChange}
@@ -210,9 +197,7 @@ export default function App() {
             onTextSizeChange={handleTextSizeChange}
           />
         )}
-        {activeView === "network" && <NetworkSettings />}
-        {activeView === "webdav" && <WebDAV />}
-        {activeView === "backup" && <BackupManage />}
+        {view === "backup" && <BackupManage />}
       </main>
       <AutoBackupNotifier />
     </div>

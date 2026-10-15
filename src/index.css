@@ -347,7 +347,49 @@ label,
   gap: 2px;
 }
 .sidebar-bottom {
+  position: relative;
   padding: 8px;
+}
+
+/* 设置浮层菜单：从底部「设置」按钮上方弹出 */
+.settings-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 8px;
+  right: 8px;
+  z-index: 50;
+  padding: 6px;
+  background: var(--seed-surface);
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius-md);
+  box-shadow: var(--seed-shadow-modal);
+}
+.settings-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--seed-radius);
+  background: none;
+  color: var(--seed-muted);
+  font-size: var(--text-sm);
+  font-weight: 450;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.settings-popover-item:hover {
+  background: var(--seed-hover);
+  color: var(--seed-fg);
+}
+.settings-popover-item.active {
+  background: var(--seed-active-bg);
+  color: var(--seed-active-fg);
+  font-weight: 500;
 }
 
 /* Menu Items */
@@ -470,31 +512,35 @@ label,
 }
 
 /* ===== PREFERENCES ===== */
+/* 标题/说明在卡片外，卡片只承载内容（与备份页 backup-section / backup-card 一致） */
 .pref-section {
-  background: var(--seed-surface);
-  border: 1px solid var(--seed-border);
-  border-radius: var(--seed-radius-lg);
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   transition:
     background 0.25s ease,
     border-color 0.25s ease;
 }
-/* 相邻设置卡片间距与其它页面卡片一致（agent-list / webdav-list 均为 12px） */
 .pref-section + .pref-section {
-  margin-top: 12px;
+  margin-top: 20px;
 }
 .pref-section-title {
   font-size: var(--text-base);
   font-weight: 600;
   letter-spacing: -0.01em;
-  margin-bottom: 4px;
   color: var(--seed-fg);
 }
 .pref-section-desc {
   font-size: var(--text-sm);
   color: var(--seed-muted);
-  margin-bottom: 20px;
   line-height: 1.5;
+  margin-bottom: 14px;
+}
+.pref-card {
+  background: var(--seed-surface);
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius);
+  padding: 16px;
 }
 .pref-options {
   display: flex;
@@ -633,7 +679,7 @@ label,
   flex-shrink: 0;
 }
 
-/* ===== 主题选择网格（偏好设置 · 外观） ===== */
+/* ===== 主题选择网格（常规 · 外观） ===== */
 .pref-theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -688,35 +734,12 @@ label,
   align-items: flex-start;
   gap: 8px;
 }
-.pref-theme-card-radio {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--seed-input-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 1px;
-  transition: border-color 0.15s ease;
-}
-.pref-theme-card.selected .pref-theme-card-radio {
-  border-color: var(--seed-primary);
-}
-.pref-theme-card-radio-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--seed-primary);
-  transform: scale(0);
-  transition: transform 0.15s ease;
-}
-.pref-theme-card.selected .pref-theme-card-radio-dot {
-  transform: scale(1);
-}
 .pref-theme-card-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .pref-theme-card-label {
   font-size: var(--text-sm);
@@ -727,7 +750,6 @@ label,
 .pref-theme-card-desc {
   font-size: var(--text-xs);
   color: var(--seed-muted);
-  margin-top: 2px;
   line-height: 1.4;
 }
 
@@ -736,7 +758,6 @@ label,
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 14px;
 }
 .pref-text-size-opt {
   height: 28px;
@@ -1127,6 +1148,7 @@ label,
 .ai-provider-model-picker-item:hover {
   background: var(--seed-surface);
 }
+/* 复用 .ui-check 后去掉其默认 16px 上 margin（list 内由 gap 控制间距） */
 .ai-provider-model-picker-item.ui-check {
   margin-top: 0;
 }
@@ -1729,6 +1751,10 @@ a[href]:focus-visible {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+}
+/* 备份页：主标题与首个区块标题间距与常规页对齐（不再额外叠加 header-bar margin） */
+.backup-header-bar {
+  margin-bottom: 0;
 }
 .content-header-bar .content-title {
   margin: 0;
@@ -3410,6 +3436,7 @@ a[href]:focus-visible {
   color: var(--seed-fg);
   user-select: none;
 }
+/* 复用 .ui-check 后去掉默认 16px 上 margin（toolbar/list 内由 gap 控制） */
 .skill-dup-select-all.ui-check,
 .skill-dup-check.ui-check {
   margin-top: 0;
@@ -3552,6 +3579,7 @@ a[href]:focus-visible {
   cursor: default;
   opacity: 0.78;
 }
+/* 迁移卡片内的自定义复选框对勾：与标题行顶部对齐 */
 .skill-migrate-item .ui-check-box {
   margin-top: 3px;
   flex-shrink: 0;
@@ -4540,7 +4568,7 @@ a[href]:focus-visible {
   flex-direction: column;
   gap: 8px;
 }
-/* 备份内容区：说明与标题紧贴（不受折叠状态影响） */
+/* 备份范围区：说明与标题紧贴（不受折叠状态影响） */
 .backup-section-units {
   gap: 6px;
 }
@@ -4622,6 +4650,10 @@ a[href]:focus-visible {
   border-top: 1px solid var(--seed-border-subtle);
   font-size: var(--text-sm);
   color: var(--seed-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .backup-unit-list {
   list-style: none;
@@ -4646,6 +4678,15 @@ a[href]:focus-visible {
 }
 .backup-unit-item {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.webdav-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .backup-unit-check {
   align-items: flex-start;

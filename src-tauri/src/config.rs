@@ -30,7 +30,7 @@ fn lock_config_file() -> Result<MutexGuard<'static, ()>, String> {
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub theme: String,
-    /// 文字大小（%）：magpie 同款档位 100/110/125/150，默认 110。
+    /// 文字大小（%）：magpie 同款档位 100/110/125/150，默认 100。
     #[serde(default = "default_text_size")]
     pub text_size: u32,
     #[serde(default)]
@@ -128,12 +128,6 @@ pub struct BackupSettings {
     /// 定时自动备份配置；旧 config.json 缺失该字段时取默认值（关闭）。
     #[serde(default)]
     pub auto: AutoBackupSettings,
-    /// Override path to CLIProxyAPI conf; empty = auto-detect.
-    #[serde(default)]
-    pub cliproxyapi_conf_path: String,
-    /// Override sub2api install/root dir; empty = auto-detect.
-    #[serde(default)]
-    pub sub2api_root_path: String,
     /// Remote WebDAV subdir prefix (no leading slash).
     #[serde(default = "default_remote_dir")]
     pub default_remote_dir: String,
@@ -163,8 +157,6 @@ impl Default for BackupSettings {
     fn default() -> Self {
         Self {
             auto: AutoBackupSettings::default(),
-            cliproxyapi_conf_path: String::new(),
-            sub2api_root_path: String::new(),
             default_remote_dir: default_remote_dir(),
             keep_local_copy: false,
         }
@@ -288,7 +280,7 @@ fn is_valid_secrets_key(value: &str) -> bool {
 }
 
 fn default_text_size() -> u32 {
-    110
+    100
 }
 
 /// 文字大小合法档位：100/110/125/150（%），与 magpie 一致。
@@ -395,7 +387,7 @@ fn ensure_app_config_locked() -> Result<AppConfig, String> {
         }
     }
 
-    // 文字大小：缺失或非法档位（非 100/110/125/150）一律改写为 110。
+    // 文字大小：缺失或非法档位（非 100/110/125/150）一律改写为 100。
     match obj.get("textSize").and_then(|v| v.as_u64()) {
         Some(n) if matches!(n, 100 | 110 | 125 | 150) => {}
         Some(_) | None => {
@@ -552,8 +544,6 @@ pub fn save_route_aggregation_config(
 
 /// 归一化手动路径字段（trim 与默认目录兜底），backup 段各保存路径共用。
 fn normalize_backup_settings(mut settings: BackupSettings) -> BackupSettings {
-    settings.cliproxyapi_conf_path = settings.cliproxyapi_conf_path.trim().to_string();
-    settings.sub2api_root_path = settings.sub2api_root_path.trim().to_string();
     let remote = settings
         .default_remote_dir
         .trim()
@@ -664,7 +654,7 @@ pub fn set_theme(theme: String) -> Result<AppConfig, String> {
     })
 }
 
-/// 设置文字大小（%）。仅接受 100/110/125/150，非法值归一化为 110 后写入，
+/// 设置文字大小（%）。仅接受 100/110/125/150，非法值归一化为 100 后写入，
 /// 返回写入后的完整配置（其它字段原样保留）。
 pub fn set_text_size(percent: u32) -> Result<AppConfig, String> {
     let percent = normalize_text_size(percent);
@@ -870,13 +860,13 @@ mod tests {
         }
         for bad in [0, 90, 105, 120, 200, 99, 151] {
             assert!(!is_valid_text_size(bad), "should reject {bad}");
-            assert_eq!(normalize_text_size(bad), 110);
+            assert_eq!(normalize_text_size(bad), 100);
         }
     }
 
     #[test]
-    fn text_size_defaults_to_110() {
-        assert_eq!(default_text_size(), 110);
+    fn text_size_defaults_to_100() {
+        assert_eq!(default_text_size(), 100);
     }
 
     #[test]

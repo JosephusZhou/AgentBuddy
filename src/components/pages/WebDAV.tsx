@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 import { Toast } from "@/components/Toast";
+import { CheckGlyph } from "@/components/ui";
 import { useOverlayDismiss } from "../ui";
-import { Pencil, Plus, RefreshCw, Trash2, X, Zap } from "lucide-react";
+import { Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import type { WebDAVConnectionLite } from "./backup-manage/types";
 
 /* ===== Types ===== */
 type ConnectionStatus = "connected" | "disconnected" | "checking";
@@ -26,35 +28,19 @@ interface WebDavTestResult {
   httpStatus?: number | null;
 }
 
-/* ===== Invoke helpers ===== */
-async function invokeGetConnections(): Promise<WebDAVConnection[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  const rows = await (invoke("get_webdav_connections") as Promise<
-    Array<{
-      id: string;
-      name: string;
-      url: string;
-      username: string;
-      status?: string;
-      lastError?: string;
-      lastCheckedAt?: number | null;
-      createdAt?: number;
-      updatedAt?: number;
-    }>
-  >);
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    url: r.url,
-    username: r.username,
-    status: r.status === "connected" ? "connected" : "disconnected",
-    lastError: r.lastError || "",
-    lastCheckedAt: r.lastCheckedAt ?? null,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }));
+interface WebDavSectionProps {
+  /** 连接列表（来自备份页 state） */
+  connections: WebDAVConnectionLite[];
+  /** 备份目标勾选集合：手动备份与自动备份共用 */
+  selected: Set<string>;
+  onToggle: (id: string, checked: boolean) => void;
+  uploadDir: string;
+  onUploadDirChange: (value: string) => void;
+  /** 增删改/测试后通知父组件重新拉取连接列表 */
+  onChanged: () => void;
 }
 
+/* ===== Invoke helpers ===== */
 async function invokeUpsert(payload: {
   id: string;
   name: string;
@@ -98,24 +84,21 @@ async function invokeTest(id: string): Promise<WebDavTestResult> {
 }
 
 /* ===== SVG Icons ===== */
-const IconPlus = () => <Plus size={16} strokeWidth={2} />;
-
 const IconTrash = () => <Trash2 size={16} strokeWidth={1.8} />;
-
 const IconClose = () => <X size={16} strokeWidth={2} />;
-
-const IconTrashConfirm = () => <Trash2 size={20} strokeWidth={2} />;
-
+const IconTrashConfirm = () => <Trash2 size={20} strokeWidth={1.5} />;
 const IconEdit = () => <Pencil size={16} strokeWidth={1.8} />;
-
 const IconRefresh = () => <RefreshCw size={16} strokeWidth={1.8} />;
 
-const IconEmpty = () => <Zap size={40} strokeWidth={1.5} />;
-
 /* ===== Component ===== */
-export default function WebDAV() {
-  const [connections, setConnections] = useState<WebDAVConnection[]>([]);
-  const [loaded, setLoaded] = useState(false);
+export default function WebDavSection({
+  connections,
+  selected,
+  onToggle,
+  uploadDir,
+  onUploadDirChange,
+  onChanged,
+}: WebDavSectionProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -123,10 +106,10 @@ export default function WebDAV() {
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
 
   const formDismiss = useOverlayDismiss(() => setShowForm(false), !isSaving);
   const deleteDismiss = useOverlayDismiss(() => setDeleteTarget(null), !isDeleting);
-  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
 
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
@@ -134,30 +117,11 @@ export default function WebDAV() {
   const [formPassword, setFormPassword] = useState("");
   const idCounter = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const hasLoaded = useRef(false);
 
   const nextId = useCallback(() => {
     idCounter.current += 1;
     return `webdav-${Date.now()}-${idCounter.current}`;
   }, []);
-
-  const loadConnections = useCallback(async () => {
-    try {
-      const rows = await invokeGetConnections();
-      setConnections(rows);
-    } catch (err) {
-      setStatusMsg(`加载 WebDAV 连接失败：${err instanceof Error ? err.message : String(err)}`);
-      setConnections([]);
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (hasLoaded.current) return;
-    hasLoaded.current = true;
-    void loadConnections();
-  }, [loadConnections]);
 
   useEffect(() => {
     if (showForm) {
@@ -186,7 +150,7 @@ export default function WebDAV() {
     setShowForm(true);
   }, []);
 
-  const openEdit = useCallback((conn: WebDAVConnection) => {
+  const openEdit = useCallback((conn: WebDAVConnectionLite) => {
     setEditingId(conn.id);
     setFormName(conn.name);
     setFormUrl(conn.url);
@@ -196,52 +160,30 @@ export default function WebDAV() {
     setShowForm(true);
   }, []);
 
-  const runTest = useCallback(async (id: string, displayName?: string) => {
-    setTestingIds((prev) => new Set(prev).add(id));
-    setConnections((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: "checking" as const } : c)),
-    );
-    const label = displayName?.trim() || id;
-    try {
-      const result = await invokeTest(id);
-      setConnections((prev) =>
-        prev.map((c) =>
-          c.id === id
-            ? {
-                ...c,
-                status: result.ok ? "connected" : "disconnected",
-                lastError: result.ok ? "" : result.message,
-                lastCheckedAt: Math.floor(Date.now() / 1000),
-              }
-            : c,
-        ),
-      );
-      setStatusMsg(
-        result.ok ? `「${label}」${result.message}` : `「${label}」测试失败：${result.message}`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setConnections((prev) =>
-        prev.map((c) =>
-          c.id === id
-            ? {
-                ...c,
-                status: "disconnected",
-                lastError: message,
-                lastCheckedAt: Math.floor(Date.now() / 1000),
-              }
-            : c,
-        ),
-      );
-      setStatusMsg(`「${label}」测试失败：${message}`);
-    } finally {
-      setTestingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
-  }, []);
+  const runTest = useCallback(
+    async (id: string, displayName?: string) => {
+      setTestingIds((prev) => new Set(prev).add(id));
+      const label = displayName?.trim() || id;
+      try {
+        const result = await invokeTest(id);
+        setStatusMsg(
+          result.ok ? `「${label}」${result.message}` : `「${label}」测试失败：${result.message}`,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setStatusMsg(`「${label}」测试失败：${message}`);
+      } finally {
+        setTestingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        // 测试后状态可能变化，通知父组件刷新列表
+        onChanged();
+      }
+    },
+    [onChanged, setStatusMsg],
+  );
 
   const handleSave = useCallback(async () => {
     const name = formName.trim();
@@ -277,132 +219,148 @@ export default function WebDAV() {
         payload.password = passwordTrimmed;
       }
 
-      const saved = await invokeUpsert(payload);
-      setConnections((prev) => {
-        const exists = prev.some((c) => c.id === saved.id);
-        if (exists) {
-          return prev.map((c) => (c.id === saved.id ? { ...c, ...saved } : c));
-        }
-        return [saved, ...prev];
-      });
+      await invokeUpsert(payload);
       setShowForm(false);
       setFormPassword("");
-      setStatusMsg(editingId ? "连接已更新，正在测试连通性…" : "连接已保存，正在测试连通性…");
-      void runTest(saved.id, saved.name);
+      setStatusMsg(editingId ? "连接已更新" : "连接已保存");
+      onChanged();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSaving(false);
     }
-  }, [formName, formUrl, formUsername, formPassword, editingId, nextId, runTest]);
+  }, [formName, formUrl, formUsername, formPassword, editingId, nextId, onChanged, setStatusMsg]);
 
   const handleDelete = useCallback(async () => {
     if (deleteTarget === null) return;
     setIsDeleting(true);
     try {
       await invokeDelete(deleteTarget);
-      setConnections((prev) => prev.filter((c) => c.id !== deleteTarget));
       setDeleteTarget(null);
       setStatusMsg("连接已删除");
+      onChanged();
     } catch (err) {
       setStatusMsg(`删除失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsDeleting(false);
     }
-  }, [deleteTarget]);
+  }, [deleteTarget, onChanged, setStatusMsg]);
 
   const deleteName = connections.find((c) => c.id === deleteTarget)?.name;
 
   return (
     <>
-      <div className="content-header">
-        <h1 className="content-title">WebDAV</h1>
-      </div>
-      <div className="content-body">
-        <div className="webdav-header">
-          <span className="webdav-count">
-            {loaded ? `${connections.length} 个连接` : "加载中…"}
-          </span>
-          <button className="btn-add" onClick={openAdd} data-tooltip="添加 WebDAV 连接">
-            <IconPlus />
+      <section className="backup-section">
+        <div className="backup-section-head">
+          <h2 className="backup-section-title">WebDAV</h2>
+          <button type="button" className="btn btn-secondary" onClick={openAdd}>
+            添加服务器
           </button>
         </div>
+        <div className="backup-card">
+          <Toast message={statusMsg} />
 
-        <Toast message={statusMsg} />
+          <p className="backup-upload-dir-hint">勾选的目标同时应用于手动备份与自动备份。</p>
 
-        {!loaded ? null : connections.length === 0 ? (
-          <div className="empty-state">
-            <IconEmpty />
-            <div className="empty-state-text">暂无 WebDAV 连接，点击右上角添加</div>
+          {connections.length === 0 ? (
+            <div className="backup-empty-inline">
+              尚未配置 WebDAV 连接，点击右上角「添加服务器」。
+            </div>
+          ) : (
+            <ul className="backup-unit-list depth-0">
+              {connections.map((c) => {
+                const isTesting = testingIds.has(c.id);
+                return (
+                  <li key={c.id} className="backup-unit-item">
+                    <label className="ui-check backup-unit-check">
+                      <input
+                        type="checkbox"
+                        className="ui-check-input"
+                        checked={selected.has(c.id)}
+                        onChange={(e) => onToggle(c.id, e.target.checked)}
+                      />
+                      <CheckGlyph />
+                      <span className="backup-unit-body">
+                        <span className="backup-unit-label-row">
+                          <span className="backup-unit-label">{c.name}</span>
+                          <span
+                            className={`backup-badge ${
+                              c.status === "connected" ? "backup-badge-ok" : ""
+                            }`}
+                          >
+                            {c.status === "connected" ? "已连接" : "未检测"}
+                          </span>
+                        </span>
+                        <span className="backup-unit-path">
+                          {c.url}
+                          {c.username ? ` · ${c.username}` : ""}
+                        </span>
+                      </span>
+                    </label>
+                    <span className="webdav-row-actions">
+                      <button
+                        type="button"
+                        className="btn-delete"
+                        onClick={() => void runTest(c.id, c.name)}
+                        data-tooltip="重新检测"
+                        disabled={isTesting}
+                        style={{ opacity: 1 }}
+                      >
+                        <IconRefresh />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-delete"
+                        onClick={() => openEdit(c)}
+                        data-tooltip="编辑连接"
+                        style={{ opacity: 1 }}
+                      >
+                        <IconEdit />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-delete"
+                        onClick={() => setDeleteTarget(c.id)}
+                        data-tooltip="删除连接"
+                        style={{ opacity: 1 }}
+                      >
+                        <IconTrash />
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <div className="backup-upload-dir">
+            <label className="backup-field">
+              <span className="backup-field-label">上传目录</span>
+              <input
+                type="text"
+                className="form-input"
+                value={uploadDir}
+                onChange={(e) => onUploadDirChange(e.target.value)}
+                placeholder="留空默认是 Octopus"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <p className="backup-upload-dir-hint">
+              相对 WebDAV 连接根路径的目录；不存在时会通过 MKCOL
+              自动创建。备份文件直接放在该目录下。
+            </p>
           </div>
-        ) : (
-          <div className="webdav-list">
-            {connections.map((conn) => {
-              const isTesting = testingIds.has(conn.id) || conn.status === "checking";
-              return (
-                <div key={conn.id} className={`webdav-item ${isTesting ? "checking" : ""}`}>
-                  <button
-                    type="button"
-                    className={`status-dot ${isTesting ? "checking" : conn.status}`}
-                    data-tooltip={isTesting ? "检测中…" : "重新检测连接"}
-                    onClick={() => {
-                      if (!isTesting) void runTest(conn.id, conn.name);
-                    }}
-                    disabled={isTesting}
-                    style={{
-                      border: "none",
-                      padding: 0,
-                      cursor: isTesting ? "default" : "pointer",
-                      background: "transparent",
-                    }}
-                  />
-                  <div className="webdav-info">
-                    <div className="webdav-name">{conn.name}</div>
-                    <div className="webdav-detail">{conn.url}</div>
-                    <div className="webdav-detail">用户: {conn.username}</div>
-                    {conn.status === "disconnected" && conn.lastError ? (
-                      <div className="webdav-detail" style={{ color: "var(--seed-danger)" }}>
-                        {conn.lastError}
-                      </div>
-                    ) : null}
-                  </div>
-                  <button
-                    className="btn-delete"
-                    onClick={() => void runTest(conn.id, conn.name)}
-                    data-tooltip="重新检测"
-                    disabled={isTesting}
-                    style={{ opacity: 1 }}
-                  >
-                    <IconRefresh />
-                  </button>
-                  <button
-                    className="btn-delete"
-                    onClick={() => openEdit(conn)}
-                    data-tooltip="编辑连接"
-                    style={{ opacity: 1 }}
-                  >
-                    <IconEdit />
-                  </button>
-                  <button
-                    className="btn-delete"
-                    onClick={() => setDeleteTarget(conn.id)}
-                    data-tooltip="删除连接"
-                    style={{ opacity: 1 }}
-                  >
-                    <IconTrash />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        </div>
+      </section>
 
       {/* ===== Add / Edit Modal ===== */}
       <div className={`modal-overlay ${showForm ? "visible" : ""}`} {...formDismiss}>
         <div className="modal">
           <div className="modal-header">
-            <h2 className="modal-title">{editingId ? "编辑 WebDAV 连接" : "添加 WebDAV 连接"}</h2>
+            <h2 className="modal-title">
+              {editingId ? "编辑 WebDAV 服务器" : "添加 WebDAV 服务器"}
+            </h2>
             <button
               className="modal-close"
               onClick={() => !isSaving && setShowForm(false)}

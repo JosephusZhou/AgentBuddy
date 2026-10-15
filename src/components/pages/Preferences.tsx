@@ -1,4 +1,5 @@
 import { THEMES, THEME_META, TEXT_SIZES, type Theme } from "../../lib/theme";
+import NetworkSettings from "./NetworkSettings";
 
 interface PreferencesProps {
   theme: Theme;
@@ -34,66 +35,67 @@ export default function Preferences({
   return (
     <>
       <div className="content-header">
-        <h1 className="content-title">偏好设置</h1>
+        <h1 className="content-title">常规</h1>
       </div>
       <div className="content-body">
         <div className="pref-section">
           <div className="pref-section-title">外观</div>
-          <div className="pref-section-desc">选择界面主题，更改后将即时生效</div>
-
-          <div className="pref-theme-grid">
-            {THEMES.map((id) => {
-              const meta = THEME_META[id];
-              const selected = theme === id;
-              return (
-                <button
-                  type="button"
-                  key={id}
-                  className={`pref-theme-card ${selected ? "selected" : ""}`}
-                  onClick={() => onThemeChange(id)}
-                  aria-pressed={selected}
-                  data-tooltip={meta.description}
-                >
-                  <ThemeSwatch mode={id} />
-                  <div className="pref-theme-card-info">
-                    <span className="pref-theme-card-radio">
-                      <span className="pref-theme-card-radio-dot" />
-                    </span>
-                    <span className="pref-theme-card-text">
-                      <span className="pref-theme-card-label">{meta.label}</span>
-                      <span className="pref-theme-card-desc">{meta.description}</span>
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="pref-card">
+            <div className="pref-section-desc">选择界面主题，更改后将即时生效</div>
+            <div className="pref-theme-grid">
+              {THEMES.map((id) => {
+                const meta = THEME_META[id];
+                const selected = theme === id;
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    className={`pref-theme-card ${selected ? "selected" : ""}`}
+                    onClick={() => onThemeChange(id)}
+                    aria-pressed={selected}
+                    data-tooltip={meta.description}
+                  >
+                    <ThemeSwatch mode={id} />
+                    <div className="pref-theme-card-info">
+                      <span className="pref-theme-card-text">
+                        <span className="pref-theme-card-label">{meta.label}</span>
+                        <span className="pref-theme-card-desc">{meta.description}</span>
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
         <div className="pref-section">
           <div className="pref-section-title">文字大小</div>
-          <div className="pref-section-desc">
-            放大 Octopus 窗口里的一切；也可用 {shortcut} 快捷调整
-          </div>
-
-          <div className="pref-text-size-row" role="radiogroup" aria-label="文字大小">
-            {TEXT_SIZES.map((size) => {
-              const selected = textSize === size;
-              return (
-                <button
-                  type="button"
-                  key={size}
-                  className={`pref-text-size-opt ${selected ? "selected" : ""}`}
-                  onClick={() => onTextSizeChange(size)}
-                  role="radio"
-                  aria-checked={selected}
-                >
-                  {size}%
-                </button>
-              );
-            })}
+          <div className="pref-card">
+            <div className="pref-section-desc">
+              放大 Octopus 窗口里的一切；也可用 {shortcut} 快捷调整
+            </div>
+            <div className="pref-text-size-row" role="radiogroup" aria-label="文字大小">
+              {TEXT_SIZES.map((size) => {
+                const selected = textSize === size;
+                return (
+                  <button
+                    type="button"
+                    key={size}
+                    className={`pref-text-size-opt ${selected ? "selected" : ""}`}
+                    onClick={() => onTextSizeChange(size)}
+                    role="radio"
+                    aria-checked={selected}
+                  >
+                    {size}%
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        <NetworkSettings />
       </div>
     </>
   );
