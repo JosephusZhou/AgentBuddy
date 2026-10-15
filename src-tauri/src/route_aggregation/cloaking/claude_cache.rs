@@ -2,11 +2,17 @@
 
 use serde_json::Value;
 
-fn has_cache_control(block: &Value) -> bool {
-    block.get("cache_control").is_some()
+/// 有效 cache_control：存在、非 null、是对象且 `type == "ephemeral"`。
+/// 对齐上游 CLIProxyAPI `isValidClaudeCacheControl`（be8c35f：忽略无效与 null 条目）。
+fn is_valid_cache_control(block: &Value) -> bool {
+    matches!(
+        block.get("cache_control"),
+        Some(Value::Object(obj))
+            if obj.get("type").and_then(Value::as_str) == Some("ephemeral")
+    )
 }
 fn set_ephemeral(block: &mut Value) {
-    if block.is_object() && !has_cache_control(block) {
+    if block.is_object() && !is_valid_cache_control(block) {
         block["cache_control"] = serde_json::json!({"type": "ephemeral"});
     }
 }
@@ -37,7 +43,7 @@ pub fn count_cache_controls(body: &Value) -> usize {
     let mut copy = body.clone();
     let mut count = 0;
     visit_blocks_mut(&mut copy, |block| {
-        if has_cache_control(block) {
+        if is_valid_cache_control(block) {
             count += 1
         }
     });
@@ -97,12 +103,11 @@ pub fn upgrade_ttl(body: &mut Value, ttl: &str) {
         return;
     }
     visit_blocks_mut(body, |block| {
-        if let Some(cache) = block
-            .get_mut("cache_control")
-            .filter(|value| value.is_object())
-        {
-            if cache.get("ttl").is_none() {
-                cache["ttl"] = Value::String(ttl.to_string());
+        if is_valid_cache_control(block) {
+            if let Some(cache) = block.get_mut("cache_control") {
+                if cache.get("ttl").is_none() {
+                    cache["ttl"] = Value::String(ttl.to_string());
+                }
             }
         }
     });
@@ -111,10 +116,10 @@ pub fn upgrade_ttl(body: &mut Value, ttl: &str) {
 pub fn normalize_ttl_order(body: &mut Value) {
     let mut seen_short = false;
     visit_blocks_mut(body, |block| {
-        let Some(cache) = block
-            .get_mut("cache_control")
-            .filter(|value| value.is_object())
-        else {
+        if !is_valid_cache_control(block) {
+            return;
+        }
+        let Some(cache) = block.get_mut("cache_control") else {
             return;
         };
         match cache.get("ttl").and_then(Value::as_str) {
@@ -138,9 +143,9 @@ pub fn enforce_limit(body: &mut Value, max_blocks: usize) {
     while count_cache_controls(body) > max_blocks {
         let mut removed = false;
         if let Some(blocks) = body.get_mut("system").and_then(Value::as_array_mut) {
-            if let Some(last) = blocks.iter().rposition(has_cache_control) {
+            if let Some(last) = blocks.iter().rposition(is_valid_cache_control) {
                 for (index, block) in blocks.iter_mut().enumerate() {
-                    if index != last && has_cache_control(block) {
+                    if index != last && is_valid_cache_control(block) {
                         removed = remove_cache_control(block);
                         if removed {
                             break;
@@ -153,9 +158,9 @@ pub fn enforce_limit(body: &mut Value, max_blocks: usize) {
             continue;
         }
         if let Some(blocks) = body.get_mut("tools").and_then(Value::as_array_mut) {
-            if let Some(last) = blocks.iter().rposition(has_cache_control) {
+            if let Some(last) = blocks.iter().rposition(is_valid_cache_control) {
                 for (index, block) in blocks.iter_mut().enumerate() {
-                    if index != last && has_cache_control(block) {
+                    if index != last && is_valid_cache_control(block) {
                         removed = remove_cache_control(block);
                         if removed {
                             break;
@@ -170,7 +175,10 @@ pub fn enforce_limit(body: &mut Value, max_blocks: usize) {
         if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
             for message in messages {
                 if let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) {
-                    if let Some(block) = blocks.iter_mut().find(|block| has_cache_control(block)) {
+                    if let Some(block) = blocks
+                        .iter_mut()
+                        .find(|block| is_valid_cache_control(block))
+                    {
                         removed = remove_cache_control(block);
                     }
                 }
@@ -211,5 +219,42 @@ mod tests {
         let mut body = serde_json::json!({"system": [{"type": "text", "cache_control": {"type": "ephemeral", "ttl": "5m"}}, {"type": "text", "cache_control": {"type": "ephemeral", "ttl": "1h"}}]});
         normalize(&mut body, 4, None);
         assert!(body["system"][1]["cache_control"].get("ttl").is_none());
+    }
+
+    #[test]
+    fn ignores_invalid_and_null_cache_control_entries() {
+        // 对齐上游 be8c35f：null、非对象、type 非 ephemeral 均不算有效 cache_control
+        let body = serde_json::json!({
+            "system": [
+                {"type": "text", "text": "null-cc", "cache_control": null},
+                {"type": "text", "text": "str-cc", "cache_control": "ephemeral"},
+                {"type": "text", "text": "bad-type", "cache_control": {"type": "persistent"}},
+                {"type": "text", "text": "valid", "cache_control": {"type": "ephemeral"}}
+            ]
+        });
+        assert_eq!(count_cache_controls(&body), 1);
+    }
+
+    #[test]
+    fn overwrites_invalid_cache_control_when_ensuring() {
+        // ensure 注入只认有效 cache_control；无效（null）条目应被覆盖为 ephemeral
+        let mut body =
+            serde_json::json!({"system": [{"type": "text", "text": "x", "cache_control": null}]});
+        normalize(&mut body, 4, None);
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn limit_ignores_invalid_entries() {
+        // 无效条目不占 cache 额度；有效 1 个不超上限，不应被删除
+        let mut body = serde_json::json!({
+            "system": [
+                {"type": "text", "text": "a", "cache_control": null},
+                {"type": "text", "text": "b", "cache_control": {"type": "ephemeral"}}
+            ]
+        });
+        normalize(&mut body, 1, None);
+        assert_eq!(count_cache_controls(&body), 1);
+        assert!(body["system"][1].get("cache_control").is_some());
     }
 }

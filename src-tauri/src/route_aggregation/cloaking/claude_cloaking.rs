@@ -17,15 +17,18 @@ use super::tool_remap;
 use crate::route_aggregation::config::RouteAggregationConfig;
 use crate::route_aggregation::CloakingMode;
 use axum::http::HeaderMap;
+use std::collections::HashMap;
 
 /// Apply Claude Code cloaking to the request body and headers.
 ///
-/// Returns (modified_body, modified_headers).
+/// Returns (modified_body, modified_headers, tool_remap_map)。第三个元素是本次
+/// 请求产生的 `目标名 → 原始名` 工具名映射表，响应侧恢复工具名时必须原样传回
+/// `tool_remap::reverse_remap_tool_names_in_response`。
 pub fn apply_cloaking(
     body: &serde_json::Value,
     _client_headers: &HeaderMap,
     config: &RouteAggregationConfig,
-) -> Result<(serde_json::Value, HeaderMap), String> {
+) -> Result<(serde_json::Value, HeaderMap, HashMap<String, String>), String> {
     let mut modified_body = body.clone();
     let mut headers = HeaderMap::new();
 
@@ -37,6 +40,7 @@ pub fn apply_cloaking(
         return Ok((
             modified_body,
             header_scrub::passthrough_client_headers(_client_headers),
+            HashMap::new(),
         ));
     }
 
@@ -58,7 +62,7 @@ pub fn apply_cloaking(
     claude_identity::inject_user_id(&mut modified_body, "default");
 
     // 3. OAuth tool name remapping
-    tool_remap::remap_tool_names_in_request(&mut modified_body);
+    let tool_remap_map = tool_remap::remap_tool_names_in_request(&mut modified_body);
 
     // 4. Sensitive word obfuscation
     obfuscate::obfuscate_claude_body(&mut modified_body, &config.claude_sensitive_words);
@@ -88,7 +92,7 @@ pub fn apply_cloaking(
     // 旧统一行为等价的防御性清理）。
     header_scrub::scrub_proxy_headers(&mut headers);
 
-    Ok((modified_body, headers))
+    Ok((modified_body, headers, tool_remap_map))
 }
 
 /// Apply the measured minimal shape used by Claude Code's count_tokens call.
@@ -96,23 +100,24 @@ pub fn apply_count_tokens_cloaking(
     body: &serde_json::Value,
     client_headers: &HeaderMap,
     config: &RouteAggregationConfig,
-) -> Result<(serde_json::Value, HeaderMap), String> {
+) -> Result<(serde_json::Value, HeaderMap, HashMap<String, String>), String> {
     if !full_cloak_applies(client_headers, config) {
         return Ok((
             body.clone(),
             header_scrub::passthrough_client_headers(client_headers),
+            HashMap::new(),
         ));
     }
     let mut modified_body = body.clone();
     claude_system_prompt::relocate_for_count_tokens(&mut modified_body, config.claude_strict_mode)?;
     claude_identity::inject_user_id(&mut modified_body, "default");
-    tool_remap::remap_tool_names_in_request(&mut modified_body);
+    let tool_remap_map = tool_remap::remap_tool_names_in_request(&mut modified_body);
     obfuscate::obfuscate_claude_body(&mut modified_body, &config.claude_sensitive_words);
     let mut headers = HeaderMap::new();
     let session_id = uuid::Uuid::new_v4().to_string();
     claude_headers::inject_claude_headers(&mut headers, &config.claude_code_version, &session_id);
     header_scrub::scrub_proxy_headers(&mut headers);
-    Ok((modified_body, headers))
+    Ok((modified_body, headers, tool_remap_map))
 }
 
 fn should_cloak(config: &RouteAggregationConfig, user_agent: &str) -> bool {
@@ -183,7 +188,7 @@ mod passthrough_tests {
                 .unwrap();
         let client = genuine_client_headers();
 
-        let (out_body, out_headers) = apply_cloaking(&body, &client, &always_config()).unwrap();
+        let (out_body, out_headers, _) = apply_cloaking(&body, &client, &always_config()).unwrap();
 
         // body 不做任何改写；客户端指纹原样透传（仅 auth / 代理追踪头被剥离，
         // 鉴权由 forwarder 按供应商密钥重新注入）。
@@ -212,7 +217,7 @@ mod passthrough_tests {
         client.insert("user-agent", hv("curl/8.4.0"));
 
         let config = always_config();
-        let (_, out_headers) = apply_cloaking(&body, &client, &config).unwrap();
+        let (_, out_headers, _) = apply_cloaking(&body, &client, &config).unwrap();
 
         // 非 CC 客户端仍走全量伪装：注入按配置版本生成的 Claude Code 头。
         assert!(out_headers
@@ -231,7 +236,7 @@ mod passthrough_tests {
         config.cloaking_mode = CloakingMode::Never;
         let client = genuine_client_headers();
 
-        let (out_body, out_headers) = apply_cloaking(&body, &client, &config).unwrap();
+        let (out_body, out_headers, _) = apply_cloaking(&body, &client, &config).unwrap();
         assert_eq!(out_body, body);
         assert_eq!(
             out_headers.get("user-agent").unwrap(),
@@ -247,7 +252,7 @@ mod passthrough_tests {
         .unwrap();
         let client = genuine_client_headers();
 
-        let (out_body, out_headers) =
+        let (out_body, out_headers, _) =
             apply_count_tokens_cloaking(&body, &client, &always_config()).unwrap();
         assert_eq!(out_body, body);
         assert_eq!(
@@ -326,7 +331,7 @@ mod fixture_tests {
         body["model"] = serde_json::Value::String("claude-opus-5".into());
         let mut config = RouteAggregationConfig::default();
         config.cloaking_mode = CloakingMode::Always;
-        let (cloaked, headers) =
+        let (cloaked, headers, _) =
             apply_count_tokens_cloaking(&body, &HeaderMap::new(), &config).unwrap();
         assert!(cloaked.get("system").is_none());
         assert_eq!(cloaked["messages"][1]["role"], "system");

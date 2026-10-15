@@ -1,6 +1,7 @@
 //! Request forwarder — sends requests to upstream providers with failover,
 //! header injection, same-protocol passthrough, and SSE passthrough.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -132,7 +133,9 @@ pub async fn forward(
         let target_format = format_for_provider_type(&provider.provider_type, group);
 
         // 1. Apply cloaking (Claude Code rectifier or Codex client simulation).
-        let (cloaked_body, mut cloaked_headers) = match group {
+        //    Claude 全量伪装路径额外返回本次请求的工具名映射表，响应侧用它做
+        //    对称恢复（避免全局反向查找误改与官方名同名的客户端自定义工具）。
+        let (cloaked_body, mut cloaked_headers, tool_remap_map) = match group {
             RouteGroup::ClaudeCode => if count_tokens {
                 cloaking::claude_cloaking::apply_count_tokens_cloaking(
                     &body,
@@ -144,16 +147,20 @@ pub async fn forward(
             }
             .map_err(ForwardError::CloakingError)?,
             RouteGroup::Codex => {
-                cloaking::codex_cloaking::apply_cloaking(&body, client_headers, config)
-                    .map_err(ForwardError::CloakingError)?
+                let (cloaked_body, cloaked_headers) =
+                    cloaking::codex_cloaking::apply_cloaking(&body, client_headers, config)
+                        .map_err(ForwardError::CloakingError)?;
+                (cloaked_body, cloaked_headers, HashMap::new())
             }
             // CC→CC 透传：真实 OpenAI SDK 客户端本身就是目标指纹，不做伪装，
             // 仅清理代理追踪头；auth 头由下方 build_auth_headers 统一替换。
             RouteGroup::OpenAiChat => (
                 body.clone(),
                 cloaking::header_scrub::passthrough_client_headers(client_headers),
+                HashMap::new(),
             ),
         };
+        let tool_remap_map = Arc::new(tool_remap_map);
 
         // 2. Effective body = cloaked body + 变体模型回写（passthrough 不做协议转换）
         let mut effective_body = cloaked_body;
@@ -194,6 +201,7 @@ pub async fn forward(
             config,
             is_stream,
             reverse_tool_names,
+            tool_remap_map.clone(),
         )
         .await
         {
@@ -335,6 +343,7 @@ async fn send_request(
     config: &RouteAggregationConfig,
     is_stream: bool,
     reverse_tool_names: bool,
+    tool_remap_map: Arc<HashMap<String, String>>,
 ) -> Result<(Response, Vec<u8>, bool), String> {
     let client = build_proxied_client(config)?;
 
@@ -388,7 +397,7 @@ async fn send_request(
 
     if is_stream {
         let stream = if reverse_tool_names {
-            reverse_tool_names_in_sse(response.bytes_stream())
+            reverse_tool_names_in_sse(response.bytes_stream(), tool_remap_map)
         } else {
             Box::pin(
                 response
@@ -407,7 +416,7 @@ async fn send_request(
             .await
             .map_err(|e| format!("读取响应体失败: {e}"))?;
         let body_bytes = if reverse_tool_names {
-            reverse_tool_names_in_json(&body_bytes)
+            reverse_tool_names_in_json(&body_bytes, tool_remap_map.as_ref())
         } else {
             body_bytes.to_vec()
         };
@@ -420,11 +429,11 @@ async fn send_request(
     }
 }
 
-fn reverse_tool_names_in_json(body: &[u8]) -> Vec<u8> {
+fn reverse_tool_names_in_json(body: &[u8], map: &HashMap<String, String>) -> Vec<u8> {
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return body.to_vec();
     };
-    if !cloaking::tool_remap::reverse_remap_tool_names_in_response(&mut value) {
+    if !cloaking::tool_remap::reverse_remap_tool_names_in_response(&mut value, map) {
         return body.to_vec();
     }
     serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
@@ -432,19 +441,20 @@ fn reverse_tool_names_in_json(body: &[u8]) -> Vec<u8> {
 
 fn reverse_tool_names_in_sse<S>(
     stream: S,
+    tool_remap_map: Arc<HashMap<String, String>>,
 ) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Bytes, std::io::Error>> + Send>>
 where
     S: futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
 {
     let stream = futures::stream::unfold(
-        (Box::pin(stream), Vec::<u8>::new(), false),
-        |(mut upstream, mut pending, mut finished)| async move {
+        (Box::pin(stream), Vec::<u8>::new(), false, tool_remap_map),
+        |(mut upstream, mut pending, mut finished, map)| async move {
             loop {
                 if let Some(end) = find_sse_event_end(&pending) {
                     let frame: Vec<u8> = pending.drain(..end).collect();
                     return Some((
-                        Ok(Bytes::from(transform_sse_frame(&frame))),
-                        (upstream, pending, finished),
+                        Ok(Bytes::from(transform_sse_frame(&frame, map.as_ref()))),
+                        (upstream, pending, finished, map),
                     ));
                 }
                 if finished {
@@ -453,8 +463,8 @@ where
                     }
                     let frame = std::mem::take(&mut pending);
                     return Some((
-                        Ok(Bytes::from(transform_sse_frame(&frame))),
-                        (upstream, pending, finished),
+                        Ok(Bytes::from(transform_sse_frame(&frame, map.as_ref()))),
+                        (upstream, pending, finished, map),
                     ));
                 }
                 match upstream.next().await {
@@ -463,7 +473,7 @@ where
                         finished = true;
                         return Some((
                             Err(std::io::Error::other(error.to_string())),
-                            (upstream, pending, finished),
+                            (upstream, pending, finished, map),
                         ));
                     }
                     None => finished = true,
@@ -490,22 +500,25 @@ fn find_sse_event_end(bytes: &[u8]) -> Option<usize> {
     }
 }
 
-fn transform_sse_frame(frame: &[u8]) -> Vec<u8> {
+fn transform_sse_frame(frame: &[u8], map: &HashMap<String, String>) -> Vec<u8> {
     let mut output = Vec::with_capacity(frame.len());
     let mut start = 0;
     while start < frame.len() {
         let Some(relative_end) = frame[start..].iter().position(|byte| *byte == b'\n') else {
-            output.extend_from_slice(&transform_sse_line(&frame[start..]));
+            output.extend_from_slice(&transform_sse_line(&frame[start..], map));
             break;
         };
         let end = start + relative_end + 1;
-        output.extend_from_slice(&transform_sse_line(&frame[start..end]));
+        output.extend_from_slice(&transform_sse_line(&frame[start..end], map));
         start = end;
     }
     output
 }
 
-fn transform_sse_line(line: &[u8]) -> Vec<u8> {
+fn transform_sse_line(line: &[u8], map: &HashMap<String, String>) -> Vec<u8> {
+    if map.is_empty() {
+        return line.to_vec();
+    }
     let Some(colon) = line.iter().position(|byte| *byte == b':') else {
         return line.to_vec();
     };
@@ -524,7 +537,13 @@ fn transform_sse_line(line: &[u8]) -> Vec<u8> {
         line.len()
     };
     let data = &line[value_start..line_end];
-    let transformed = reverse_tool_names_in_json(data);
+    // 快速路径：不含 tool_use 的 data 行（text/thinking delta 等占流式响应
+    // 绝大多数）无需解析，直接透传，避免每个 chunk 都做一次完整 JSON
+    // 解析与序列化。
+    if !data.windows(8).any(|window| window == b"tool_use") {
+        return line.to_vec();
+    }
+    let transformed = reverse_tool_names_in_json(data, map);
     if transformed == data {
         return line.to_vec();
     }
@@ -635,6 +654,7 @@ mod tests {
         upstream_status_is_success,
     };
     use axum::http::StatusCode;
+    use std::collections::HashMap;
 
     #[test]
     fn upstream_success_only_counts_2xx_status_codes() {
@@ -655,7 +675,9 @@ mod tests {
     #[test]
     fn reverses_tool_name_in_non_stream_response_without_touching_input() {
         let body = br#"{"content":[{"type":"tool_use","name":"Bash","input":{"name":"Bash"}}]}"#;
-        let transformed = reverse_tool_names_in_json(body);
+        let mut map = HashMap::new();
+        map.insert("Bash".to_string(), "bash".to_string());
+        let transformed = reverse_tool_names_in_json(body, &map);
         let value: serde_json::Value = serde_json::from_slice(&transformed).unwrap();
         assert_eq!(value["content"][0]["name"], "bash");
         assert_eq!(value["content"][0]["input"]["name"], "Bash");
@@ -664,7 +686,9 @@ mod tests {
     #[test]
     fn transforms_only_json_data_lines_and_preserves_sse_boundaries() {
         let frame = b"event: content_block_start\r\ndata: {\"content_block\":{\"type\":\"tool_use\",\"name\":\"Bash\"}}\r\n\r\n";
-        let transformed = transform_sse_frame(frame);
+        let mut map = HashMap::new();
+        map.insert("Bash".to_string(), "bash".to_string());
+        let transformed = transform_sse_frame(frame, &map);
         assert!(transformed.ends_with(b"\r\n\r\n"));
         assert!(transformed
             .windows(8)
@@ -678,11 +702,11 @@ mod tests {
     #[test]
     fn leaves_non_json_and_done_sse_data_unchanged() {
         assert_eq!(
-            transform_sse_frame(b"data: [DONE]\n\n"),
+            transform_sse_frame(b"data: [DONE]\n\n", &HashMap::new()),
             b"data: [DONE]\n\n"
         );
         assert_eq!(
-            transform_sse_frame(b": keep-alive\n\n"),
+            transform_sse_frame(b": keep-alive\n\n", &HashMap::new()),
             b": keep-alive\n\n"
         );
     }
