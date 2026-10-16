@@ -159,6 +159,59 @@ pub fn update_auto_backup_settings(
     get_auto_backup_settings()
 }
 
+/// 备份口令状态 DTO：只回传存在性标志，不含口令任何形态。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPassphraseStatusDto {
+    pub has_passphrase: bool,
+}
+
+/// 设置或清除备份口令（手动与自动共用）。
+/// None 或 Some("") = 清除；其余 = 设置/覆盖新口令。
+/// 口令密文仍落在 `backup.auto.passphrase_*`，由调用方（前端口令卡片）负责确认覆盖。
+pub fn set_backup_passphrase(
+    passphrase: Option<String>,
+) -> Result<BackupPassphraseStatusDto, String> {
+    enum PassphraseChange {
+        Clear,
+        Set(crypto::EncryptedSecret),
+    }
+    // 口令加密（load_secrets_key）在进入原子写闭包前完成，避免闭包内重复取锁。
+    let change: Option<PassphraseChange> = match passphrase.as_deref() {
+        None | Some("") => Some(PassphraseChange::Clear),
+        Some(plain) => {
+            let master = config::load_secrets_key()?;
+            Some(PassphraseChange::Set(crypto::encrypt_secret(
+                &master, plain,
+            )?))
+        }
+    };
+    let has_pass_after = match &change {
+        Some(PassphraseChange::Clear) => false,
+        Some(PassphraseChange::Set(_)) => true,
+        None => config::load_backup_settings()?.auto.has_passphrase(),
+    };
+    config::update_backup_settings_atomic(move |mut settings| {
+        match change {
+            None => {}
+            Some(PassphraseChange::Clear) => {
+                settings.auto.passphrase_salt.clear();
+                settings.auto.passphrase_nonce.clear();
+                settings.auto.passphrase_cipher.clear();
+            }
+            Some(PassphraseChange::Set(enc)) => {
+                settings.auto.passphrase_salt = enc.salt;
+                settings.auto.passphrase_nonce = enc.nonce;
+                settings.auto.passphrase_cipher = enc.cipher;
+            }
+        }
+        Ok(settings)
+    })?;
+    Ok(BackupPassphraseStatusDto {
+        has_passphrase: has_pass_after,
+    })
+}
+
 pub fn get_auto_backup_status() -> Result<AutoBackupStatus, String> {
     let settings = config::load_backup_settings()?;
     let auto = &settings.auto;
@@ -399,7 +452,7 @@ fn build_auto_payload(settings: &BackupSettings) -> Result<backup::BackupRunPayl
     if auto.webdav_connection_ids.is_empty() {
         return Err("自动备份未选择 WebDAV 目标".to_string());
     }
-    let passphrase = decrypt_auto_passphrase(auto)?;
+    let passphrase = load_stored_passphrase()?;
     let base = settings.default_remote_dir.trim().trim_matches('/');
     let base = if base.is_empty() { "Octopus" } else { base };
     Ok(backup::BackupRunPayload {
@@ -409,12 +462,16 @@ fn build_auto_payload(settings: &BackupSettings) -> Result<backup::BackupRunPayl
         passphrase: Some(passphrase),
         remote_prefix: Some(format!("{base}/auto")),
         acknowledge_plaintext_secrets: false,
+        use_stored_passphrase: false,
     })
 }
 
-fn decrypt_auto_passphrase(auto: &AutoBackupSettings) -> Result<String, String> {
+/// 读取并解密当前存储的备份口令（手动与自动共用）。未设置时返回错误。
+pub(crate) fn load_stored_passphrase() -> Result<String, String> {
+    let settings = config::load_backup_settings()?;
+    let auto = &settings.auto;
     if !auto.has_passphrase() {
-        return Err("自动备份口令未设置".to_string());
+        return Err("备份口令未设置，请先在备份口令卡片中设置".to_string());
     }
     let master = config::load_secrets_key()?;
     crypto::decrypt_secret(
@@ -423,7 +480,7 @@ fn decrypt_auto_passphrase(auto: &AutoBackupSettings) -> Result<String, String> 
         &auto.passphrase_nonce,
         &auto.passphrase_cipher,
     )
-    .map_err(|e| format!("读取自动备份口令失败: {e}"))
+    .map_err(|e| format!("读取备份口令失败: {e}"))
 }
 
 /// 记录一轮自动备份的尝试结果（成功失败都算一次尝试，下一周期自然重试）。

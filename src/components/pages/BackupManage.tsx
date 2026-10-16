@@ -15,6 +15,7 @@ import {
   restoreRemoteBackup,
   runAutoBackupNow,
   runBackupUpload,
+  setBackupPassphrase,
   updateAutoBackupSettings,
   updateBackupSettings,
 } from "./backup-manage/api";
@@ -298,15 +299,24 @@ export default function BackupManage() {
   });
   /** 本次备份的上传目录（相对 WebDAV 根）；空则回退 Octopus */
   const [uploadDir, setUploadDir] = useState("Octopus");
-  const [passphrase, setPassphrase] = useState("");
-  const [passphrase2, setPassphrase2] = useState("");
-  const [passphraseVisible, setPassphraseVisible] = useState(false);
-  const [passphrase2Visible, setPassphrase2Visible] = useState(false);
-  const [ackPlaintext, setAckPlaintext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BackupRunResult | null>(null);
   const [progress, setProgress] = useState<BackupProgressEvent | null>(null);
+
+  // 备份口令（手动/自动共用）：不可回读，只有 hasPassphrase；输入新口令保存即覆盖。
+  const [hasPassphrase, setHasPassphrase] = useState(false);
+  const [passphraseInput, setPassphraseInput] = useState("");
+  const [passphraseInput2, setPassphraseInput2] = useState("");
+  const [passphraseInputVisible, setPassphraseInputVisible] = useState(false);
+  const [passphraseInput2Visible, setPassphraseInput2Visible] = useState(false);
+  const [passphraseSaving, setPassphraseSaving] = useState(false);
+  /** 已设置口令且输入新口令时，保存前弹窗确认覆盖。 */
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const overwriteDismiss = useOverlayDismiss(() => setConfirmOverwrite(false), passphraseSaving);
+
+  // 手动备份加密方式：null = 未选择（此时不能点立即备份）
+  const [manualMode, setManualMode] = useState<"encrypted" | "plaintext" | null>(null);
 
   // 自动备份（设置持久化在 config.json backup.auto；备份范围选择独立，
   // WebDAV 目标与手动备份共用上方勾选）
@@ -320,19 +330,10 @@ export default function BackupManage() {
     hasPassphrase: false,
   });
   const [autoStatus, setAutoStatus] = useState<AutoBackupStatus | null>(null);
-  const [autoSelected, setAutoSelected] = useState<Set<string>>(new Set());
-  const [autoPassphrase, setAutoPassphrase] = useState("");
-  const [autoPassphrase2, setAutoPassphrase2] = useState("");
-  const [autoPassphraseVisible, setAutoPassphraseVisible] = useState(false);
-  const [autoPassphrase2Visible, setAutoPassphrase2Visible] = useState(false);
-  /** 自动备份单元树折叠：默认收起，避免与手动树重复占用版面 */
-  const [autoUnitsExpanded, setAutoUnitsExpanded] = useState(false);
-  const [autoDirty, setAutoDirty] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
-  /** 已设置口令且输入新口令时，保存前弹窗确认覆盖。 */
-  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
-  const overwriteDismiss = useOverlayDismiss(() => setConfirmOverwrite(false), autoSaving);
+  /** 每天时刻输入的自动保存防抖 timer。 */
+  const autoTimerRef = useRef<number | null>(null);
 
   // Restore
   const [restoreConnId, setRestoreConnId] = useState("");
@@ -358,10 +359,9 @@ export default function BackupManage() {
       setUploadDir(s.defaultRemoteDir?.trim() || "Octopus");
       setConnections(dav);
       setSelected(collectDefaultIds(u));
-      // 自动备份优先用已保存的选择；首次使用时预填默认选中项。
-      setAutoSelected(auto.unitIds.length > 0 ? new Set(auto.unitIds) : collectDefaultIds(u));
+      setHasPassphrase(auto.hasPassphrase);
+      // 自动备份与手动共用备份范围，无需单独恢复 autoSelected。
       setAutoSettings(auto);
-      setAutoDirty(false);
       // WebDAV 目标勾选为手动/自动备份共用：优先沿用已保存的自动备份目标，
       // 未保存过则默认全选全部连接。
       setSelectedDav(
@@ -414,34 +414,36 @@ export default function BackupManage() {
   }, [units, selected]);
 
   const onToggleUnit = (id: string, node: BackupUnitNode, checked: boolean) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      const kids = node.children ?? [];
-      if (kids.length > 0) {
-        const ids = collectAvailableIds([node]);
-        for (const i of ids) {
-          if (checked) next.add(i);
-          else next.delete(i);
-        }
-      } else {
-        if (checked) next.add(id);
-        else next.delete(id);
+    const next = new Set(selected);
+    const kids = node.children ?? [];
+    if (kids.length > 0) {
+      const ids = collectAvailableIds([node]);
+      for (const i of ids) {
+        if (checked) next.add(i);
+        else next.delete(i);
       }
-      return next;
-    });
+    } else {
+      if (checked) next.add(id);
+      else next.delete(id);
+    }
+    setSelected(next);
+    // 自动备份与手动共用备份范围：变化即静默同步落盘。
+    void persistAutoSettings(autoSettings, selectedDav, next, true);
   };
 
   const selectAllUnits = (checked: boolean) => {
-    setSelected(checked ? new Set(availableLeafIds) : new Set());
+    const next = checked ? new Set(availableLeafIds) : new Set<string>();
+    setSelected(next);
+    void persistAutoSettings(autoSettings, selectedDav, next, true);
   };
 
   const onToggleDav = (id: string, checked: boolean) => {
-    setSelectedDav((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+    const next = new Set(selectedDav);
+    if (checked) next.add(id);
+    else next.delete(id);
+    setSelectedDav(next);
+    // WebDAV 目标手动/自动共用：变化即静默落盘自动备份配置。
+    void persistAutoSettings(autoSettings, next, undefined, true);
   };
 
   const startBackup = async () => {
@@ -453,12 +455,12 @@ export default function BackupManage() {
       setStatusMsg("请至少选择一个 WebDAV 目标");
       return;
     }
-    if (passphrase && passphrase !== passphrase2) {
-      setStatusMsg("两次输入的口令不一致");
+    if (!manualMode) {
+      setStatusMsg("请选择备份方式（口令加密或明文上传）");
       return;
     }
-    if (hasSecrets && !passphrase && !ackPlaintext) {
-      setStatusMsg("包内可能含密钥：请设置口令，或勾选「我已知晓风险」");
+    if (manualMode === "encrypted" && !hasPassphrase) {
+      setStatusMsg("请先在上方「备份口令」卡片设置口令");
       return;
     }
 
@@ -494,9 +496,10 @@ export default function BackupManage() {
       const res = await runBackupUpload({
         unitIds: Array.from(selected),
         webdavConnectionIds: Array.from(selectedDav),
-        passphrase: passphrase || undefined,
         remotePrefix,
-        acknowledgePlaintextSecrets: ackPlaintext || !!passphrase,
+        // 加密分支由后端解密共享口令；明文分支确认含密钥风险。
+        useStoredPassphrase: manualMode === "encrypted",
+        acknowledgePlaintextSecrets: manualMode === "plaintext",
       });
       setResult(res);
       setStatusMsg(res.message);
@@ -551,92 +554,90 @@ export default function BackupManage() {
     };
   }, [refreshAutoStatus]);
 
-  /** 校验并写入自动备份设置；成功返回 true 并清空表单脏状态。 */
-  const persistAutoSettings = async (): Promise<boolean> => {
-    if (autoSelected.size === 0) {
-      setStatusMsg("请至少选择一个自动备份内容");
+  /** 把指定状态立即落盘到自动备份配置（无「保存」按钮，改动即生效）。
+   *  备份范围与手动备份共用；显式传入 nextSelected，未传则读当前 state。
+   *  quiet = true 时（由范围/WebDAV 勾选触发）校验失败不弹 Toast。 */
+  const persistAutoSettings = async (
+    nextSettings: AutoBackupSettings,
+    nextDav: Set<string>,
+    nextSelected?: Set<string>,
+    quiet = false,
+  ): Promise<boolean> => {
+    const units = nextSelected ?? selected;
+    if (units.size === 0 || nextDav.size === 0) {
+      if (!quiet) {
+        setStatusMsg(units.size === 0 ? "请至少选择一个备份范围" : "请至少选择一个 WebDAV 目标");
+      }
       return false;
     }
-    if (selectedDav.size === 0) {
-      setStatusMsg("请至少选择一个 WebDAV 目标");
-      return false;
-    }
-    if (autoPassphrase && autoPassphrase !== autoPassphrase2) {
-      setStatusMsg("两次输入的口令不一致");
-      return false;
-    }
-    const dailyTime = autoSettings.dailyTime.trim() || "09:30";
     setAutoSaving(true);
     try {
       const saved = await updateAutoBackupSettings({
-        enabled: autoSettings.enabled,
-        mode: autoSettings.mode,
-        intervalHours: autoSettings.intervalHours,
-        dailyTime,
-        unitIds: Array.from(autoSelected),
-        // WebDAV 目标勾选为手动/自动备份共用，落盘当前共享勾选。
-        webdavConnectionIds: Array.from(selectedDav),
-        // 留空 = 不修改口令；非空 = 设置/覆盖口令（覆盖前由前端弹窗确认）。
-        passphrase: autoPassphrase || undefined,
+        enabled: nextSettings.enabled,
+        mode: nextSettings.mode,
+        intervalHours: nextSettings.intervalHours,
+        dailyTime: nextSettings.dailyTime.trim() || "09:30",
+        unitIds: Array.from(units),
+        // WebDAV 目标勾选为手动/自动共用，落盘当前共享勾选。
+        webdavConnectionIds: Array.from(nextDav),
       });
       setAutoSettings(saved);
-      setAutoPassphrase("");
-      setAutoPassphrase2("");
-      setAutoDirty(false);
+      setHasPassphrase(saved.hasPassphrase);
       return true;
     } catch (e) {
-      setStatusMsg(`保存失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
+      setStatusMsg(
+        `自动备份设置保存失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`,
+      );
       return false;
     } finally {
       setAutoSaving(false);
     }
   };
 
-  const saveAutoSettings = async () => {
-    if (!(await persistAutoSettings())) return;
-    setStatusMsg("自动备份设置已保存");
-    void refreshAutoStatus();
-  };
-
-  /** 保存自动备份设置：先做可即时反馈的校验；已设置口令且输入了新口令时，弹窗确认覆盖。 */
-  const handleSaveAutoSettings = async () => {
-    if (autoSelected.size === 0) {
-      setStatusMsg("请至少选择一个自动备份内容");
+  /** 共享口令卡片：保存新口令；已设置时先弹窗确认覆盖。 */
+  const handleSavePassphrase = () => {
+    if (!passphraseInput) {
+      setStatusMsg("请输入新口令");
       return;
     }
-    if (selectedDav.size === 0) {
-      setStatusMsg("请至少选择一个 WebDAV 目标");
-      return;
-    }
-    if (autoPassphrase && autoPassphrase !== autoPassphrase2) {
+    if (passphraseInput !== passphraseInput2) {
       setStatusMsg("两次输入的口令不一致");
       return;
     }
-    if (autoPassphrase && autoSettings.hasPassphrase) {
+    if (hasPassphrase) {
       setConfirmOverwrite(true);
       return;
     }
-    await saveAutoSettings();
+    void doSavePassphrase();
   };
 
-  const confirmOverwritePassphrase = async () => {
+  const doSavePassphrase = async () => {
     setConfirmOverwrite(false);
-    await saveAutoSettings();
+    setPassphraseSaving(true);
+    try {
+      const res = await setBackupPassphrase(passphraseInput);
+      setHasPassphrase(res.hasPassphrase);
+      setPassphraseInput("");
+      setPassphraseInput2("");
+      setStatusMsg("备份口令已保存");
+    } catch (e) {
+      setStatusMsg(`保存备份口令失败：${e instanceof Error ? e.message : String(e ?? "未知错误")}`);
+    } finally {
+      setPassphraseSaving(false);
+    }
   };
 
   const runAutoNow = async () => {
+    // 先 flush 每天时刻输入可能挂起的防抖保存。
+    if (autoTimerRef.current) {
+      window.clearTimeout(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
     setAutoRunning(true);
     try {
-      // 后端按已保存配置执行：表单有未保存改动（含刚输入的口令、共享勾选的
-      // WebDAV 目标变化）时先落盘，否则会出现「运行的不是表单里看到的配置/
-      // 口令未设置」的错位。
-      const davChanged =
-        Array.from(selectedDav).sort().join(",") !==
-        [...autoSettings.webdavConnectionIds].sort().join(",");
-      if (autoDirty || autoPassphrase || davChanged) {
-        const saved = await persistAutoSettings();
-        if (!saved) return;
-      }
+      // 后端按已保存配置执行：先把当前表单状态落盘，避免运行的不是看到的配置。
+      const saved = await persistAutoSettings(autoSettings, selectedDav);
+      if (!saved) return;
       const res = await runAutoBackupNow();
       setStatusMsg(res.message);
     } catch (e) {
@@ -646,34 +647,6 @@ export default function BackupManage() {
       void refreshAutoStatus();
     }
   };
-
-  const onToggleAutoUnit = (id: string, node: BackupUnitNode, checked: boolean) => {
-    setAutoSelected((prev) => {
-      const next = new Set(prev);
-      const kids = node.children ?? [];
-      if (kids.length > 0) {
-        const ids = collectAvailableIds([node]);
-        for (const i of ids) {
-          if (checked) next.add(i);
-          else next.delete(i);
-        }
-      } else {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-    setAutoDirty(true);
-  };
-
-  const autoUnitsAllSelected =
-    availableLeafIds.length > 0 && availableLeafIds.every((id) => autoSelected.has(id));
-  const autoUnitsSomeSelected =
-    availableLeafIds.some((id) => autoSelected.has(id)) && !autoUnitsAllSelected;
-  // 输入框里已填写的口令也视为满足要求：hasPassphrase 只反映已落盘状态，
-  // 否则首次保存（口令尚未存在）会被本条件永久禁用。
-  const autoNeedsPassphrase =
-    selectedContainsSecrets(units, autoSelected) && !autoSettings.hasPassphrase && !autoPassphrase;
 
   const allUnitsSelected =
     availableLeafIds.length > 0 && availableLeafIds.every((id) => selected.has(id));
@@ -768,7 +741,13 @@ export default function BackupManage() {
     }
   };
 
-  const canStart = !loading && !running && selected.size > 0 && selectedDav.size > 0;
+  const canStart =
+    !loading &&
+    !running &&
+    selected.size > 0 &&
+    selectedDav.size > 0 &&
+    !!manualMode &&
+    (manualMode === "plaintext" || hasPassphrase);
 
   const selectedRemoteItem = remoteItems.find((i) => remoteItemKey(i) === selectedRemote);
   const canRestore =
@@ -845,6 +824,128 @@ export default function BackupManage() {
               onChanged={refreshWebDavConnections}
             />
 
+            {/* 备份口令（手动/自动共用）：不可回读，输入新口令保存即覆盖 */}
+            <section className="backup-section">
+              <div className="backup-section-head">
+                <h2 className="backup-section-title">备份口令</h2>
+                {hasPassphrase && <span className="backup-badge backup-badge-ok">已设置</span>}
+              </div>
+              <div className="backup-card backup-options">
+                <p className="backup-upload-dir-hint">
+                  加密备份时使用的口令，手动与自动备份共用。口令只加密落盘、不可回读；
+                  恢复加密备份时需手动输入当时设置的口令。
+                </p>
+                <div className="backup-field-row">
+                  <label className="backup-field">
+                    <span className="backup-field-label">
+                      {hasPassphrase ? "新口令（留空则不修改）" : "口令"}
+                    </span>
+                    <div className="form-input-with-action">
+                      <input
+                        type={passphraseInputVisible ? "text" : "password"}
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={passphraseInput}
+                        onChange={(e) => setPassphraseInput(e.target.value)}
+                        placeholder={
+                          hasPassphrase ? "输入新口令可覆盖原口令" : "用于加密备份压缩包"
+                        }
+                        disabled={passphraseSaving}
+                      />
+                      <button
+                        type="button"
+                        className="form-input-action"
+                        data-tooltip={passphraseInputVisible ? "隐藏口令" : "显示口令"}
+                        aria-label={passphraseInputVisible ? "隐藏口令" : "显示口令"}
+                        aria-pressed={passphraseInputVisible}
+                        onClick={() => setPassphraseInputVisible((v) => !v)}
+                        disabled={passphraseSaving}
+                      >
+                        {passphraseInputVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="backup-field">
+                    <span className="backup-field-label">确认口令</span>
+                    <div className="form-input-with-action">
+                      <input
+                        type={passphraseInput2Visible ? "text" : "password"}
+                        className="form-input"
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={passphraseInput2}
+                        onChange={(e) => setPassphraseInput2(e.target.value)}
+                        placeholder="再次输入"
+                        disabled={passphraseSaving || !passphraseInput}
+                      />
+                      <button
+                        type="button"
+                        className="form-input-action"
+                        data-tooltip={passphraseInput2Visible ? "隐藏确认口令" : "显示确认口令"}
+                        aria-label={passphraseInput2Visible ? "隐藏确认口令" : "显示确认口令"}
+                        aria-pressed={passphraseInput2Visible}
+                        onClick={() => setPassphraseInput2Visible((v) => !v)}
+                        disabled={passphraseSaving || !passphraseInput}
+                      >
+                        {passphraseInput2Visible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <div className="backup-advanced-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleSavePassphrase}
+                    disabled={passphraseSaving || !passphraseInput}
+                  >
+                    {passphraseSaving ? "保存中…" : hasPassphrase ? "覆盖口令" : "设置口令"}
+                  </button>
+                </div>
+              </div>
+
+              {/* 覆盖口令确认弹窗：已设置口令时输入新口令保存需确认 */}
+              <div
+                className={`modal-overlay ${confirmOverwrite ? "visible" : ""}`}
+                {...overwriteDismiss}
+              >
+                <div className="modal">
+                  <div className="modal-header">
+                    <h2 className="modal-title">覆盖备份口令</h2>
+                    <button
+                      className="modal-close"
+                      onClick={() => !passphraseSaving && setConfirmOverwrite(false)}
+                      disabled={passphraseSaving}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <p>已设置备份口令。保存后将用新口令覆盖原口令，原口令无法找回。</p>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setConfirmOverwrite(false)}
+                      disabled={passphraseSaving}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void doSavePassphrase()}
+                      disabled={passphraseSaving}
+                    >
+                      {passphraseSaving ? "保存中…" : "覆盖口令并保存"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             {/* 手动备份 */}
             <section className="backup-section">
               <div className="backup-section-head">
@@ -853,78 +954,43 @@ export default function BackupManage() {
               <div className="backup-card backup-options">
                 {hasSecrets && (
                   <div className="backup-alert">
-                    当前选择可能包含 API Key、OAuth 令牌或 secretsKey。强烈建议设置备份口令。
+                    当前选择可能包含 API Key、OAuth 令牌或 secretsKey，建议使用口令加密。
                   </div>
                 )}
 
-                <div className="backup-field-row">
-                  <label className="backup-field">
-                    <span className="backup-field-label">备份口令（可选）</span>
-                    <div className="form-input-with-action">
-                      <input
-                        type={passphraseVisible ? "text" : "password"}
-                        className="form-input"
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        value={passphrase}
-                        onChange={(e) => setPassphrase(e.target.value)}
-                        placeholder="留空则生成明文 zip"
-                        disabled={running}
-                      />
-                      <button
-                        type="button"
-                        className="form-input-action"
-                        data-tooltip={passphraseVisible ? "隐藏备份口令" : "显示备份口令"}
-                        aria-label={passphraseVisible ? "隐藏备份口令" : "显示备份口令"}
-                        aria-pressed={passphraseVisible}
-                        onClick={() => setPassphraseVisible((visible) => !visible)}
-                        disabled={running}
-                      >
-                        {passphraseVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
+                <div className="backup-mode-radios" role="radiogroup" aria-label="备份方式">
+                  <label className="ui-radio backup-mode-radio">
+                    <input
+                      type="radio"
+                      className="ui-radio-input"
+                      name="manual-backup-mode"
+                      checked={manualMode === "encrypted"}
+                      disabled={running || !hasPassphrase}
+                      onChange={() => setManualMode("encrypted")}
+                    />
+                    <span className="ui-radio-box" aria-hidden />
+                    <span className="ui-radio-label">
+                      使用口令加密 zip 上传含密钥的备份
+                      {!hasPassphrase && (
+                        <span className="backup-unit-warn">（需先在上方「备份口令」设置）</span>
+                      )}
+                    </span>
                   </label>
-                  <label className="backup-field">
-                    <span className="backup-field-label">确认口令</span>
-                    <div className="form-input-with-action">
-                      <input
-                        type={passphrase2Visible ? "text" : "password"}
-                        className="form-input"
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        value={passphrase2}
-                        onChange={(e) => setPassphrase2(e.target.value)}
-                        placeholder="再次输入"
-                        disabled={running || !passphrase}
-                      />
-                      <button
-                        type="button"
-                        className="form-input-action"
-                        data-tooltip={passphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
-                        aria-label={passphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
-                        aria-pressed={passphrase2Visible}
-                        onClick={() => setPassphrase2Visible((visible) => !visible)}
-                        disabled={running || !passphrase}
-                      >
-                        {passphrase2Visible ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
+                  <label className="ui-radio backup-mode-radio">
+                    <input
+                      type="radio"
+                      className="ui-radio-input"
+                      name="manual-backup-mode"
+                      checked={manualMode === "plaintext"}
+                      disabled={running}
+                      onChange={() => setManualMode("plaintext")}
+                    />
+                    <span className="ui-radio-box" aria-hidden />
+                    <span className="ui-radio-label">
+                      我已知晓风险：将以明文 zip 上传含密钥的备份
+                    </span>
                   </label>
                 </div>
-
-                {hasSecrets && !passphrase && (
-                  <label className="ui-check backup-ack">
-                    <input
-                      type="checkbox"
-                      className="ui-check-input"
-                      checked={ackPlaintext}
-                      onChange={(e) => setAckPlaintext(e.target.checked)}
-                      disabled={running}
-                    />
-                    <CheckGlyph />
-                    <span>我已知晓风险：将以明文 zip 上传含密钥的备份</span>
-                  </label>
-                )}
 
                 <p className="backup-upload-dir-hint">
                   上传成功后本地临时包会删除；每个 WebDAV 目录仅保留最新 3 份备份归档（自动备份在其
@@ -942,7 +1008,9 @@ export default function BackupManage() {
                           ? "请先选择备份范围"
                           : selectedDav.size === 0
                             ? "请先选择 WebDAV 目标"
-                            : "立即备份"
+                            : !manualMode
+                              ? "请选择备份方式"
+                              : "立即备份"
                     }
                     onClick={() => void startBackup()}
                     disabled={!canStart}
@@ -953,14 +1021,15 @@ export default function BackupManage() {
               </div>
             </section>
 
-            {/* 自动备份：设置持久化在 config.json backup.auto，备份范围独立于手动，
-                WebDAV 目标与手动备份共用上方勾选 */}
+            {/* 自动备份：设置持久化在 config.json backup.auto；备份范围与 WebDAV 目标
+                均与手动备份共用上方勾选；改动即自动保存 */}
             <section className="backup-section">
               <div className="backup-section-head">
                 <h2 className="backup-section-title">自动备份</h2>
                 {autoStatus?.running && (
                   <span className="backup-badge backup-badge-ok">备份进行中</span>
                 )}
+                {autoSaving && <span className="backup-unit-warn">保存中…</span>}
               </div>
               <div className="backup-card backup-auto">
                 <p className="backup-upload-dir-hint">
@@ -970,21 +1039,6 @@ export default function BackupManage() {
                   ，自动强制口令加密，仅保留最近 3
                   份，不与手动备份挤占保留窗口；应用未运行时不执行。
                 </p>
-
-                <label className="ui-check backup-ack">
-                  <input
-                    type="checkbox"
-                    className="ui-check-input"
-                    checked={autoSettings.enabled}
-                    onChange={(e) => {
-                      setAutoSettings((s) => ({ ...s, enabled: e.target.checked }));
-                      setAutoDirty(true);
-                    }}
-                    disabled={autoSaving || autoRunning}
-                  />
-                  <CheckGlyph />
-                  <span>启用自动备份</span>
-                </label>
 
                 <div className="backup-field-row">
                   <label className="backup-field">
@@ -996,11 +1050,12 @@ export default function BackupManage() {
                         { value: "daily", label: "每天固定时刻" },
                       ]}
                       onChange={(v) => {
-                        setAutoSettings((s) => ({
-                          ...s,
+                        const nextSettings: AutoBackupSettings = {
+                          ...autoSettings,
                           mode: v === "daily" ? "daily" : "interval",
-                        }));
-                        setAutoDirty(true);
+                        };
+                        setAutoSettings(nextSettings);
+                        void persistAutoSettings(nextSettings, selectedDav);
                       }}
                       disabled={autoSaving || autoRunning}
                     />
@@ -1015,8 +1070,12 @@ export default function BackupManage() {
                           label: intervalLabel(h),
                         }))}
                         onChange={(v) => {
-                          setAutoSettings((s) => ({ ...s, intervalHours: Number(v) }));
-                          setAutoDirty(true);
+                          const nextSettings = {
+                            ...autoSettings,
+                            intervalHours: Number(v),
+                          };
+                          setAutoSettings(nextSettings);
+                          void persistAutoSettings(nextSettings, selectedDav);
                         }}
                         disabled={autoSaving || autoRunning}
                       />
@@ -1029,14 +1088,39 @@ export default function BackupManage() {
                         className="form-input"
                         value={autoSettings.dailyTime}
                         onChange={(e) => {
-                          setAutoSettings((s) => ({ ...s, dailyTime: e.target.value }));
-                          setAutoDirty(true);
+                          const nextSettings = { ...autoSettings, dailyTime: e.target.value };
+                          setAutoSettings(nextSettings);
+                          if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
+                          autoTimerRef.current = window.setTimeout(() => {
+                            void persistAutoSettings(nextSettings, selectedDav);
+                          }, 600);
                         }}
                         disabled={autoSaving || autoRunning}
                       />
                     </label>
                   )}
                 </div>
+
+                <label className="ui-check backup-ack">
+                  <input
+                    type="checkbox"
+                    className="ui-check-input"
+                    checked={autoSettings.enabled}
+                    onChange={(e) => {
+                      const nextEnabled = e.target.checked;
+                      if (nextEnabled && !hasPassphrase) {
+                        setStatusMsg("请先在上方「备份口令」卡片设置口令");
+                        return;
+                      }
+                      const nextSettings = { ...autoSettings, enabled: nextEnabled };
+                      setAutoSettings(nextSettings);
+                      void persistAutoSettings(nextSettings, selectedDav);
+                    }}
+                    disabled={autoSaving || autoRunning}
+                  />
+                  <CheckGlyph />
+                  <span>启用自动备份</span>
+                </label>
 
                 {autoSettings.enabled && (
                   <div className="backup-auto-status">
@@ -1052,184 +1136,21 @@ export default function BackupManage() {
                   <div className="backup-unit-warn">{autoStatus.lastMessage}</div>
                 )}
 
-                <button
-                  type="button"
-                  className="btn btn-secondary backup-advanced-toggle"
-                  onClick={() => setAutoUnitsExpanded((v) => !v)}
-                >
-                  {autoUnitsExpanded
-                    ? "收起自动备份内容"
-                    : `选择自动备份内容（已选 ${autoSelected.size} 项）`}
-                </button>
-                {autoUnitsExpanded && (
-                  <>
-                    <UnitTree nodes={units} selected={autoSelected} onToggle={onToggleAutoUnit} />
-                    <label className="ui-check backup-select-all">
-                      <input
-                        type="checkbox"
-                        className="ui-check-input"
-                        checked={autoUnitsAllSelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = autoUnitsSomeSelected;
-                        }}
-                        onChange={(e) => {
-                          setAutoSelected(e.target.checked ? new Set(availableLeafIds) : new Set());
-                          setAutoDirty(true);
-                        }}
-                        disabled={availableLeafIds.length === 0}
-                      />
-                      <CheckGlyph />
-                      <span>全选可用项</span>
-                    </label>
-                  </>
-                )}
-
-                {autoSettings.hasPassphrase && (
-                  <div className="backup-auto-pass-set">
-                    <span>
-                      备份口令：<strong>已设置</strong>（不可回读，输入新口令保存可覆盖）
-                    </span>
-                  </div>
-                )}
-                <div className="backup-field-row">
-                  <label className="backup-field">
-                    <span className="backup-field-label">
-                      备份口令{autoSettings.hasPassphrase ? "（留空保持不变）" : "（必填）"}
-                    </span>
-                    <div className="form-input-with-action">
-                      <input
-                        type={autoPassphraseVisible ? "text" : "password"}
-                        className="form-input"
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        value={autoPassphrase}
-                        onChange={(e) => {
-                          setAutoPassphrase(e.target.value);
-                          setAutoDirty(true);
-                        }}
-                        placeholder={
-                          autoSettings.hasPassphrase ? "输入新口令可覆盖原口令" : "自动备份强制加密"
-                        }
-                        disabled={autoSaving || autoRunning}
-                      />
-                      <button
-                        type="button"
-                        className="form-input-action"
-                        data-tooltip={autoPassphraseVisible ? "隐藏备份口令" : "显示备份口令"}
-                        aria-label={autoPassphraseVisible ? "隐藏备份口令" : "显示备份口令"}
-                        aria-pressed={autoPassphraseVisible}
-                        onClick={() => setAutoPassphraseVisible((visible) => !visible)}
-                        disabled={autoSaving || autoRunning}
-                      >
-                        {autoPassphraseVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  </label>
-                  <label className="backup-field">
-                    <span className="backup-field-label">确认口令</span>
-                    <div className="form-input-with-action">
-                      <input
-                        type={autoPassphrase2Visible ? "text" : "password"}
-                        className="form-input"
-                        autoComplete="new-password"
-                        spellCheck={false}
-                        value={autoPassphrase2}
-                        onChange={(e) => setAutoPassphrase2(e.target.value)}
-                        placeholder="再次输入"
-                        disabled={autoSaving || autoRunning || !autoPassphrase}
-                      />
-                      <button
-                        type="button"
-                        className="form-input-action"
-                        data-tooltip={autoPassphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
-                        aria-label={autoPassphrase2Visible ? "隐藏确认口令" : "显示确认口令"}
-                        aria-pressed={autoPassphrase2Visible}
-                        onClick={() => setAutoPassphrase2Visible((visible) => !visible)}
-                        disabled={autoSaving || autoRunning || !autoPassphrase}
-                      >
-                        {autoPassphrase2Visible ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  </label>
-                </div>
-
-                {autoNeedsPassphrase && (
-                  <div className="backup-alert">
-                    自动备份所选内容可能包含密钥，必须设置备份口令后才能启用。
-                  </div>
-                )}
-
                 <div className="backup-advanced-actions">
                   <button
                     type="button"
                     className="btn btn-primary"
                     disabled={
-                      !autoDirty ||
-                      autoSaving ||
-                      autoRunning ||
-                      running ||
-                      autoSelected.size === 0 ||
-                      selectedDav.size === 0 ||
-                      (autoSettings.enabled && autoNeedsPassphrase)
-                    }
-                    onClick={() => void handleSaveAutoSettings()}
-                  >
-                    {autoSaving ? "保存中…" : "保存自动备份设置"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={
                       running ||
                       autoRunning ||
-                      autoSelected.size === 0 ||
+                      selected.size === 0 ||
                       selectedDav.size === 0 ||
-                      (!autoSettings.hasPassphrase && !autoPassphrase)
+                      !hasPassphrase
                     }
                     onClick={() => void runAutoNow()}
                   >
                     {autoRunning ? "自动备份中…" : "按当前配置立即运行"}
                   </button>
-                </div>
-              </div>
-
-              {/* 覆盖口令确认弹窗：已设置口令时输入新口令保存需确认 */}
-              <div
-                className={`modal-overlay ${confirmOverwrite ? "visible" : ""}`}
-                {...overwriteDismiss}
-              >
-                <div className="modal">
-                  <div className="modal-header">
-                    <h2 className="modal-title">覆盖自动备份口令</h2>
-                    <button
-                      className="modal-close"
-                      onClick={() => !autoSaving && setConfirmOverwrite(false)}
-                      disabled={autoSaving}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                  <div className="modal-body">
-                    <p>已设置自动备份口令。保存后将用新口令覆盖原口令，原口令无法找回。</p>
-                  </div>
-                  <div className="modal-footer">
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setConfirmOverwrite(false)}
-                      disabled={autoSaving}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => void confirmOverwritePassphrase()}
-                      disabled={autoSaving}
-                    >
-                      {autoSaving ? "保存中…" : "覆盖口令并保存"}
-                    </button>
-                  </div>
                 </div>
               </div>
             </section>

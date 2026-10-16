@@ -56,6 +56,13 @@ export interface BackupRunPayload {
   passphrase?: string;
   remotePrefix?: string;
   acknowledgePlaintextSecrets: boolean;
+  /** 手动备份选择「使用已存口令加密」时由后端解密共享口令，前端不传明文。 */
+  useStoredPassphrase?: boolean;
+}
+
+/** 备份口令状态（手动/自动共用）：只回传存在性标志。 */
+export interface BackupPassphraseStatus {
+  hasPassphrase: boolean;
 }
 
 export interface BackupUploadTargetResult {

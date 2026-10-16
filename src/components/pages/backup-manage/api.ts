@@ -2,6 +2,7 @@ import type {
   AutoBackupSettings,
   AutoBackupSettingsUpdate,
   AutoBackupStatus,
+  BackupPassphraseStatus,
   BackupRunPayload,
   BackupRunResult,
   BackupSettings,
@@ -58,6 +59,14 @@ export async function updateAutoBackupSettings(
 export async function getAutoBackupStatus(): Promise<AutoBackupStatus> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("get_auto_backup_status") as Promise<AutoBackupStatus>;
+}
+
+/** 设置或清除备份口令（手动/自动共用）；不传或传空串 = 清除。 */
+export async function setBackupPassphrase(passphrase?: string): Promise<BackupPassphraseStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_backup_passphrase", {
+    passphrase: passphrase || null,
+  }) as Promise<BackupPassphraseStatus>;
 }
 
 /** 按自动备份配置立即执行一轮（走同一互斥锁与 auto 远端子目录）。 */

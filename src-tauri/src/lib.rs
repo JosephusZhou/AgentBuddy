@@ -424,6 +424,15 @@ async fn update_auto_backup_settings(
 }
 
 #[tauri::command]
+async fn set_backup_passphrase(
+    passphrase: Option<String>,
+) -> Result<backup_schedule::BackupPassphraseStatusDto, String> {
+    tauri::async_runtime::spawn_blocking(move || backup_schedule::set_backup_passphrase(passphrase))
+        .await
+        .map_err(|e| format!("保存备份口令任务失败: {}", e))?
+}
+
+#[tauri::command]
 async fn get_auto_backup_status() -> Result<backup_schedule::AutoBackupStatus, String> {
     tauri::async_runtime::spawn_blocking(backup_schedule::get_auto_backup_status)
         .await
@@ -1716,6 +1725,7 @@ pub fn run() {
             restore_remote_backup,
             get_auto_backup_settings,
             update_auto_backup_settings,
+            set_backup_passphrase,
             get_auto_backup_status,
             run_auto_backup_now,
             list_skills,

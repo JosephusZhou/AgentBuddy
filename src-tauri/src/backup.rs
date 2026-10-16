@@ -76,6 +76,9 @@ pub struct BackupRunPayload {
     pub remote_prefix: Option<String>,
     #[serde(default)]
     pub acknowledge_plaintext_secrets: bool,
+    /// 手动备份选择「使用已存口令加密」时置位：前端无法回读口令，由后端解密共享口令。
+    #[serde(default)]
+    pub use_stored_passphrase: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -977,11 +980,23 @@ pub(crate) fn execute_backup(
         return Err("请至少选择一个 WebDAV 目标".to_string());
     }
 
-    let passphrase_preview = payload
+    // 显式口令优先；未传显式口令但选择「用已存口令加密」时，由后端解密共享口令
+    // （前端口令不可回读，无法直接传递）。
+    let explicit_passphrase = payload
         .passphrase
         .as_ref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let passphrase_preview = match explicit_passphrase {
+        Some(p) => Some(p),
+        None => {
+            if payload.use_stored_passphrase {
+                Some(crate::backup_schedule::load_stored_passphrase()?)
+            } else {
+                None
+            }
+        }
+    };
     // Overall steps: collect + zip + [encrypt] + each upload + finalize
     let total_steps: u32 =
         2 + if passphrase_preview.is_some() { 1 } else { 0 } + upload_ids.len() as u32 + 1;
