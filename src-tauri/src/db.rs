@@ -278,7 +278,7 @@ pub fn save_agents(agents: &[SniffResult]) -> Result<(), String> {
 /// 删除已从注册表移除的 agent 的历史缓存行（版本升级后的自愈）。
 ///
 /// 背景：`save_agents` 只做 upsert、从不删除——旧版本扫描缓存（如 kiro /
-/// deveco-code 等）在注册表移除对应 agent 后仍永远残留，导致 Agent 管理页
+/// deveco-code 等）在注册表移除对应 agent 后仍永远残留，导致 Agent 页
 /// （get_cached_agents）继续展示已移除的 agent。启动时调用一次本函数清除。
 /// 手动添加的同名 agent 会一并被删——与已移除的注册表项同名本就冲突，可接受。
 pub fn purge_removed_agents(names: &[&str]) -> Result<usize, String> {

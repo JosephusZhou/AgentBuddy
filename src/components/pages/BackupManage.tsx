@@ -781,8 +781,13 @@ export default function BackupManage() {
   return (
     <>
       <div className="content-header">
-        <div className="content-header-bar backup-header-bar">
-          <h1 className="content-title">备份</h1>
+        <div className="content-header-bar">
+          <h1 className="content-title">
+            <span className="title-crumb">
+              设置<span className="title-sep">/</span>
+            </span>
+            备份
+          </h1>
         </div>
       </div>
 

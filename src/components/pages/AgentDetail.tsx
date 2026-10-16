@@ -54,9 +54,9 @@ export interface AgentDetailProps {
   displayName: string;
   icon: string;
   onBack: () => void;
-  /** 跳转到 MCP 管理页（缺省时隐藏入口） */
+  /** 跳转到 MCP 页（缺省时隐藏入口） */
   onManageMcps?: () => void;
-  /** 跳转到 Skills 管理页（缺省时隐藏入口） */
+  /** 跳转到 Skills 页（缺省时隐藏入口） */
   onManageSkills?: () => void;
 }
 
@@ -172,7 +172,12 @@ export default function AgentDetail({
           >
             <ArrowLeft strokeWidth={1.8} />
           </button>
-          <h1 className="content-title">{title}</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              管理<span className="title-sep">/</span>
+            </span>
+            {title}
+          </h1>
         </div>
       </div>
       <div className="content-body">

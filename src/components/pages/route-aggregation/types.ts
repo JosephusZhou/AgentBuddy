@@ -109,4 +109,4 @@ export function isRouteableProviderType(types: ApiType[] | undefined | null): bo
 
 /** 不支持路由聚合的供应商在 UI 上的提示文案。 */
 export const UNSUPPORTED_ROUTE_PROVIDER_HINT =
-  "该供应商的 API 协议与路由聚合不兼容，无法参与聚合转发（可在 AI 供应商管理页直接使用）";
+  "该供应商的 API 协议与路由聚合不兼容，无法参与聚合转发（可在供应商页直接使用）";

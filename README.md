@@ -10,13 +10,14 @@ Octopus 是一个面向本地桌面场景的 Tauri + React 工具，用来统一
 
 | 模块 | 说明 |
 |------|------|
-| Agent 发现 | 自动扫描本机已安装的 AI Agent（Claude Code、Claude Desktop、Codex CLI、OpenCode、Antigravity、WorkBuddy、Pi），展示安装路径、配置目录、MCP 状态等详情 |
-| MCP 管理 | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量应用/删除、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
-| Skills 管理 | 本地 / GitHub / GitCode 多源导入 Skill，支持批量应用到多个 Agent、标签管理、导出 |
+| Agent | 自动扫描本机已安装的 AI Agent（Claude Code、Claude Desktop、Codex CLI、OpenCode、Antigravity、WorkBuddy、Pi），展示安装路径、配置目录、MCP 状态等详情 |
+| MCP | 跨 Agent 统一管理 MCP 服务器配置（增删改、批量应用/删除、连接测试），支持 TOML / JSON / JSONC 等多方言写入 |
+| Skills | 本地 / GitHub / GitCode 多源导入 Skill，支持批量应用到多个 Agent、标签管理、导出 |
 | Claude 多环境 | 管理多个 `CLAUDE_CONFIG_DIR` 环境（别名安装、Token 配置、MCP 同步、模型选择） |
 | Codex 多环境 | 管理多个 `CODEX_HOME` 环境（别名安装、Auth 配置、MCP 同步） |
-| OpenCode 配置 | 管理 Provider / Model、API Key、Models.dev 目录同步 |
-| AI 供应商库 | 集中管理 AI 供应商（Anthropic / OpenAI / 通用 Universal），加密存储 API Key，支持 Base URL 自定义 |
+| OpenCode配置 | 管理 OpenCode 的 Provider / Model、API Key、Models.dev 目录同步 |
+| Pi配置 | 管理 Pi 的 Provider / Model、API Key、Models.dev 目录同步 |
+| 供应商 | 集中管理供应商（Anthropic / OpenAI / 通用 Universal），加密存储 API Key，支持 Base URL 自定义 |
 | 路由聚合 | 本地 Axum 代理，统一接入已启用供应商的模型路由，支持同协议转发、故障转移与 cloaking |
 | 项目配置 | 一键为项目初始化 AI Agent 骨架（Full / Symlink 模式），可选注入 MCP 和 Skills |
 | 备份与恢复 | 本地打包 + 多 WebDAV 上传（支持加密）、远端恢复；支持定时自动备份（按间隔 / 每日触发，强制口令加密，上传至独立 auto 子目录） |
@@ -135,14 +136,16 @@ src/                          React 前端
     agent-filter.tsx          Agent 过滤组件（共享）
     ModelComboBox.tsx         模型下拉选择组件
     pages/
-      AgentSniff.tsx          Agent 发现
+      AgentSniff.tsx          Agent
       AgentDetail.tsx         Agent 详情面板
-      McpManage.tsx           MCP 服务器管理
-      SkillsManage.tsx        Skills 管理
+      McpManage.tsx           MCP
+      SkillsManage.tsx        Skills
       ClaudeEnv.tsx           Claude 多环境管理
       CodexEnv.tsx            Codex 多环境管理
-      OpenCodeConfig.tsx      OpenCode 配置
-      AiProviders.tsx         AI 供应商管理
+      OpenCodeConfig.tsx      OpenCode配置入口（薄包装）
+      PiConfig.tsx            Pi配置入口（薄包装）
+      model-config/ModelConfigAgentPage.tsx  OpenCode/Pi 复用的模型配置主体
+      AiProviders.tsx         供应商
       RouteAggregation.tsx    路由聚合
       ProjectConfig.tsx       项目配置初始化
       BackupManage.tsx        备份管理
@@ -167,7 +170,7 @@ src-tauri/src/                Rust 后端
   opencode_config.rs          OpenCode Provider/Model 配置
   pi_model_config.rs          Pi 模型与认证配置
   agent_model_config.rs       OpenCode / Pi 统一模型分派
-  ai_provider.rs              AI 供应商注册与加密存储
+  ai_provider.rs              供应商注册与加密存储
   agent_open.rs               打开 Agent 配置文件
   project_config.rs           项目级 AI 配置初始化
   db.rs                       SQLite 持久化

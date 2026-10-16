@@ -178,7 +178,7 @@ impl ProviderRouter {
                 api_key: b.api_key.clone(),
                 model_ids: b.model_ids.clone(),
                 enabled: b.enabled,
-                // 模型列表唯一来源：用户在 AI 供应商编辑页配置的 `custom_models_json`。
+                // 模型列表唯一来源：用户在供应商编辑页配置的 `custom_models_json`。
                 // 非空时直接作为 supported_model_ids；空列表保持 None（failover 不按模型过滤）。
                 supported_model_ids: if b.model_ids.is_empty() {
                     None

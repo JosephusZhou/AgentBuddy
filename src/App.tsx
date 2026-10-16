@@ -3,7 +3,8 @@ import Sidebar from "./components/Sidebar";
 import AgentSniff from "./components/pages/AgentSniff";
 import AiProviders from "./components/pages/AiProviders";
 import BackupManage from "./components/pages/BackupManage";
-import ModelConfig from "./components/pages/OpenCodeConfig";
+import OpenCodeConfig from "./components/pages/OpenCodeConfig";
+import PiConfig from "./components/pages/PiConfig";
 import ProjectConfig from "./components/pages/ProjectConfig";
 import SkillsManage from "./components/pages/SkillsManage";
 import McpManage from "./components/pages/McpManage";
@@ -31,7 +32,8 @@ import { Toast } from "./components/Toast";
 export type MainView =
   | "agent-sniff"
   | "ai-providers"
-  | "model-config"
+  | "opencode-config"
+  | "pi-config"
   | "project-config"
   | "skills-manage"
   | "mcp-manage"
@@ -182,7 +184,8 @@ export default function App() {
       <main className="main-content">
         {view === "agent-sniff" && <AgentSniff onNavigate={setView} />}
         {view === "ai-providers" && <AiProviders />}
-        {view === "model-config" && <ModelConfig />}
+        {view === "opencode-config" && <OpenCodeConfig />}
+        {view === "pi-config" && <PiConfig />}
         {view === "project-config" && <ProjectConfig />}
         {view === "skills-manage" && <SkillsManage />}
         {view === "mcp-manage" && <McpManage />}

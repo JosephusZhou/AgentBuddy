@@ -264,7 +264,12 @@ export default function RouteAggregation() {
     return (
       <>
         <div className="content-header">
-          <h1 className="content-title">路由聚合</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              模型<span className="title-sep">/</span>
+            </span>
+            路由聚合
+          </h1>
         </div>
         <div className="content-body" style={{ alignItems: "center", justifyContent: "center" }}>
           <Loader2 size={24} className="animate-spin" style={{ color: "var(--seed-muted)" }} />
@@ -284,7 +289,12 @@ export default function RouteAggregation() {
       {/* Header */}
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">路由聚合</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              模型<span className="title-sep">/</span>
+            </span>
+            路由聚合
+          </h1>
           <div className="header-actions">
             {serverRunning ? (
               <button
@@ -539,7 +549,7 @@ export default function RouteAggregation() {
             <div className="empty-state" style={{ minHeight: 120, padding: "24px 12px" }}>
               <Server size={32} />
               <div className="empty-state-text">暂无供应商</div>
-              <div className="empty-state-subtext">请先在「AI 供应商」中添加供应商</div>
+              <div className="empty-state-subtext">请先在「供应商」中添加供应商</div>
             </div>
           ) : providersExpanded ? (
             <>
@@ -1092,7 +1102,7 @@ function ProviderSelectRow({
             </div>
           ) : !models || models.length === 0 ? (
             <div style={{ fontSize: "var(--text-xs)", color: "var(--seed-muted)" }}>
-              暂无自定义模型。供应商对外可见模型仅来自「AI 供应商」中的自定义模型列表，请前往配置。
+              暂无自定义模型。供应商对外可见模型仅来自「供应商」中的自定义模型列表，请前往配置。
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>

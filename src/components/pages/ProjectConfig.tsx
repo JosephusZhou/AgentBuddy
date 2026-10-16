@@ -273,7 +273,12 @@ export default function ProjectConfig() {
   return (
     <>
       <div className="content-header">
-        <h1 className="content-title">项目AI配置</h1>
+        <h1 className="content-title">
+          <span className="title-crumb">
+            环境与配置<span className="title-sep">/</span>
+          </span>
+          项目配置
+        </h1>
         <p className="content-desc">为项目目录初始化多个 AI coding agent 的配置文件和目录</p>
       </div>
 
@@ -408,7 +413,7 @@ export default function ProjectConfig() {
             {selectedMcps.size > 0
               ? summarizeSelection(selectedMcpTitles)
               : mcpOptions.length === 0
-                ? "暂无可选 MCP — 可先在「MCP 管理」页添加或嗅探。"
+                ? "暂无可选 MCP — 可先在「MCP」页添加或嗅探。"
                 : "未选择。勾选的 MCP 将按名称合并写入各 Agent 的项目级配置文件（如 .mcp.json / .codex/config.toml / opencode.json）。"}
           </span>
         </div>
@@ -437,7 +442,7 @@ export default function ProjectConfig() {
             {selectedSkills.size > 0
               ? summarizeSelection(selectedSkillTitles)
               : skillOptions.length === 0
-                ? "暂无可选 Skills — 可先在「Skills 管理」页添加或嗅探。"
+                ? "暂无可选 Skills — 可先在「Skills」页添加或嗅探。"
                 : "未选择。勾选的 Skills 将安装到项目 .agents/skills 目录，所选多个 Agent 均可共享使用。"}
           </span>
         </div>
@@ -544,7 +549,7 @@ export default function ProjectConfig() {
           <div className="modal-body mcp-modal-body">
             {mcpOptions.length === 0 ? (
               <span className="proj-mode-option-desc">
-                暂无可选 MCP — 可先在「MCP 管理」页添加或嗅探。
+                暂无可选 MCP — 可先在「MCP」页添加或嗅探。
               </span>
             ) : (
               <>
@@ -646,7 +651,7 @@ export default function ProjectConfig() {
           <div className="modal-body mcp-modal-body">
             {skillOptions.length === 0 ? (
               <span className="proj-mode-option-desc">
-                暂无可选 Skills — 可先在「Skills 管理」页添加或嗅探。
+                暂无可选 Skills — 可先在「Skills」页添加或嗅探。
               </span>
             ) : (
               <>

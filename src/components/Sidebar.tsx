@@ -17,6 +17,7 @@ import {
   Route,
   Cog,
   Wrench,
+  Terminal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -44,17 +45,17 @@ const MENU_GROUPS: MenuGroupDef[] = [
     label: "管理",
     icon: Wrench,
     items: [
-      { view: "agent-sniff", label: "Agent管理", icon: Bot },
-      { view: "mcp-manage", label: "MCP管理", icon: Blocks },
-      { view: "skills-manage", label: "skills管理", icon: Sparkles },
+      { view: "agent-sniff", label: "Agent", icon: Bot },
+      { view: "mcp-manage", label: "MCP", icon: Blocks },
+      { view: "skills-manage", label: "Skills", icon: Sparkles },
     ],
   },
   {
     id: "routing",
-    label: "路由",
+    label: "模型",
     icon: Route,
     items: [
-      { view: "ai-providers", label: "AI供应商", icon: CloudCog },
+      { view: "ai-providers", label: "供应商", icon: CloudCog },
       { view: "route-aggregation", label: "路由聚合", icon: Network },
     ],
   },
@@ -65,8 +66,9 @@ const MENU_GROUPS: MenuGroupDef[] = [
     items: [
       { view: "claude-env", label: "Claude环境", icon: Layers },
       { view: "codex-env", label: "Codex环境", icon: SquareTerminal },
-      { view: "model-config", label: "模型配置", icon: Braces },
-      { view: "project-config", label: "项目AI配置", icon: FolderCog },
+      { view: "opencode-config", label: "OpenCode配置", icon: Braces },
+      { view: "pi-config", label: "Pi配置", icon: Terminal },
+      { view: "project-config", label: "项目配置", icon: FolderCog },
     ],
   },
 ];

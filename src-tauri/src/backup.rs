@@ -627,7 +627,7 @@ fn build_generic_agent_unit(
         warnings: if is_found {
             vec![]
         } else if available {
-            vec!["未在 Agent 管理中标记为已安装，但检测到配置文件".into()]
+            vec!["未在 Agent 页中标记为已安装，但检测到配置文件".into()]
         } else {
             vec!["未检测到配置".into()]
         },

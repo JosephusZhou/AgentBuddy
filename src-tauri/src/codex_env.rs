@@ -62,7 +62,7 @@ pub struct CodexEnvironment {
     pub base_url: String,
     /// 列表接口不回传明文 token；编辑时用 `get_codex_env_secret` 按需拉取。
     pub api_key: String,
-    /// 关联的 AI 供应商 ID（空串=未关联）。反向同步时按此查找环境。
+    /// 关联的供应商 ID（空串=未关联）。反向同步时按此查找环境。
     pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -99,7 +99,7 @@ pub struct CodexEnvUpsertPayload {
     pub model_provider: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
-    /// 关联的 AI 供应商 ID。None = 不改动，空串 = 取消关联。
+    /// 关联的供应商 ID。None = 不改动，空串 = 取消关联。
     pub provider_id: Option<String>,
 }
 
@@ -131,7 +131,7 @@ pub struct CodexEnvClonePayload {
     pub sync_mode: Option<String>,
     /// When true, write shell alias after creation. Defaults to false.
     pub install_alias: Option<bool>,
-    /// 关联的 AI 供应商 ID。空串或 None = 不关联。
+    /// 关联的供应商 ID。空串或 None = 不关联。
     pub provider_id: Option<String>,
 }
 

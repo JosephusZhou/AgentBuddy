@@ -8,7 +8,7 @@ use crate::platform;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// What the Agent 管理 card can open for a given agent.
+/// What the Agent 页 card can open for a given agent.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentOpenTargets {

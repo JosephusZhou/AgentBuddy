@@ -1,4 +1,4 @@
-/** 通用模型配置页的共享类型（OpenCode / Pi）。 */
+/** OpenCode / Pi 配置页的共享类型。 */
 
 /** 支持可视化模型配置的 agent 标识。 */
 export type ModelConfigAgentId = "opencode" | "pi";

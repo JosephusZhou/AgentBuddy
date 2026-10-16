@@ -1,4 +1,4 @@
-/** 将本软件的路由聚合服务包装为"虚拟 AI 供应商"，供各环境/配置页的供应商下拉选择。
+/** 将本软件的路由聚合服务包装为"虚拟供应商"，供各环境/配置页的供应商下拉选择。
  *
  * 始终按当前监听配置返回该虚拟供应商，以便已保存的环境在服务停止后仍能回显；
  * 选中后各页面按普通供应商流程回填 Base URL / API Key（主 Key）：
@@ -12,7 +12,7 @@ import type { AiProvider } from "../ai-providers/types";
 import { invokeGetSecret } from "../ai-providers/api";
 import { getConfig, getStatus, getRouteAggregatedModels } from "./api";
 
-/** 虚拟供应商哨兵 ID：不存在于 AI 供应商库中，不可用 get_ai_provider_secret 读取。 */
+/** 虚拟供应商哨兵 ID：不存在于供应商库中，不可用 get_ai_provider_secret 读取。 */
 export const ROUTE_AGGREGATION_PROVIDER_ID = "__route_aggregation__";
 
 export function isRouteAggregationProvider(id: string | null | undefined): boolean {

@@ -59,7 +59,7 @@ export async function regenerateApiKey(index: number): Promise<string> {
 
 /** 获取供应商的对外模型列表。
  *
- * 来源唯一：AI 供应商编辑页配置的 `customModels`（已在后端从 `custom_models_json`
+ * 来源唯一：供应商编辑页配置的 `customModels`（已在后端从 `custom_models_json`
  * 读取并按 alias_id 优先展开）。即使该列表为空也**不**再向供应商远端 /v1/models
  * 拉取——配置侧的自定义列表即为对外暴露的全部模型。 */
 export async function getRouteProviderModels(providerId: string): Promise<string[]> {

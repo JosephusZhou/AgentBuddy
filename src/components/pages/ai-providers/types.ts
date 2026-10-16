@@ -1,4 +1,4 @@
-/** AI 供应商管理页的类型定义（与 Rust 端 ai_provider.rs 的 camelCase DTO 对齐）。 */
+/** 供应商管理页的类型定义（与 Rust 端 ai_provider.rs 的 camelCase DTO 对齐）。 */
 
 /** 单个 API 协议类型：可在一个供应商上多选组合。 */
 export type ApiType = "anthropic" | "openai_chat" | "openai_responses";

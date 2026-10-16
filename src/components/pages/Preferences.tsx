@@ -35,7 +35,14 @@ export default function Preferences({
   return (
     <>
       <div className="content-header">
-        <h1 className="content-title">常规</h1>
+        <div className="content-header-bar">
+          <h1 className="content-title">
+            <span className="title-crumb">
+              设置<span className="title-sep">/</span>
+            </span>
+            常规
+          </h1>
+        </div>
       </div>
       <div className="content-body">
         <div className="pref-section">

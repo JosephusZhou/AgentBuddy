@@ -1048,7 +1048,12 @@ export default function McpManage() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">MCP 管理</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              管理<span className="title-sep">/</span>
+            </span>
+            MCP
+          </h1>
           <div className="header-actions">
             <button
               className={`action-btn ${batchMode ? "active" : ""}`}
@@ -1588,9 +1593,7 @@ export default function McpManage() {
                 )}
               </div>
               {agents.length === 0 ? (
-                <div className="mcp-agent-empty">
-                  暂无已安装的 Agent，请先到「Agent 管理」完成扫描
-                </div>
+                <div className="mcp-agent-empty">暂无已安装的 Agent，请先到「Agent」页完成扫描</div>
               ) : (
                 <div className="mcp-agent-grid">
                   {agents.map((agent) => {
@@ -1813,9 +1816,7 @@ export default function McpManage() {
                   : "将从下列勾选的 Agent 配置中删除每个选中 MCP 的对应条目，并更新其应用记录。"}
               </p>
               {agents.length === 0 ? (
-                <div className="mcp-agent-empty">
-                  暂无已安装的 Agent，请先到「Agent 管理」完成扫描
-                </div>
+                <div className="mcp-agent-empty">暂无已安装的 Agent，请先到「Agent」页完成扫描</div>
               ) : (
                 <div className="mcp-agent-grid">
                   {agents.map((agent) => {

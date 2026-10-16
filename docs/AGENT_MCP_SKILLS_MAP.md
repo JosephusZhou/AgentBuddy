@@ -359,9 +359,9 @@ if removeFromAgentConfigs:
 
 ---
 
-## 8. 项目级 MCP / Skills（项目 AI 配置页）
+## 8. 项目级 MCP / Skills（项目配置页）
 
-「项目 AI 配置」初始化（`init_project_config`）时，用户可从 AgentBuddy 已配置的 MCP / Skills 中勾选，
+「项目配置」初始化（`init_project_config`）时，用户可从 AgentBuddy 已配置的 MCP / Skills 中勾选，
 落盘到所选项目目录（与全局应用互不影响）。
 
 ### 8.1 项目级 MCP 目标文件（来自 `project_config::AGENT_SPECS`）
@@ -403,7 +403,7 @@ if removeFromAgentConfigs:
 | Gemini `httpUrl` | 与 UI `url` 字段名不一致 | `JsonGeminiMixed` 写器强制转换；headers 需实测 |
 | Codex Skills 双路径 | `~/.codex/skills` vs `~/.agents/skills` | 写本机已存在者；两者都无则写 `~/.codex/skills` |
 | Claude Code 大文件 | `~/.claude.json` 含大量状态字段 | 只改 `mcpServers` 键，独立方言 `ClaudeJsonUser` |
-| 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目；项目级写入由用户在「项目 AI 配置」页显式勾选触发 |
+| 项目级 MCP | 写项目会进 git / 需信任 | 全局应用默认不写项目；项目级写入由用户在「项目配置」页显式勾选触发 |
 | SSE 方言差异 | 各产品支持不一 | 能映射则映射，否则提示跳过 |
 | 密钥 | 配置中常含 token | AgentBuddy 永不日志打印 env/headers 值；API Key 经 `crypto::encrypt` 落 SQLite |
 | OpenCode JSONC | 注释 / 尾逗号 | `json5` 解析；重写 pretty JSON（注释不保留，会抛 warn 给用户） |

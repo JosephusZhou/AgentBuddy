@@ -350,7 +350,7 @@ pub fn upsert_provider(payload: AiProviderUpsertPayload) -> Result<AiProviderAct
         return Err("供应商 ID 不能为空".to_string());
     }
     if id == crate::codex_env::OFFICIAL_OAUTH_PROVIDER_ID {
-        return Err("该供应商 ID 保留给 Codex 官方 OAuth 登录，不能用于 AI 供应商".to_string());
+        return Err("该供应商 ID 保留给 Codex 官方 OAuth 登录，不能用于供应商".to_string());
     }
     if name.is_empty() {
         return Err("名称不能为空".to_string());

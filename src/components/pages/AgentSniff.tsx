@@ -328,7 +328,12 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">Agent管理</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              管理<span className="title-sep">/</span>
+            </span>
+            Agent
+          </h1>
           <div className="header-actions">
             <button
               className={`action-btn ${isSniffing ? "sniffing" : ""}`}

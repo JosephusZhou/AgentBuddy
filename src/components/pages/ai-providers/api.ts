@@ -1,4 +1,4 @@
-/** AI 供应商管理页的 Tauri 命令封装。 */
+/** 供应商管理页的 Tauri 命令封装。 */
 
 import type { AiProvider, AiProviderActionResult, AiProviderUpsertPayload } from "./types";
 
@@ -34,10 +34,10 @@ export async function invokeGetSecrets(id: string): Promise<string[]> {
 /**
  * 从 Base URL 拉取远端模型列表。
  *
- * **临时配置专用**：当 Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi）
- * 在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
+ * **临时配置专用**：当 Claude 环境 / Codex 环境 / OpenCode 配置、Pi 配置页
+ * 在用户不关联供应商库、手填 baseUrl + apiKey 时调用。
  *
- * **不**适用于 AI 供应商库（`ai_providers`）本身——后者以 `custom_models_json` 为
+ * **不**适用于供应商库（`ai_providers`）本身——后者以 `custom_models_json` 为
  * 唯一来源，**不**发起远程请求。
  *
  */

@@ -61,7 +61,7 @@ pub struct ClaudeEnvironment {
     /// settings.json → env.ANTHROPIC_DEFAULT_{TIER}_MODEL 中与主模型不同的档位值
     /// （haiku/sonnet/opus/fable），供编辑表单回填；相同或缺失的档不出现。
     pub model_tiers: std::collections::HashMap<String, String>,
-    /// 关联的 AI 供应商 ID（空串=未关联）。反向同步时按此查找环境。
+    /// 关联的供应商 ID（空串=未关联）。反向同步时按此查找环境。
     pub provider_id: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -106,7 +106,7 @@ pub struct ClaudeEnvUpsertPayload {
     pub model_sonnet: Option<String>,
     pub model_opus: Option<String>,
     pub model_fable: Option<String>,
-    /// 关联的 AI 供应商 ID。None = 不改动，空串 = 取消关联。
+    /// 关联的供应商 ID。None = 不改动，空串 = 取消关联。
     pub provider_id: Option<String>,
 }
 
@@ -166,7 +166,7 @@ pub struct ClaudeEnvClonePayload {
     /// When true, immediately write the shell alias into ~/.zshrc after creation.
     /// Defaults to false — alias管理默认保持独立一步，避免擅自改写 ~/.zshrc。
     pub install_alias: Option<bool>,
-    /// 关联的 AI 供应商 ID。空串或 None = 不关联。
+    /// 关联的供应商 ID。空串或 None = 不关联。
     pub provider_id: Option<String>,
 }
 
@@ -274,10 +274,10 @@ pub struct ClaudeEnvMcpStatusResult {
 
 /// Models exposed by an OpenAI-compatible endpoint configured for a Claude environment.
 ///
-/// 该结构是**临时配置**路径下的模型来源——当 Claude 环境 / Codex 环境 / 模型配置页
-/// （OpenCode / Pi）选择手填 baseUrl + apiKey 而非关联 AI 供应商库时，
+/// 该结构是**临时配置**路径下的模型来源——当 Claude 环境 / Codex 环境 / OpenCode 配置、
+/// Pi 配置页选择手填 baseUrl + apiKey 而非关联供应商库时，
 /// 通过远端拉取 `/v1/models` 填入。**不**适用于"软件内
-/// 已配置 AI 供应商"——后者以 `ai_providers.custom_models_json` 为唯一来源。
+/// 已配置供应商"——后者以 `ai_providers.custom_models_json` 为唯一来源。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeEnvRemoteModelsResult {
@@ -959,7 +959,7 @@ fn move_environment_dir(src: &Path, dst: &Path) -> Result<EnvMoveOutcome, String
 }
 
 /// 四档模型覆盖：写入 ANTHROPIC_DEFAULT_{TIER}_MODEL / _NAME 时按档取值，
-/// 留空的档回退到主模型（ANTHROPIC_MODEL）。与 AI 供应商库的档位语义一致。
+/// 留空的档回退到主模型（ANTHROPIC_MODEL）。与供应商库的档位语义一致。
 #[derive(Debug, Clone, Default)]
 pub struct ModelTierOverrides {
     pub haiku: String,
@@ -2786,9 +2786,9 @@ pub fn get_mcp_sync_status() -> Result<ClaudeEnvMcpStatusResult, String> {
 
 // 远端拉取实现（fetch_remote_models / models_endpoint_urls /
 // parse_remote_model_ids）仅服务于"临时配置"路径：
-// Claude 环境 / Codex 环境 / 模型配置页（OpenCode / Pi）当用户不关联
-// AI 供应商库、手填 baseUrl + apiKey 时使用。本函数**不**被 AI 供应商库本身
-// （`ai_providers`）调用——AI 供应商库以 `custom_models_json` 为唯一来源。
+// Claude 环境 / Codex 环境 / OpenCode 配置、Pi 配置页当用户不关联
+// 供应商库、手填 baseUrl + apiKey 时使用。本函数**不**被供应商库本身
+// （`ai_providers`）调用——供应商库以 `custom_models_json` 为唯一来源。
 
 fn models_endpoint_urls(base_url: &str) -> Result<Vec<String>, String> {
     let base = base_url.trim().trim_end_matches('/');

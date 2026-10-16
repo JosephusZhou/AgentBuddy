@@ -92,7 +92,7 @@ const IconChevron = ({ open }: { open?: boolean }) => (
   />
 );
 
-/* ===== AI 供应商选择下拉（Codex 环境专用：仅 OpenAI / 通用类型） ===== */
+/* ===== 供应商选择下拉（Codex 环境专用：仅 OpenAI / 通用类型） ===== */
 
 const OFFICIAL_OAUTH_PROVIDER: AiProvider = {
   id: OFFICIAL_OAUTH_PROVIDER_ID,
@@ -178,7 +178,7 @@ const CodexProviderSelect = ({
         </span>
       </button>
       {open && (
-        <div className="app-select-menu" role="listbox" aria-label="AI 供应商列表">
+        <div className="app-select-menu" role="listbox" aria-label="供应商列表">
           {allowClear && value && (
             <button
               type="button"
@@ -506,10 +506,10 @@ export default function CodexEnv() {
   };
 
   // 模型列表两层来源：
-  // 1. 优先：所选 AI 供应商的 `customModels`（已在打开表单时同步装入 `cloneRemoteModels`
-  //    / `editRemoteModels`）。这是"已配置 AI 供应商"路径，**不**触发任何远端请求。
+  // 1. 优先：所选供应商的 `customModels`（已在打开表单时同步装入 `cloneRemoteModels`
+  //    / `editRemoteModels`）。这是"已配置供应商"路径，**不**触发任何远端请求。
   // 2. 回退：当前环境手填 baseUrl + apiKey 时，点击"拉取列表"按钮调用
-  //    `invokeFetchRemoteModels` 远端拉取（这是"临时配置"路径，AI 供应商库规则不适用）。
+  //    `invokeFetchRemoteModels` 远端拉取（这是"临时配置"路径，供应商库规则不适用）。
   const fetchModels = useCallback(
     async (mode: "clone" | "edit") => {
       const baseUrl = mode === "clone" ? cloneBaseUrl : editBaseUrl;
@@ -530,8 +530,8 @@ export default function CodexEnv() {
         } else {
           setStatusMsg(
             isRouteAggregationProvider(provider.id)
-              ? "路由聚合暂无可用模型：请先在路由聚合页勾选供应商，并在 AI 供应商页为其配置自定义模型"
-              : "该供应商未配置自定义模型，请先在 AI 供应商页添加",
+              ? "路由聚合暂无可用模型：请先在路由聚合页勾选供应商，并在供应商页为其配置自定义模型"
+              : "该供应商未配置自定义模型，请先在供应商页添加",
           );
         }
         return;
@@ -964,7 +964,12 @@ export default function CodexEnv() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">Codex 环境</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              环境与配置<span className="title-sep">/</span>
+            </span>
+            Codex 环境
+          </h1>
           <div className="header-actions">
             {/* 从右到左：复制、扫描 */}
             <button
@@ -1039,7 +1044,7 @@ export default function CodexEnv() {
             通过 <code>CODEX_HOME</code> 隔离多套 Codex CLI 配置目录（主要服务 CLI）。复制始终包含
             config.toml，AGENTS.md / skills 可在新建时勾选，不含 auth / 会话。MCP 源为默认{" "}
             <code>~/.codex/config.toml</code> 的 <code>[mcp_servers]</code>
-            ；可用「同步 MCP」覆盖写入各自定义环境。全局 MCP 管理页仍只写默认根。
+            ；可用「同步 MCP」覆盖写入各自定义环境。全局 MCP 页仍只写默认根。
           </div>
         )}
 

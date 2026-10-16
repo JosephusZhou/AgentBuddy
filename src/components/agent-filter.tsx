@@ -1,4 +1,4 @@
-/** Agent 筛选 chips（单选）：MCP 管理与 Skills 管理页共用。
+/** Agent 筛选 chips（单选）：MCP 与 Skills 页共用。
  * 传入的 items 应已过滤为「本机扫描到已存在 + 用户手动添加」的 Agent。 */
 
 import { getAgentIcon } from "./agent-icons";

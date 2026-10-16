@@ -132,7 +132,7 @@ function TypeCheckboxes({
 export default function AiProviders() {
   const [providers, setProviders] = useState<AiProvider[]>([]);
   const [loaded, setLoaded] = useState(false);
-  // 搜索（250ms 防抖）与类型筛选，交互与 Skills 管理页一致
+  // 搜索（250ms 防抖）与类型筛选，交互与 Skills 页一致
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "anthropic" | "openai">("all");
@@ -201,7 +201,7 @@ export default function AiProviders() {
       const rows = await invokeList();
       setProviders(rows);
     } catch (err) {
-      setStatusMsg(`加载 AI 供应商失败：${err instanceof Error ? err.message : String(err)}`);
+      setStatusMsg(`加载供应商失败：${err instanceof Error ? err.message : String(err)}`);
       setProviders([]);
     } finally {
       setLoaded(true);
@@ -214,7 +214,7 @@ export default function AiProviders() {
     void loadProviders();
   }, [loadProviders]);
 
-  // 搜索防抖（与 Skills 管理页一致：250ms，清空立即生效）
+  // 搜索防抖（与 Skills 页一致：250ms，清空立即生效）
   useEffect(() => {
     const query = searchInput.trim().toLocaleLowerCase();
     if (!query) {
@@ -703,9 +703,14 @@ export default function AiProviders() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">AI供应商</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              模型<span className="title-sep">/</span>
+            </span>
+            供应商
+          </h1>
           <div className="header-actions">
-            <button className="action-btn" data-tooltip="添加 AI 供应商" onClick={openAdd}>
+            <button className="action-btn" data-tooltip="添加供应商" onClick={openAdd}>
               <IconPlus />
             </button>
           </div>
@@ -795,7 +800,7 @@ export default function AiProviders() {
         {!loaded ? null : providers.length === 0 ? (
           <div className="empty-state">
             <IconEmpty />
-            <div className="empty-state-text">暂无 AI 供应商，点击右上角添加</div>
+            <div className="empty-state-text">暂无供应商，点击右上角添加</div>
           </div>
         ) : filteredProviders.length === 0 ? (
           <div className="empty-state skill-filter-empty">
@@ -891,7 +896,7 @@ export default function AiProviders() {
       <div className={`modal-overlay ${showForm ? "visible" : ""}`} {...formDismiss}>
         <div className="modal ai-provider-modal">
           <div className="modal-header">
-            <h2 className="modal-title">{editingId ? "编辑 AI 供应商" : "添加 AI 供应商"}</h2>
+            <h2 className="modal-title">{editingId ? "编辑供应商" : "添加供应商"}</h2>
             <button
               className="modal-close"
               onClick={() => !isSaving && setShowForm(false)}

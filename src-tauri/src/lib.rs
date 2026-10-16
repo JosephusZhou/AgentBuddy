@@ -799,9 +799,9 @@ async fn get_claude_env_mcp_status() -> Result<claude_env::ClaudeEnvMcpStatusRes
         .map_err(|e| format!("读取 MCP 同步状态任务失败: {}", e))?
 }
 
-/// 远端拉取模型列表。仅服务于"临时配置"路径：Claude 环境 / Codex 环境 / 模型配置页
-/// （OpenCode / Pi）在用户不关联 AI 供应商库、手填 baseUrl + apiKey 时调用。
-/// **不**适用于"已配置 AI 供应商"——后者以 `custom_models_json` 为唯一来源。
+/// 远端拉取模型列表。仅服务于"临时配置"路径：Claude 环境 / Codex 环境 / OpenCode 配置、
+/// Pi 配置页在用户不关联供应商库、手填 baseUrl + apiKey 时调用。
+/// **不**适用于"已配置供应商"——后者以 `custom_models_json` 为唯一来源。
 #[tauri::command]
 async fn fetch_claude_env_remote_models(
     base_url: String,
@@ -1075,10 +1075,10 @@ async fn fetch_codex_env_remote_models(
 /* ===== AI providers (上游模型供应商库) ===== */
 
 /// 写操作后异步触发路由聚合内存池刷新，避免「刚加/改了供应商 → 下游
-/// `/v1/models` 或模型配置页的虚拟供应商看到的还是旧 pool」这种隐性脏数据。
+/// `/v1/models` 或 OpenCode 配置、Pi 配置页的虚拟供应商看到的还是旧 pool」这种隐性脏数据。
 ///
 /// 用后台 spawn 而不是 inline await：
-/// - 不阻塞 AI 供应商主命令的返回（用户操作的 UX 优先）；
+/// - 不阻塞供应商主命令的返回（用户操作的 UX 优先）；
 /// - 即使刷新失败也不影响供应商写入的最终一致性，下次任一相关命令会兜底刷一次。
 fn spawn_route_aggregation_pool_refresh(
     router: std::sync::Arc<route_aggregation::provider_router::ProviderRouter>,
@@ -1099,7 +1099,7 @@ fn spawn_route_aggregation_pool_refresh(
 async fn list_ai_providers() -> Result<Vec<ai_provider::AiProvider>, String> {
     tauri::async_runtime::spawn_blocking(ai_provider::list_providers)
         .await
-        .map_err(|e| format!("列出 AI 供应商任务失败: {e}"))?
+        .map_err(|e| format!("列出供应商任务失败: {e}"))?
 }
 
 #[tauri::command]
@@ -1110,7 +1110,7 @@ async fn upsert_ai_provider(
     let result =
         tauri::async_runtime::spawn_blocking(move || ai_provider::upsert_provider(payload))
             .await
-            .map_err(|e| format!("保存 AI 供应商任务失败: {e}"))??;
+            .map_err(|e| format!("保存供应商任务失败: {e}"))??;
     spawn_route_aggregation_pool_refresh(state.provider_router.clone());
     Ok(result)
 }
@@ -1122,7 +1122,7 @@ async fn delete_ai_provider(
 ) -> Result<ai_provider::AiProviderActionResult, String> {
     let result = tauri::async_runtime::spawn_blocking(move || ai_provider::delete_provider(id))
         .await
-        .map_err(|e| format!("删除 AI 供应商任务失败: {e}"))??;
+        .map_err(|e| format!("删除供应商任务失败: {e}"))??;
     spawn_route_aggregation_pool_refresh(state.provider_router.clone());
     Ok(result)
 }
@@ -1452,7 +1452,7 @@ fn reveal_route_aggregation_log_file(
 
 /// Get the effective model list of a provider for the route aggregation UI.
 ///
-/// 来源唯一：`ai_providers.custom_models_json`（用户在 AI 供应商编辑页手动配置的
+/// 来源唯一：`ai_providers.custom_models_json`（用户在供应商编辑页手动配置的
 /// 模型列表）。即使该列表为空也**不**再向供应商远端 /v1/models 拉取——配置侧的
 /// 自定义列表即为对外暴露的全部模型。
 #[tauri::command]
@@ -1477,7 +1477,7 @@ async fn get_route_provider_models(provider_id: String) -> Result<Vec<String>, S
 ///
 /// 路由聚合作为特殊供应商，其对外模型列表 = 所有已勾选（启用）供应商的
 /// `custom_models_json` 有效模型 ID 的去重并集，与 `GET /v1/models` 暴露的
-/// 列表完全一致。唯一来源仍是 AI 供应商编辑页的自定义列表，**不**向远端拉取。
+/// 列表完全一致。唯一来源仍是供应商编辑页的自定义列表，**不**向远端拉取。
 #[tauri::command]
 async fn get_route_aggregation_models(
     state: tauri::State<'_, route_aggregation::RouteAggregationState>,
@@ -1865,7 +1865,7 @@ pub fn run() {
             });
 
             // 清除已从注册表移除的 agent 的历史扫描缓存（save_agents 只 upsert 不删除，
-            // 否则 Agent 管理页会一直展示 kiro / deveco-code 等已下线的 agent）。
+            // 否则 Agent 页会一直展示 kiro / deveco-code 等已下线的 agent）。
             if let Err(err) = db::purge_removed_agents(&["kiro", "deveco-code"]) {
                 eprintln!("[octopus] failed to purge removed agents: {}", err);
             }

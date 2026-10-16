@@ -1217,7 +1217,12 @@ export default function SkillsManage() {
     <>
       <div className="content-header">
         <div className="content-header-bar">
-          <h1 className="content-title">Skills 管理</h1>
+          <h1 className="content-title">
+            <span className="title-crumb">
+              管理<span className="title-sep">/</span>
+            </span>
+            Skills
+          </h1>
           <div className="header-actions">
             {/* 从右到左：添加、扫描、检查更新、从 CC Switch 迁移、批量管理 */}
             {(updateAvailableCount > 0 || batchUpdatingScope === "available") && (
@@ -2501,7 +2506,7 @@ export default function SkillsManage() {
                 </p>
                 {agents.length === 0 ? (
                   <div className="agent-pick-empty">
-                    暂无已安装的 Agent，请先到「Agent 管理」完成扫描
+                    暂无已安装的 Agent，请先到「Agent」页完成扫描
                   </div>
                 ) : (
                   <div className="agent-pick-grid">
@@ -2923,7 +2928,7 @@ export default function SkillsManage() {
               </p>
               {agents.length === 0 ? (
                 <div className="agent-pick-empty">
-                  暂无已安装的 Agent，请先到「Agent 管理」完成扫描
+                  暂无已安装的 Agent，请先到「Agent」页完成扫描
                 </div>
               ) : (
                 <div className="agent-pick-grid">

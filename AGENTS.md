@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Octopus 是一个 Tauri 2 桌面应用，用于发现本机 AI coding agent，并管理 MCP、Skills、
-多环境、模型配置、供应商、项目配置和备份。
+多环境、OpenCode配置、Pi配置、供应商、项目配置和备份。
 
 ## 技术栈与命令
 
@@ -53,7 +53,7 @@ src-tauri/src/
   pi_model_config.rs              Pi 模型和 auth
   agent_model_config.rs           OpenCode / Pi 的统一模型分派
   project_config.rs               项目级 AI 骨架、MCP 和共享 Skills
-  ai_provider.rs                  AI 供应商、加密 API Key 和 custom models
+  ai_provider.rs                  供应商、加密 API Key 和 custom models
   agent_open.rs                  打开 Agent 配置文件的 command
   db.rs                            SQLite 持久化
   config.rs                        app config.json、主题、代理和 secretsKey
@@ -135,7 +135,7 @@ OpenCode JSONC 用 json5 读取后写为标准 JSON；扫描以磁盘状态更�
   environments、AI providers 和 `provider_route_toggle`。
 - `config.json` 保存主题、备份、网络代理和私有 `secretsKey`；外部 HTTP（Skills、WebDAV、
   MCP probe、Models.dev、OpenCode catalog 等）统一经过代理配置。
-- 已保存 AI 供应商的 `custom_models_json` 是运行时可见模型的唯一来源；路由池、provider
+- 已保存供应商的 `custom_models_json` 是运行时可见模型的唯一来源；路由池、provider
   状态、`GET /v1/models` 和 `get_route_provider_models` 都不得自动请求供应商模型列表。
 - 编辑表单可显式执行一次远端模型拉取作为候选；未关联供应商的临时环境配置也允许远端拉取。
 
@@ -201,8 +201,8 @@ CLIProxyAPI 只提供行为同步参考，不是运行时依赖。上游变更�
 
 ## 前端视图
 
-主界面包含 Agent 发现、MCP 管理、Skills 管理、Claude 环境、Codex 环境、OpenCode 配置、AI
-供应商、路由聚合、项目 AI 配置和备份管理；设置界面包含偏好、网络代理和 WebDAV。
+主界面包含 Agent、MCP、Skills、Claude 环境、Codex 环境、OpenCode配置、Pi配置、
+供应商、路由聚合、项目配置和备份管理；设置界面包含偏好、网络代理和 WebDAV。
 
 ## 修改规则
 
