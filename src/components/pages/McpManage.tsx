@@ -852,9 +852,6 @@ export default function McpManage() {
     for (const id of validSelectedIds) if (!filteredIdSet.has(id)) n += 1;
     return n;
   }, [validSelectedIds, filteredIdSet]);
-  // 当前筛选内是否已全部选中（用于全选/取消全选切换）
-  const allFilteredSelected =
-    filteredServers.length > 0 && filteredServers.every((s) => selectedIds.has(s.id));
 
   const exitBatchMode = useCallback(() => {
     setBatchMode(false);
@@ -1042,8 +1039,6 @@ export default function McpManage() {
     }
   }, [isBatchRunning, servers, validSelectedIds, batchApplyAgents, batchApplyMode, exitBatchMode]);
 
-  const typeLabel = (t: McpType) => t.toUpperCase();
-
   return (
     <>
       <div className="content-header">
@@ -1225,14 +1220,11 @@ export default function McpManage() {
                             <CheckGlyph />
                           </label>
                         )}
-                        <div className="mcp-card-icon">
-                          {server.title.slice(0, 2).toUpperCase()}
-                        </div>
                         <div className="mcp-card-main">
                           <div className="mcp-card-title-row">
                             <span className="mcp-card-title">{server.title}</span>
-                            <span className={`mcp-type-badge mcp-type-${server.type}`}>
-                              {typeLabel(server.type)}
+                            <span className={`skill-tag mcp-tag-${server.type}`}>
+                              {server.type}
                             </span>
                           </div>
                         </div>
@@ -1287,23 +1279,17 @@ export default function McpManage() {
 
       {/* ===== 批量操作条（批量模式下浮出） ===== */}
       {batchMode && servers.length > 0 && (
-        <div className="skill-batch-bar">
+        <div className="skill-batch-bar mcp-batch-bar">
           <div className="skill-batch-bar-left">
             <button
               type="button"
               className="mcp-agent-action"
-              onClick={toggleSelectAllFiltered}
-              disabled={isBatchRunning || filteredServers.length === 0}
+              onClick={validSelectedIds.size > 0 ? clearSelection : toggleSelectAllFiltered}
+              disabled={
+                isBatchRunning || (validSelectedIds.size === 0 && filteredServers.length === 0)
+              }
             >
-              {allFilteredSelected ? "取消全选" : "全选"}
-            </button>
-            <button
-              type="button"
-              className="mcp-agent-action"
-              onClick={clearSelection}
-              disabled={isBatchRunning || validSelectedIds.size === 0}
-            >
-              清除
+              {validSelectedIds.size > 0 ? "清除" : "全选"}
             </button>
             <span className="skill-batch-count">
               已选 <strong>{validSelectedIds.size}</strong> / {servers.length}
@@ -1388,9 +1374,6 @@ export default function McpManage() {
                     className={`mcp-type-option ${mcpType === opt.value ? "selected" : ""}`}
                     onClick={() => setMcpType(opt.value)}
                   >
-                    <div className="pref-radio">
-                      <div className="pref-radio-dot" />
-                    </div>
                     <div className="mcp-type-option-content">
                       <div className="mcp-type-option-label">{opt.label}</div>
                       <div className="mcp-type-option-desc">{opt.desc}</div>
@@ -1576,18 +1559,13 @@ export default function McpManage() {
                     <button
                       type="button"
                       className="mcp-agent-action"
-                      onClick={selectAllAgents}
-                      disabled={selectedAgents.size === agents.length}
+                      onClick={
+                        selectedAgents.size === agents.length
+                          ? clearSelectedAgents
+                          : selectAllAgents
+                      }
                     >
-                      全选
-                    </button>
-                    <button
-                      type="button"
-                      className="mcp-agent-action"
-                      onClick={clearSelectedAgents}
-                      disabled={selectedAgents.size === 0}
-                    >
-                      清除
+                      {selectedAgents.size === agents.length ? "清除" : "全选"}
                     </button>
                   </div>
                 )}
@@ -1609,9 +1587,6 @@ export default function McpManage() {
                           {getAgentIcon(agent.name) ?? agent.icon}
                         </span>
                         <span className="mcp-agent-pick-name">{agent.display_name}</span>
-                        <span className={`mcp-agent-check ${selected ? "checked" : ""}`}>
-                          {selected ? "✓" : ""}
-                        </span>
                       </button>
                     );
                   })}
@@ -1794,18 +1769,14 @@ export default function McpManage() {
                     <button
                       type="button"
                       className="mcp-agent-action"
-                      onClick={selectAllBatchApplyAgents}
-                      disabled={isBatchRunning || batchApplyAgents.size === agents.length}
+                      onClick={
+                        batchApplyAgents.size === agents.length
+                          ? clearBatchApplyAgents
+                          : selectAllBatchApplyAgents
+                      }
+                      disabled={isBatchRunning}
                     >
-                      全选
-                    </button>
-                    <button
-                      type="button"
-                      className="mcp-agent-action"
-                      onClick={clearBatchApplyAgents}
-                      disabled={isBatchRunning || batchApplyAgents.size === 0}
-                    >
-                      清除
+                      {batchApplyAgents.size === agents.length ? "清除" : "全选"}
                     </button>
                   </div>
                 )}
@@ -1833,9 +1804,6 @@ export default function McpManage() {
                           {getAgentIcon(agent.name) ?? agent.icon}
                         </span>
                         <span className="mcp-agent-pick-name">{agent.display_name}</span>
-                        <span className={`mcp-agent-check ${selected ? "checked" : ""}`}>
-                          {selected ? "✓" : ""}
-                        </span>
                       </button>
                     );
                   })}

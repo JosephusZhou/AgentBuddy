@@ -2263,15 +2263,6 @@ a[href]:focus-visible {
   border-color: var(--seed-input-focus);
   background: var(--seed-active-bg);
 }
-.mcp-type-option .pref-radio {
-  margin-top: 2px;
-}
-.mcp-type-option.selected .pref-radio {
-  border-color: var(--seed-primary);
-}
-.mcp-type-option.selected .pref-radio-dot {
-  transform: scale(1);
-}
 .mcp-type-option-content {
   flex: 1;
   min-width: 0;
@@ -2608,7 +2599,7 @@ a[href]:focus-visible {
 }
 .mcp-card-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 .mcp-card-icon {
@@ -2639,6 +2630,7 @@ a[href]:focus-visible {
   font-size: var(--text-base);
   font-weight: 500;
   color: var(--seed-fg);
+  line-height: 1.35;
 }
 .mcp-type-badge {
   font-size: var(--text-xs);
@@ -2671,13 +2663,9 @@ a[href]:focus-visible {
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
-.mcp-card:hover .mcp-card-actions {
-  opacity: 1;
-}
-.mcp-card-action {
+/* MCP 卡片内删除按钮：父级已常显，恢复按钮自身可见（.btn-delete 全局默认 opacity: 0） */
+.mcp-card-actions .btn-delete {
   opacity: 1;
 }
 
@@ -2692,8 +2680,8 @@ a[href]:focus-visible {
   border-color: var(--seed-primary);
   background: var(--seed-active-bg);
 }
-/* 卡片内复选框：顶部对齐标题行 */
-.mcp-card-check {
+/* 卡片内复选框：与标题行垂直居中对齐（spec 高于 .ui-check 默认 16px 上边距，防止被覆盖） */
+.mcp-card .mcp-card-check {
   margin-top: 0;
   flex-shrink: 0;
 }
@@ -2960,6 +2948,10 @@ a[href]:focus-visible {
   font-size: var(--text-sm);
   color: var(--seed-muted);
 }
+/* MCP 批量条：左侧按钮（全选/清除）向右让出一段间距，不与底栏左缘贴齐 */
+.mcp-batch-bar .skill-batch-bar-left {
+  padding-left: 8px;
+}
 
 /* 批量删除确认里的技能名标签列表 */
 .skill-batch-namelist {
@@ -3176,6 +3168,22 @@ a[href]:focus-visible {
   color: var(--seed-primary);
   border-color: color-mix(in srgb, var(--seed-primary) 22%, transparent);
   font-variant-numeric: tabular-nums;
+}
+/* MCP 类型标签（MCP 管理页）：沿用 skill-tag 胶囊样式，按类型配色 */
+.mcp-tag-stdio {
+  background: color-mix(in srgb, var(--seed-primary) 12%, transparent);
+  color: var(--seed-active-fg);
+  border-color: color-mix(in srgb, var(--seed-primary) 25%, transparent);
+}
+.mcp-tag-http {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+.mcp-tag-sse {
+  background: rgba(168, 85, 247, 0.1);
+  color: #a855f7;
+  border-color: rgba(168, 85, 247, 0.25);
 }
 /* 可点击的来源徽标：布局在此，配色沿用 skill-tag-github / skill-tag-gitcode */
 .skill-source-link {
@@ -4249,7 +4257,10 @@ a[href]:focus-visible {
   flex-direction: column;
   gap: 10px;
 }
+/* OpenCode / Pi 配置页供应商卡片头部含多行 meta，保持顶部对齐的原有布局，
+   不受 MCP 管理页 .mcp-card-header 居中改动影响 */
 .oc-provider-card .mcp-card-header {
+  align-items: flex-start;
   margin-bottom: 10px;
 }
 /* OpenCode / Pi 配置页的供应商操作始终可见，便于直接发现添加/编辑/删除入口。 */
