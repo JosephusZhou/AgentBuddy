@@ -122,6 +122,23 @@ async fn open_agent_config_file(
         .map_err(|e| format!("打开配置文件任务失败: {e}"))?
 }
 
+#[tauri::command]
+async fn read_agent_prompt(name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_open::read_agent_prompt(&name))
+        .await
+        .map_err(|e| format!("读取全局提示词任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn write_agent_prompt(
+    name: String,
+    content: String,
+) -> Result<agent_open::AgentOpenResult, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_open::write_agent_prompt(&name, &content))
+        .await
+        .map_err(|e| format!("保存全局提示词任务失败: {e}"))?
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentConfigStat {
@@ -170,6 +187,11 @@ struct AgentDetail {
     config_dir: Option<String>,
     mcp_file: Option<String>,
     settings_file: Option<String>,
+    prompt_file: Option<String>,
+    /// 该 Agent 的 MCP 是否由 Octopus 统一管理（false 时详情页隐藏 MCP 板块）。
+    mcp_supported: bool,
+    /// 该 Agent 是否支持 Skills（false 时详情页隐藏 Skills 板块）。
+    skills_supported: bool,
     mcps: Vec<AgentMcpInfo>,
     skills: Vec<skills::AgentSkillInfo>,
 }
@@ -195,18 +217,30 @@ async fn get_agent_detail(name: String) -> Result<AgentDetail, String> {
 
         let targets = agent_open::open_targets(&name);
 
-        let mcps = mcp_config::list_agent_mcp_entries(&name)
-            .into_iter()
-            .map(|(title, draft)| AgentMcpInfo {
-                title,
-                transport: draft.transport,
-                command: draft.command,
-                args: draft.args,
-                url: draft.url,
-            })
-            .collect();
+        let (mcp_supported, skills_supported) = crate::agents::find(&name)
+            .map(|spec| (spec.mcp_managed, spec.skills_supported))
+            .unwrap_or((false, false));
 
-        let skills = skills::list_agent_skills(&name);
+        let mcps = if mcp_supported {
+            mcp_config::list_agent_mcp_entries(&name)
+                .into_iter()
+                .map(|(title, draft)| AgentMcpInfo {
+                    title,
+                    transport: draft.transport,
+                    command: draft.command,
+                    args: draft.args,
+                    url: draft.url,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let skills = if skills_supported {
+            skills::list_agent_skills(&name)
+        } else {
+            Vec::new()
+        };
 
         AgentDetail {
             name,
@@ -218,6 +252,9 @@ async fn get_agent_detail(name: String) -> Result<AgentDetail, String> {
             config_dir: targets.config_dir,
             mcp_file: targets.mcp_file,
             settings_file: targets.settings_file,
+            prompt_file: targets.prompt_file,
+            mcp_supported,
+            skills_supported,
             mcps,
             skills,
         }
@@ -1699,6 +1736,8 @@ pub fn run() {
             agent_open_targets,
             reveal_agent_config_dir,
             open_agent_config_file,
+            read_agent_prompt,
+            write_agent_prompt,
             apply_mcp_to_agents,
             remove_mcp_from_agents,
             sniff_mcp_servers,

@@ -1766,6 +1766,39 @@ a[href]:focus-visible {
   margin: 0;
 }
 
+/* 详情页头部：返回按钮 + 面包屑标题 左侧对齐排列 */
+.content-header-bar.detail-header-bar {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+/* 返回按钮：无边框无背景，仅箭头图标 */
+.back-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--seed-muted);
+  cursor: pointer;
+  border-radius: var(--seed-radius);
+  flex-shrink: 0;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.back-btn:hover {
+  background: var(--seed-hover);
+  color: var(--seed-fg);
+}
+.back-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* ===== CONTENT HEADER ACTIONS ===== */
 .header-actions {
   display: flex;
@@ -2069,6 +2102,36 @@ a[href]:focus-visible {
   font-size: var(--text-sm);
   color: var(--seed-muted);
   opacity: 0.8;
+}
+
+/* 全局提示词编辑器 */
+.prompt-editor {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px 14px;
+  border: 1px solid var(--seed-border);
+  border-radius: var(--seed-radius);
+  background: var(--seed-surface);
+  color: var(--seed-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+.prompt-editor:focus {
+  border-color: var(--seed-primary);
+}
+.prompt-editor::placeholder {
+  color: var(--seed-muted);
+  opacity: 0.7;
+}
+.prompt-editor-path {
+  margin-top: 6px;
+  font-size: var(--text-xs);
+  color: var(--seed-muted);
 }
 .agent-detail-items {
   display: flex;

@@ -18,6 +18,9 @@ pub struct AgentOpenTargets {
     pub mcp_file: Option<String>,
     /// Main settings file when it is distinct from the MCP file (today: claude-code).
     pub settings_file: Option<String>,
+    /// Global prompt file (CLAUDE.md / AGENTS.md / GEMINI.md) inside the config dir.
+    /// None for agents that don't support global prompt editing.
+    pub prompt_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,10 +136,19 @@ pub fn open_targets(name: &str) -> AgentOpenTargets {
         Some(settings.to_string_lossy().to_string())
     });
 
+    // Global prompt file: config_dir + prompt_file name from registry.
+    let prompt_file = config_dir.as_ref().and_then(|dir| {
+        crate::agents::find(name).and_then(|spec| {
+            spec.prompt_file
+                .map(|fname| Path::new(dir).join(fname).to_string_lossy().to_string())
+        })
+    });
+
     AgentOpenTargets {
         config_dir,
         mcp_file,
         settings_file,
+        prompt_file,
     }
 }
 
@@ -184,6 +196,56 @@ pub fn open_config_file(name: String, kind: String) -> Result<AgentOpenResult, S
         }
     };
     open_existing_path(&path, label)
+}
+
+/// Resolve the global prompt file path for `name`.
+/// Returns Err when the agent has no known prompt file.
+fn resolve_prompt_path(name: &str) -> Result<PathBuf, String> {
+    let targets = open_targets(name);
+    let path = targets
+        .prompt_file
+        .ok_or_else(|| format!("Agent「{name}」不支持全局提示词编辑"))?;
+    Ok(PathBuf::from(path))
+}
+
+/// Read the global prompt file content for `name`.
+/// Returns empty string when the file does not exist yet.
+pub fn read_agent_prompt(name: &str) -> Result<String, String> {
+    let path = resolve_prompt_path(name)?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("读取全局提示词失败: {e}"))
+}
+
+/// Write the global prompt file content for `name`.
+/// Creates parent dirs and the file itself if missing.
+/// Uses temp-file + rename for atomic write.
+pub fn write_agent_prompt(name: &str, content: &str) -> Result<AgentOpenResult, String> {
+    let path = resolve_prompt_path(name)?;
+
+    // Ensure parent directory exists.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+
+    // Atomic write: temp file in same dir + rename.
+    let tmp = path.with_extension(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!("{e}.tmp"))
+            .unwrap_or_else(|| "tmp".to_string()),
+    );
+    std::fs::write(&tmp, content).map_err(|e| format!("写入临时文件失败: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("替换提示词文件失败: {e}"))?;
+
+    Ok(AgentOpenResult {
+        ok: true,
+        message: format!(
+            "已保存全局提示词: {}",
+            display_path(&path.to_string_lossy())
+        ),
+    })
 }
 
 #[cfg(test)]

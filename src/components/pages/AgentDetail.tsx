@@ -4,11 +4,11 @@ import {
   ChevronRight,
   FileCog,
   FileJson,
+  FileText,
   FolderOpen,
   Puzzle,
   Sparkles,
 } from "lucide-react";
-import { getAgentIcon } from "../agent-icons";
 import { Toast } from "@/components/Toast";
 import { useStatusMessage } from "@/lib/useStatusMessage";
 
@@ -38,6 +38,9 @@ interface AgentDetailData {
   configDir: string | null;
   mcpFile: string | null;
   settingsFile: string | null;
+  promptFile: string | null;
+  mcpSupported: boolean;
+  skillsSupported: boolean;
   mcps: AgentMcpInfo[];
   skills: AgentSkillInfo[];
 }
@@ -52,7 +55,6 @@ export interface AgentDetailProps {
   name: string;
   /** Display name fallback while the detail loads. */
   displayName: string;
-  icon: string;
   onBack: () => void;
   /** 跳转到 MCP 页（缺省时隐藏入口） */
   onManageMcps?: () => void;
@@ -78,7 +80,6 @@ function displayPath(path: string | null | undefined): string {
 export default function AgentDetail({
   name,
   displayName,
-  icon,
   onBack,
   onManageMcps,
   onManageSkills,
@@ -87,6 +88,7 @@ export default function AgentDetail({
   const [loadError, setLoadError] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useStatusMessage();
+  const [promptContent, setPromptContent] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +96,17 @@ export default function AgentDetail({
       try {
         const { invoke } = await import("@tauri-apps/api/core");
         const data = await (invoke("get_agent_detail", { name }) as Promise<AgentDetailData>);
-        if (!cancelled) setDetail(data);
+        if (cancelled) return;
+        setDetail(data);
+        // Load global prompt content if the agent supports it.
+        if (data.promptFile) {
+          try {
+            const content = await invoke("read_agent_prompt", { name });
+            if (!cancelled) setPromptContent(content as string);
+          } catch {
+            // Prompt read failure is non-fatal; leave empty.
+          }
+        }
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
       }
@@ -146,6 +158,16 @@ export default function AgentDetail({
     [name, runOpen],
   );
 
+  const handleSavePrompt = useCallback(() => {
+    void runOpen("prompt", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke("write_agent_prompt", {
+        name,
+        content: promptContent,
+      }) as Promise<AgentOpenResult>;
+    });
+  }, [name, promptContent, runOpen]);
+
   const title = detail?.displayName || displayName;
   const installPaths = detail?.installPaths ?? [];
   const configDirs = detail?.configDirs ?? [];
@@ -161,10 +183,10 @@ export default function AgentDetail({
   return (
     <>
       <div className="content-header">
-        <div className="content-header-bar">
+        <div className="content-header-bar detail-header-bar">
           <button
             type="button"
-            className="action-btn"
+            className="back-btn"
             data-tooltip="返回 Agent 列表"
             data-tooltip-align="start"
             aria-label="返回 Agent 列表"
@@ -175,6 +197,9 @@ export default function AgentDetail({
           <h1 className="content-title">
             <span className="title-crumb">
               管理<span className="title-sep">/</span>
+            </span>
+            <span className="title-crumb">
+              Agent<span className="title-sep">/</span>
             </span>
             {title}
           </h1>
@@ -188,20 +213,6 @@ export default function AgentDetail({
 
         {detail && (
           <div className="agent-detail">
-            {/* ===== 概览 ===== */}
-            <div className="agent-card">
-              <div className="agent-card-header">
-                <div className={`agent-icon ${detail.found ? "found" : ""}`}>
-                  {getAgentIcon(detail.name) ?? icon}
-                </div>
-                <div className="agent-name">{title}</div>
-                <span className="agent-status">
-                  <span className={`status-dot ${detail.found ? "connected" : "disconnected"}`} />
-                  {detail.found ? "已安装" : "未找到"}
-                </span>
-              </div>
-            </div>
-
             {/* ===== 路径信息 ===== */}
             <section className="agent-detail-section">
               <h2 className="agent-detail-section-title">路径信息</h2>
@@ -282,81 +293,118 @@ export default function AgentDetail({
               </div>
             </section>
 
-            {/* ===== MCP 列表 ===== */}
-            <section className="agent-detail-section">
-              <h2 className="agent-detail-section-title">
-                <Puzzle size={14} strokeWidth={1.8} />
-                MCP 服务（{mcps.length}）
-                {onManageMcps && (
-                  <button type="button" className="agent-detail-manage-link" onClick={onManageMcps}>
-                    前往管理
-                    <ChevronRight size={13} strokeWidth={2} />
-                  </button>
-                )}
-              </h2>
-              {mcps.length === 0 ? (
-                <div className="agent-detail-empty">未配置 MCP 服务</div>
-              ) : (
-                <div className="agent-detail-items">
-                  {mcps.map((mcp) => (
-                    <div key={mcp.title} className="agent-detail-item">
-                      <div className="agent-detail-item-header">
-                        <span className="agent-detail-item-title">{mcp.title}</span>
-                        {mcp.transport && <span className="agent-detail-tag">{mcp.transport}</span>}
-                      </div>
-                      {mcp.command && (
-                        <div className="agent-detail-item-sub">
-                          {[mcp.command, ...mcp.args].join(" ")}
-                        </div>
-                      )}
-                      {!mcp.command && mcp.url && (
-                        <div className="agent-detail-item-sub">{mcp.url}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* ===== Skills 列表 ===== */}
-            <section className="agent-detail-section">
-              <h2 className="agent-detail-section-title">
-                <Sparkles size={14} strokeWidth={1.8} />
-                Skills（{skills.length}）
-                {onManageSkills && (
+            {/* ===== 全局提示词 ===== */}
+            {detail.promptFile && (
+              <section className="agent-detail-section">
+                <h2 className="agent-detail-section-title">
+                  <FileText size={14} strokeWidth={1.8} />
+                  全局提示词
                   <button
                     type="button"
                     className="agent-detail-manage-link"
-                    onClick={onManageSkills}
+                    onClick={handleSavePrompt}
+                    disabled={busy}
                   >
-                    前往管理
-                    <ChevronRight size={13} strokeWidth={2} />
+                    保存
                   </button>
-                )}
-              </h2>
-              {skills.length === 0 ? (
-                <div className="agent-detail-empty">未安装 Skills</div>
-              ) : (
-                <div className="agent-detail-items">
-                  {skills.map((skill) => (
-                    <div key={skill.id} className="agent-detail-item">
-                      <div className="agent-detail-item-header">
-                        <span className="agent-detail-item-title">{skill.title}</span>
-                        {skill.title !== skill.id && (
-                          <span className="agent-detail-tag">{skill.id}</span>
+                </h2>
+                <textarea
+                  className="prompt-editor"
+                  value={promptContent}
+                  onChange={(e) => setPromptContent(e.target.value)}
+                  placeholder="在此输入全局提示词，保存后将写入配置目录下的提示词文件"
+                  rows={10}
+                  spellCheck={false}
+                />
+                <div className="prompt-editor-path">{displayPath(detail.promptFile)}</div>
+              </section>
+            )}
+
+            {/* ===== MCP 列表 ===== */}
+            {detail.mcpSupported && (
+              <section className="agent-detail-section">
+                <h2 className="agent-detail-section-title">
+                  <Puzzle size={14} strokeWidth={1.8} />
+                  MCP 服务（{mcps.length}）
+                  {onManageMcps && (
+                    <button
+                      type="button"
+                      className="agent-detail-manage-link"
+                      onClick={onManageMcps}
+                    >
+                      前往管理
+                      <ChevronRight size={13} strokeWidth={2} />
+                    </button>
+                  )}
+                </h2>
+                {mcps.length === 0 ? (
+                  <div className="agent-detail-empty">未配置 MCP 服务</div>
+                ) : (
+                  <div className="agent-detail-items">
+                    {mcps.map((mcp) => (
+                      <div key={mcp.title} className="agent-detail-item">
+                        <div className="agent-detail-item-header">
+                          <span className="agent-detail-item-title">{mcp.title}</span>
+                          {mcp.transport && (
+                            <span className="agent-detail-tag">{mcp.transport}</span>
+                          )}
+                        </div>
+                        {mcp.command && (
+                          <div className="agent-detail-item-sub">
+                            {[mcp.command, ...mcp.args].join(" ")}
+                          </div>
+                        )}
+                        {!mcp.command && mcp.url && (
+                          <div className="agent-detail-item-sub">{mcp.url}</div>
                         )}
                       </div>
-                      {skill.description && (
-                        <div className="agent-detail-item-sub">{skill.description}</div>
-                      )}
-                      <div className="agent-detail-item-sub agent-detail-item-path">
-                        {displayPath(skill.path)}
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* ===== Skills 列表 ===== */}
+            {detail.skillsSupported && (
+              <section className="agent-detail-section">
+                <h2 className="agent-detail-section-title">
+                  <Sparkles size={14} strokeWidth={1.8} />
+                  Skills（{skills.length}）
+                  {onManageSkills && (
+                    <button
+                      type="button"
+                      className="agent-detail-manage-link"
+                      onClick={onManageSkills}
+                    >
+                      前往管理
+                      <ChevronRight size={13} strokeWidth={2} />
+                    </button>
+                  )}
+                </h2>
+                {skills.length === 0 ? (
+                  <div className="agent-detail-empty">未安装 Skills</div>
+                ) : (
+                  <div className="agent-detail-items">
+                    {skills.map((skill) => (
+                      <div key={skill.id} className="agent-detail-item">
+                        <div className="agent-detail-item-header">
+                          <span className="agent-detail-item-title">{skill.title}</span>
+                          {skill.title !== skill.id && (
+                            <span className="agent-detail-tag">{skill.id}</span>
+                          )}
+                        </div>
+                        {skill.description && (
+                          <div className="agent-detail-item-sub">{skill.description}</div>
+                        )}
+                        <div className="agent-detail-item-sub agent-detail-item-path">
+                          {displayPath(skill.path)}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         )}
       </div>

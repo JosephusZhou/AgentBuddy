@@ -56,11 +56,16 @@ pub struct AgentSpec {
 
     // ---- MCP ----
     pub mcp: McpSpec,
+    /// 该 Agent 的 MCP 是否由 Octopus 统一管理（false 表示配置独立、详情页不展示 MCP 板块）。
+    pub mcp_managed: bool,
 
     // ---- Skills ----
     /// Skills 目录候选（相对 `~`）；扫描按序、写入取第一个。
     pub skills_roots: &'static [&'static str],
     pub skills_supported: bool,
+
+    /// 全局提示词文件名（相对配置目录），None 表示该 Agent 不支持全局提示词编辑。
+    pub prompt_file: Option<&'static str>,
 
     /// 共享物理配置根标识（多个 agent 指向同一物理根时使用）；`None` 表示独立。
     /// 用于 MCP/Skills 写入去重，避免对同一物理根写两次。
@@ -175,8 +180,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::Fixed(".codex/config.toml"),
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.codex/skills", "~/.agents/skills"],
         skills_supported: true,
+        prompt_file: Some("AGENTS.md"),
         shared_root: None,
     },
     // 2. Claude Code CLI
@@ -197,8 +204,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::Fixed(".claude.json"),
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.claude/skills"],
         skills_supported: true,
+        prompt_file: Some("CLAUDE.md"),
         shared_root: None,
     },
     // 3. Claude Desktop App
@@ -215,8 +224,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::ClaudeDesktopScan,
             jsonc: false,
         },
+        mcp_managed: false,
         skills_roots: &[],
         skills_supported: false,
+        prompt_file: None,
         shared_root: None,
     },
     // 4. OpenCode（CLI + App，共享配置）
@@ -238,8 +249,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::OpencodeConfig,
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.config/opencode/skills"],
         skills_supported: true,
+        prompt_file: Some("AGENTS.md"),
         shared_root: None,
     },
     // 5. Antigravity（Google）
@@ -256,8 +269,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::Fixed(".gemini/settings.json"),
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.gemini/skills", "~/.gemini/antigravity-cli/skills"],
         skills_supported: true,
+        prompt_file: Some("GEMINI.md"),
         shared_root: None,
     },
     // 6. WorkBuddy（腾讯）
@@ -274,8 +289,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::Fixed(".workbuddy/.mcp.json"),
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.workbuddy/skills"],
         skills_supported: true,
+        prompt_file: Some("AGENTS.md"),
         shared_root: None,
     },
     // 7. Pi（badlogic/pi-mono，CLI-only）
@@ -297,8 +314,10 @@ static AGENTS: &[AgentSpec] = &[
             path: McpPath::Fixed(".pi/agent/mcp.json"),
             jsonc: false,
         },
+        mcp_managed: true,
         skills_roots: &["~/.pi/agent/skills"],
         skills_supported: true,
+        prompt_file: Some("AGENTS.md"),
         shared_root: None,
     },
 ];

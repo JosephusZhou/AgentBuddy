@@ -316,7 +316,6 @@ export default function AgentSniff({ onNavigate }: AgentSniffProps) {
       <AgentDetail
         name={selected.name}
         displayName={selected.display_name}
-        icon={selected.icon}
         onBack={() => setSelectedAgent(null)}
         onManageMcps={onNavigate ? () => onNavigate("mcp-manage") : undefined}
         onManageSkills={onNavigate ? () => onNavigate("skills-manage") : undefined}
